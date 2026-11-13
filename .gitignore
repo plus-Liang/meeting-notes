@@ -1,0 +1,41 @@
+# ---- 构建产物 ----
+target/
+build/
+out/
+*.class
+*.jar
+*.war
+
+# ---- IDE ----
+.idea/
+*.iml
+.vscode/
+*.swp
+.DS_Store
+
+# ---- 环境与密钥（绝对禁止提交）----
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+secrets/
+
+# ---- 运行时数据 ----
+data/
+logs/
+*.log
+pgdata/
+miniodata/
+redisdata/
+uploads/
+
+# ---- 大文件与媒体（不进 git）----
+*.mp3
+*.mp4
+*.wav
+*.m4a
+*.flv
+*.mkv
+*.mov

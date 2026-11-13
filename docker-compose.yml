@@ -1,0 +1,95 @@
+# MeetingNotes —— 一键启动
+# 用法：Copy-Item .env.example .env; docker compose up -d
+# 注意：不要用 sleep 等依赖，一律 healthcheck + condition: service_healthy
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 20
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD-SHELL", "mc ready local || exit 1"]
+      interval: 5s
+      retries: 30
+
+  # ASR 服务：FunASR 的 OpenAI 兼容接口。
+  # ⚠️ 镜像由 T0.1 验证后填入 .env 的 ASR_IMAGE（先不要凭猜写死）
+  asr:
+    image: ${ASR_IMAGE}
+    profiles: ["default"]
+    ports:
+      - "${ASR_PORT}:${ASR_PORT}"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:${ASR_PORT}/v1/models >/dev/null || exit 1"]
+      interval: 10s
+      retries: 60
+      start_period: 60s
+
+  # 可选：本地 LLM（第二档降级）。不启用就不加 --profile local-llm
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["local-llm"]
+    volumes:
+      - ollamadata:/root/.ollama
+    ports:
+      - "11434:11434"
+
+  app:
+    build:
+      context: ./app
+    env_file:
+      - .env
+    environment:
+      # 容器内必须用服务名，不用 localhost
+      DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}
+      REDIS_HOST: redis
+      S3_ENDPOINT: http://minio:9000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    ports:
+      - "${APP_PORT}:8080"
+    volumes:
+      # P2：inbox 目录监控（宿主目录放文件即处理）
+      - ${INBOX_HOST_DIR}:/inbox:ro
+
+volumes:
+  pgdata:
+  redisdata:
+  miniodata:
+  ollamadata:
