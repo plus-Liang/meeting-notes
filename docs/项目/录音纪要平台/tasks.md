@@ -38,8 +38,8 @@
 | **T0.4** | Spring AI 最小转写跑通 | 独立复跑 exit 0 | ✅ `25528b9` + `review/2026-11-13-T0.4验收.md` |
 | **T0.5** | 云 LLM 通道 + **无 key 可启动** | 真实摘要 + 清空 key 仍能启动 | ✅ `483d6f2` + `review/2026-11-13-T0.5验收.md`（DeepSeek 实测 3 条摘要；无 key 时 ChatModel=0、health UP） |
 
-**下一步**：T1.5–T1.8（worker 端到端 → 三页面 → 配置自检 → 单测）。T1.1–T1.4 已 ✅。
-**T1.5 开工前**：先修 T1.4 审查的 P1/P2（snake_case 契约 + 幂等真实状态 + `user_id` 过滤，D-040/D-041），一个 commit。
+**下一步**：T1.6–T1.8（三页面 → 配置自检 → 上传校验单测）。T1.1–T1.5 已 ✅。
+**T1.5 开工前**（已完成）：先修 T1.4 审查的 P1/P2（snake_case 契约 + 幂等真实状态 + `user_id` 过滤，D-040/D-041），一个 commit（`7c90e9a`）。
 **已处理**：`glossary."right"` 改名 `right_text`（D-037，用户拍板）；列名已在真实 PG16 空卷验证。
 
 **失败预案**：①FunASR 起不来 → whisper.cpp server ②仍不行 → 云 ASR ③全不行 → 先做 PASTE 入口不阻塞。
@@ -54,8 +54,8 @@
 | **T1.2** | `docker compose up` 起 pg/redis/minio/asr/app | 干净目录一次成功 | ✅ `docker compose down -v` → `up -d --build` → **5/5 healthy**；卷创建 11:21:25Z、Flyway 11:21:40Z（干净卷实锤）；`fb45588` |
 | **T1.3** | Flyway `V1__init.sql` 生效（7 张表） | 迁移可重复执行 | ✅ 真实 PG16.16：8 表（7 业务 + `flyway_schema_history`）；重启 → `Schema "public" is up to date`（幂等） |
 | **T1.4** | 上传接口：magic number / 大小 / 时长 / **格式**校验 → MinIO → task(PENDING) | 坏文件被拒、好文件入 PENDING | ✅ `3ce9386` + `review/2026-11-13-T1.4验收.md`（5 场景真机：400/201/幂等/413/400/429；hash 与 ffprobe 时长我独立复算一致）。**遗留 P1/P2 在 T1.5 前修：snake_case 契约、幂等状态失真、user_id 过滤（D-040/D-041）** |
-| **T1.5** | worker 消费：抽音轨 → ASR → 写结果 → DONE | 5 分钟 mp3 端到端出全文 | `curl /api/v1/tasks/{id}` → `status=DONE` |
-| **T1.6** | 三页面（提交/列表/详情）静态 HTML，结构按 spec §5 | 可用、无 JS 报错 | 手点全流程 + 截图 |
+| **T1.5** | worker 消费：抽音轨 → ASR → 写结果 → DONE | 5 分钟 mp3 端到端出全文 | ✅ `7c90e9a`（契约）+ `48b4b74`（worker）+ `review/2026-11-13-T1.5验收.md`。真机：397s 中文音频 → `DONE` **31s**、transcript 1853 字；失败路径 **9s** 走完 `RUNNING→RETRYING×2→DEAD`（attempts=3、`ASR_ERROR`、dead_letter 有原因）；`GET /tasks/999999` → `404 TASK_NOT_FOUND`；重传已 DONE 文件 → `reused:true` + 真实状态；`mvn test` **14/14 绿**（需 `ASR_BASE_URL=http://localhost:8001`）。**遗留**：空文本语义改 DONE（D-048，T1.6 前置）／DEAD 重传重投（D-049，T2.1）／内部重试已收敛（D-046） |
+| **T1.6** | 三页面（提交/列表/详情）静态 HTML，结构按 spec §5 | 可用、无 JS 报错 | 手点全流程 + 截图。**前置**：D-048 空文本改 DONE（worker ~5 行 + 1 单测）；页面要按 `接入指南.md` snake_case 字段渲染、404/DEAD/空 transcript 三种状态都要有可读文案 |
 | **T1.7** | 配置外置基线 | `配置清单.md` §2 三条命令无异常 | 见该文档 §2 |
 | **T1.8** | 上传校验单测 | `mvn test` 全绿 | BUILD SUCCESS + 用例数入 `state.md` |
 
@@ -67,7 +67,7 @@
 
 | ID | 任务 | DoD | 验证命令 / 期望 |
 |---|---|---|---|
-| **T2.1** | 幂等：`content_hash` 唯一 + 命中返回 `reused:true` | 同文件两次 → 1 任务 | 连传两次 → 同 task_id |
+| **T2.1** | 幂等：`content_hash` 唯一 + 命中返回 `reused:true` + **命中 DEAD 时重新投递**（D-049） | 同文件两次 → 1 任务；DEAD 文件重传 → 重新入列 | 连传两次 → 同 task_id；DEAD 后重传 → 状态回 PENDING/RETRYING 且队列有该 id |
 | **T2.2** | 重试 + 退避 + 死信 | 人为失败 → RETRYING → DEAD | 停 ASR 提交任务 → 观察迁移 |
 | **T2.3** | 崩溃恢复：启动回收 RUNNING 僵尸 | 重启不永久卡住 | 处理中 `docker restart app` → 终态 |
 | **T2.4** | 健康检查四项（DB/Redis/MinIO/ASR） | 任一不可用整体 DOWN | 打掉 minio → `status=DOWN` |

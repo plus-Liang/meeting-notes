@@ -221,6 +221,55 @@ docker compose ps        # 全部 healthy
 
 ---
 
+> 验收结论见 `docs/协作/review/2026-11-13-T1.5验收.md`：主链路 31s / 失败路径 9s / 404 / 幂等 4 组真机全过，
+> 发现并已拍板 4 条：D-046（内部重试收敛 2 次）、D-047（错误码扩到 7 个）、D-048（空文本 = DONE）、D-049（DEAD 重传归 T2.1）。
+
+---
+
+## T1.6 三页面（提交 / 列表 / 详情）+ 空文本语义修正（D-048）
+
+【规划四问】
+- **改哪里**：`app/src/main/resources/static/`（新增 `index.html` 提交页 / `tasks.html` 列表页 / `task.html` 详情页 + `app.js`）；
+  `web/TaskController.java`（`GET /` 指到提交页）；`worker/TranscriptionWorker.java`（**仅** D-048 那个分支：空文本不再抛异常）；
+  `app/src/test/java/com/meetingnotes/worker/`（新增 1 个单测）。
+- **复用什么**：`GET /api/v1/tasks/{id}`（T1.5 已实现，snake_case）、`POST /api/v1/tasks`（T1.4）、
+  `TaskStatusResponse` 字段、`ApiException` 错误码（D-041/D-047）。
+- **影响哪些功能**：对外只有 `GET /` 新增（不破坏 API）；DB 无迁移；配置无新增键；`/api/v1` 响应字段不变。
+- **怎么验证**：见【验收】5 条 + `mvn -q test`（≥15 用例）+ 可维护性脚本 exit 0（命令与期望都在下面）。
+
+【范围声明】
+- **做**：①三张静态页 + 原生 JS（**不引前端框架、不引构建链**，D-006/时间盒）；②列表页对未完成项 3 秒轮询（D-024，不用 WebSocket）；
+  ③详情页 5 种状态文案：`PENDING/RUNNING`（等）、`DONE`（全文）、`DONE + transcript=""`（「未识别到语音内容」，D-048）、
+  `RETRYING`（重试中，别当失败）、`DEAD`（显示 `error_code`）；④`/tasks/999999` → 「任务不存在」（404 文案，D-047）；
+  ⑤【前置】空文本语义改 DONE + 空串，补单测；⑥文件名/时长/大小按上限提示（60min / 200MB，D-028）。
+- **不动**：认证（T4.6）、摘要/待办（T3.x）、编辑修正（T2.x）、SSE/WS、外链抓取（D-027R）、
+  `application.yml` 键、`docker-compose.yml`、Flyway 迁移、`/api/v1` 的**已有**字段（字段只增不改，D-041）。
+- **允许的唯一契约改动（S-3）**：给 `GET /api/v1/tasks/{id}` **追加** `error_code`（nullable，仅 DEAD/RETRYING 时有值），
+  详情页靠它显示失败原因；改完同步 `接入指南.md` §3.2/§3.3 一行。除此之外加新 API/新字段 → 先写"原因 + 影响 + 替代方案"等确认。
+
+【验收】反例必须进：
+```powershell
+docker compose up -d                                          # 5/5 healthy
+# ① 正例：真实音频 → 三页走通，详情页出全文（贴 task 状态流转 + 页面截图）
+# ② 正例：6s 纯正弦波 wav → DONE + 「未识别到语音内容」（D-048）
+#    ffmpeg -f lavfi -i "sine=frequency=440:duration=6" -ar 16000 -ac 1 tone.wav
+# ③ 反例：GET /tasks/999999 → 页面显示「任务不存在」，不是白屏/500
+# ④ 反例：停 ASR（docker stop meeting-notes-asr-1）上传 → 列表出现 RETRYING 后 DEAD，详情页显示 ASR_ERROR；
+#          验完立刻 docker start meeting-notes-asr-1
+# ⑤ 反例：浏览器 console 无报错；页面无 undefined / [object Object]
+cd app; mvn -q test                                           # 期望 exit 0，用例数 ≥15
+powershell -File tools\check-maintainability.ps1               # 期望 exit 0
+```
+**通过标准**：5 条各按预期；测试数从 14 涨到 ≥15（新逻辑必须有测试，M-8）；脚本 exit 0；
+页面只用相对路径（禁止硬编码 `localhost:8080`，M-1/M-4）。
+
+【可维护性】commit 前必跑 `powershell -File tools\check-maintainability.ps1` → 必须 exit 0
+（宪法 VII；M-1~M-10 见 `可维护性要求.md`；允许清单只减不增；页面 JS 里同样禁止魔法地址与 `console.log` 残留）。
+
+【回报·测试三问】检查了哪些场景（列全含上面 5 条）｜ 实际运行了哪些测试（命令 + 关键输出 + exit code）｜ 还有哪些没验证（**不许留空**）。
+
+---
+
 ## 每张卡做完都要给你的回报
 
 ```text

@@ -42,19 +42,15 @@
 
 ---
 
-## 3. 当前任务：阶段 0 底座验证（8h，**不通过不许写业务代码**）
+## 3. 当前进度与下一张卡（阶段 1）
 
-完整任务卡见 `docs/项目/录音纪要平台/tasks-starter.md`。摘要：
+| 阶段 | 状态 |
+|---|---|
+| 阶段 0 底座（T0.1–T0.5） | ✅ 全过：RTF **0.105/0.113**、无 key 可启动（`ChatModel` Bean=0）、5/5 healthy |
+| 阶段 1（T1.1–T1.5） | ✅ 全过。T1.5 验收报告 `docs/协作/review/2026-11-13-T1.5验收.md`：397s 中文音频 → **31s** 出 1853 字；停 ASR 失败路径 **9s** 走完 `RETRYING×2 → DEAD` |
+| **下一张卡** | **T1.6 三页面**（`docs/项目/录音纪要平台/tasks-starter.md` 的 T1.6 段；含 D-048 前置改动：空文本 → DONE） |
 
-| ID | 做什么 | 通过判据（必须有输出） |
-|---|---|---|
-| T0.1 | 起 ASR 服务（自建 OpenAI 兼容容器，见下） | `curl http://localhost:8000/v1/models` 返回 200 |
-| T0.2 | curl 转写真实 mp3 | 返回 JSON，`text` 非空且中文带标点 |
-| T0.3 | 记录 RTF 与资源占用 | 写进 `docs/项目/录音纪要平台/state.md` |
-| T0.4 | Spring AI 最小转写跑通 | `mvn -q -Dtest=AsrSmokeTest test` → BUILD SUCCESS |
-| T0.5 | 云 LLM 通道（智谱优先） | 打印出摘要 |
-
-**T0 失败预案**：①自建容器起不来 → 换 whisper.cpp server ②仍不行 → 云 ASR ③全不行 → 先做 PASTE 入口跑通后续链路。
+任务总表 `tasks.md`；起栈 `docker compose up -d`（5/5 healthy 才算通过）。**一次只做一张卡，先贴证据再要下一张。**
 
 ---
 
@@ -103,6 +99,9 @@ pip install -i https://pypi.tuna.tsinghua.edu.cn/simple <pkg>
 | **app 镜像（T1.2）** | 基础镜像 JDK **21**（原 17 与 pom 冲突）；apt 源在 deb822 格式 `/etc/apt/sources.list.d/*.sources`，换源必须 `grep -rlE ... /etc/apt | xargs -r sed -i`（`sed sources.list*` 会匹配到目录静默失效）；`ARG APT_MIRROR` 可覆盖 |
 | **无 key 验证（D-039）** | 三条件：`LLM_ENABLED` 留空 + 三个 `LLM_*` 全空 + **独立容器探针**。**禁止 `mv .env`**：会让镜像变量一起消失、容器没重建，200 来自旧容器（假绿灯）。`LLM_ENABLED=true` 无 key 崩是预期（显式优先） |
 | **连库** | `docker compose exec -T postgres psql -U mn -d meetingnotes`（`postgres` 角色不存在）；`down -v` 后 `up -d` 全 5 个服务 healthy 才算 T1.2 通过 |
+| **T1.5 worker 事实** | Redis **BLPOP**（阻塞取，非轮询）单线程；容器内 ffmpeg 抽 16k 单声道 → 复用 `TranscriptionModel`；成功写 `task_result` + `DONE`；失败 `attempts+1` → `RETRYING` 重新入队（队尾）→ 耗尽 `DEAD` + `dead_letter`。**`error_code` 列宽 64 只放稳定码**（`ASR_ERROR`/`STORAGE_ERROR`），完整原因写 `dead_letter.reason`（TEXT）——把异常消息塞进 `error_code` 会让写回失败、任务反卡 RUNNING |
+| **Spring AI 内部重试（D-046）** | `OpenAiAudioTranscriptionModel` 走 `RetryUtils.DEFAULT_RETRY_TEMPLATE`，**默认 10 次指数退避**（ASR 挂掉时单次尝试 7 分钟才交给外层）→ 已用 `spring.ai.retry.max-attempts=2` / `backoff 2s~10s` 收敛；**重试语义只归 worker 状态机** |
+| **`GET /api/v1/tasks/{id}`（T1.5）** | 查询带 `user_id`（D-040）；不存在 → `404 TASK_NOT_FOUND`（固定码第 7 个，D-047）；`duration_sec` 等 INT4 列必须 `getLong + wasNull`（强转 `Long` 会 500）；`transcript: ""` = 未识别到语音、任务仍是 DONE（D-048） |
 
 ## 4.2 可维护性（宪法原则 VII，NON-NEGOTIABLE）
 
@@ -172,3 +171,5 @@ exit code：<0/非0>
 - ❌ **违反可维护性硬要求**：写死路径/端口/阈值、内层反向 import `web.*`、空 `catch`、`System.out`、
   无测试的新公共逻辑、凭空新增允许清单条目（宪法 VII；`tools\check-maintainability.ps1` 会拦）
 - ❌ 未记 `decisions.md` 就新增依赖/改技术栈/改对外契约
+- ❌ **删改已发布的对外字段/错误码**（`/api/v1` 只增不改；错误码现固定 7 个，D-041/D-047）
+- ❌ **把异常消息塞进 `error_code` 等短列**（列宽 64，超长会让写回失败 → 任务反卡 RUNNING，完整原因写 `dead_letter.reason`）

@@ -346,7 +346,7 @@
   所以这道数据结构约束必须**现在**就守住，不能等。
 - **已排除项**：T1.4 就做 Token 认证（超出卡片范围、拖慢端到端）；只写 TODO 注释不落到查询条件（等于把漏洞留给未来的自己）。
 
-### D-041 对外 JSON 契约：一律 snake_case；错误码固定 6 个
+### D-041 对外 JSON 契约：一律 snake_case；错误码固定（现 7 个，见 D-047）
 - **日期**：2026-11-13（T1.4 审查发现实现与 `接入指南.md` 不一致）｜**决策人**：本人
 - **结论**：
   - 对外 JSON 字段一律 **snake_case**（`task_id` / `content_hash` / `duration_sec` / `size_bytes` / `reused`），
@@ -354,6 +354,7 @@
   - 错误响应统一 `{"code": "...", "message": "..."}`，错误码固定为：
     `INVALID_MEDIA`(400) / `SIZE_EXCEEDED`(**413**) / `DURATION_EXCEEDED`(400) / `QUOTA_EXCEEDED`(429, 带 `Retry-After`) /
     `UNAUTHORIZED`(401) / `ASR_UNAVAILABLE`(503)。
+  - 码表**只增不改**（改 = 破坏接入方）；T1.5 后按 D-047 追加 `TASK_NOT_FOUND`(404)，现固定 7 个。
   - 幂等命中时返回**库里的真实状态**（不是硬编码 PENDING），并用 `reused: true` 标识。
 - **依据**：`接入指南.md` §3.3 自己写着"错误码必须固定，否则接入方无法处理"；而实现用了 `taskId`/`TOO_LARGE`/`TOO_LONG`，
   与文档承诺冲突。现在没有任何接入方，改是免费的；等 US-10 发布后再改就是破坏性变更。
@@ -410,6 +411,48 @@
   review 里的"建议多写注释"。且这份要求直接对应 11/13 音频的选型三原则第一条（可维护性）——选型阶段说了，实现阶段没落地。
 - **已排除项**：只写一句"代码要好维护"（不可判定）；上来引 Checkstyle/Spotless 全量规则（要改一堆存量代码，违反时间盒 IV）；
   零容忍分层（现存 4 处 `web.*` 反向依赖需要 T2.x 迁移，先登记再清零，而不是假装不存在）。
+
+### D-046 失败语义归 worker：Spring AI 内部重试收敛到 2 次（T1.5 实现时发现并修）
+- **日期**：2026-11-13（WorkBuddy 实测发现，我独立复验后确认）｜**决策人**：本人
+- **结论**：`spring.ai.retry.max-attempts=${AI_RETRY_MAX_ATTEMPTS:2}` + `backoff.initial-interval=2s` /
+  `max-interval=10s`（三个新环境变量已进 `.env.example`）。**重试语义只归 worker 的 RETRYING→DEAD 状态机**；
+  `task.error_code` 只放稳定码（列宽 64），完整原因写 `dead_letter.reason`（TEXT）。
+- **依据**：Spring AI 1.1.8 的 `OpenAiAudioTranscriptionModel` 确实走 `RetryUtils.DEFAULT_RETRY_TEMPLATE`
+  （解压 class 扫描确认），默认 10 次指数退避 → ASR 挂掉时单次尝试 7 分钟才把异常交给外层，
+  "失败进 RETRYING"名存实亡。收敛后**实测 7 分钟 → 9 秒**（我复验：`RUNNING → RETRYING×2 → DEAD`，
+  attempts=3、error_code=ASR_ERROR、dead_letter 有 87 字原因）。
+- **已排除项**：保留 Spring AI 默认 10 次退避（架空状态机、拖慢失败反馈）；自己写 HTTP 客户端绕开
+  `TranscriptionModel`（丢复用、违反原则 V）；把异常消息塞进 `error_code`（列宽不够 → DB 拒绝 →
+  任务反而卡 RUNNING，这是 T1.5 真实踩到的二次故障）。
+
+### D-047 错误码由 6 个扩到 7 个：新增 `TASK_NOT_FOUND`(404)（修订 D-041）
+- **日期**：2026-11-13（T1.5 `GET /tasks/{id}` 实现时发现码表缺口）｜**决策人**：本人
+- **结论**：固定码表 = 原 6 个 + `TASK_NOT_FOUND`(404)（任务不存在 **或不属于当前 token 的用户**，两者对外不可区分）；
+  `接入指南.md` §3.3 同步加一行。码表**只增不改**，删除/改名 = 破坏性变更。
+- **依据**：`GET /api/v1/tasks/{id}` 必须让接入方区分"没有这个任务"和"服务/参数错误"；否则对方只能
+  把所有错误当 500 重试。这也与 D-040 的 `user_id` 约束配套：查不到 ≠ 出错。
+- **已排除项**：404 返回空 body（接入方拿不到稳定码）；把"不存在"塞进 `INVALID_MEDIA`（语义错，会误导对方重传）；
+  返回 200 + null（前端与接入方都要额外判空，且丢掉 HTTP 语义）。
+
+### D-048 无语音 / 空文本 = `DONE` + 空 `transcript`，不算失败
+- **日期**：2026-11-13（T1.5 实测 6 秒纯正弦波被判 DEAD，WorkBuddy 提出待拍板）｜**决策人**：本人
+- **结论**：ASR 返回 200 但文本为空/空白 → 任务判 **DONE**，`task_result.transcript` 存空串，
+  接口返回 `"transcript": ""`；前端在详情页提示「未识别到语音内容」。**不计失败、不重试、不写 dead_letter**。
+  落地为 T1.6 前置小改（worker 内去掉该分支的抛异常 + 一条单测）。
+- **依据**：用户传纯 BGM / 静音 / 无人声视频是**业务结果**，不是系统故障。判失败会让用户看到"任务失败"、
+  白烧 3 次 ASR 算力，且 DEAD 后连重传都拿不回（见 D-049）。而"ASR 真坏了"走的是非 200/异常分支，
+  与"200 + 空文本"可区分，不会把故障伪装成成功。
+- **已排除项**：新增 `EMPTY` 状态（多一条前端状态 + 状态机分支，YAGNI IV）；保持 DEAD（语义错、浪费算力）；
+  只重试一次再 DEAD（语义仍错）。
+
+### D-049 DEAD 任务的幂等重传必须能重新投递（T2.1 设计约束）
+- **日期**：2026-11-13（T1.5 发现：同一 `content_hash` 命中 DEAD 会原样返回 DEAD）｜**决策人**：本人
+- **结论**：T2.1 做幂等恢复时，**命中 DEAD 任务的重传要触发重新入列**（清 `attempts`、状态回 PENDING 并投队列），
+  而不是把 DEAD 原样返回；在此之前把该行为写进 `接入指南.md` 的已知限制，并在 DEAD 时引导用
+  `POST /api/v1/tasks/{id}/retry`（T4.x 手动重投）兜底。
+- **依据**：用户重传同一个文件就是最自然的"再试一次"，返回 DEAD 会让他以为文件坏了，且无路可走。
+- **已排除项**：现在就在 T1.5 改（卡片明确划到 T2.1，扩范围需先确认）；重传直接新建任务绕过 hash
+  （破坏 N1 幂等、重复烧配额）。
 
 ---
 
