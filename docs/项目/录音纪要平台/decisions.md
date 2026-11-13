@@ -241,6 +241,16 @@
 - **依据**：本人的明确口径。砍功能损失的是"覆盖面"，砍证据损失的是"可验证性"——后者会让整个项目退化成 demo，且直接违反宪法原则 III。
 - **已排除项**：预先砍功能（时间够就不该少做）；砍测试/截图/CHANGELOG 来腾时间（用质量换进度，面试必被问穿）；砍三类场景验证（等于放弃项目定位，D-003R）。
 
+### D-033 GitHub 仓库：现在就建（先 Private），达标再转 Public
+- **日期**：2026-11-13｜**决策人**：本人
+- **结论**：①**立即创建 GitHub 仓库 `meeting-notes`，可见性 Private**；②本地 `git remote add origin` 并在每天收工时 `push`；
+  ③满足 6 条判据后转 **Public** 并打 `v0.1.0` tag；④仓库内 commit 邮箱用 GitHub `noreply` 地址（**只设 local config，不动全局**）；
+  ⑤如需国内加速可加 Gitee 镜像，但 **issue / Release 只用 GitHub**。
+- **依据**：D-003R 要求"给别人用"→ 必须有公开地址；本地单副本无异地备份；D-026 的最小发布集（tag/Release/issue 模板）必须托管在平台上。
+  已准备好社区文件：`LICENSE`(MIT)、`CHANGELOG.md`、`CONTRIBUTING.md`、issue/PR 模板、CI 骨架（默认手动触发，避免首页一直红）。
+- **已排除项**：不建仓只本地开发（无公开地址、无备份）；直接 Public 推骨架（半成品会留差印象、且 commit 邮箱未配好）；只建 Gitee（面试官/开源生态以 GitHub 为主）。
+- **转公开判据（6 条）**：零成本跑通 / README 首屏有定位+GIF+三步启动+"你不该用的场景" / LICENSE+CONTRIBUTING+模板齐全 / 无密钥泄露 / 作者邮箱已配 noreply / `v0.1.0` 已 tag。详见 `GitHub仓库策略.md`。
+
 ---
 
 ## 面试速查（由本文件派生，勿单独维护）
