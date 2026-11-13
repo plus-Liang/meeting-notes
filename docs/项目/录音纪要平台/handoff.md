@@ -16,7 +16,7 @@
 8. 别做平台链接抽取（D-027R）；手机上传 P1（D-029）；上限 60min/批量 20（D-028）；不准改测试降断言、不准编数字。
 ## 3. 关键文件
 `00-先看这个.md`（入口）· `docs/协作/开工准备清单.md`（G1–G8 + 材料索引）· `架构一页纸.md` · `可维护性要求.md`（M-1~M-10）·
-`spec.md` / `plan.md` / `tasks.md` / `tasks-starter.md`（下一张卡）· `decisions.md`（**53 条**）· `接入指南.md`（对外契约）·
+`spec.md` / `plan.md` / `tasks.md` / `tasks-starter.md`（下一张卡）· `decisions.md`（**55 条**）· `接入指南.md`（对外契约）·
 `review/2026-11-13-T1.5验收.md`（最新验收标准与遗留项）· `docs/协作/开发提示词模板.md`（12 模板）。
 ## 4. 未决
 T1.6 页面（含 D-048）· 认证 T4.6 · `content_hash` 唯一约束 T2.1（含 D-049 重投）· worker 单测 S-1 · 干净 clone `mvn test` 红（T3.3 的 `scripts/test.ps1`）·
