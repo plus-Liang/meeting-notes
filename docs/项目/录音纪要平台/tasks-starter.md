@@ -157,7 +157,7 @@ docker compose ps        # 全部 healthy
 
 ---
 
-## T1.4 上传接口（校验 → MinIO → 写 task）
+## T1.4 上传接口（校验 → MinIO → 写 task）✅ **已完成（`3ce9386`）**
 
 **要做**：`POST /api/v1/tasks`（multipart）；校验顺序：文件头 magic number → 大小 ≤200MB → 时长 ≤60min → 配额；
 通过后存 MinIO（按 taskId 分目录），写 `task` 表（status=PENDING，content_hash 计算好）。
@@ -169,13 +169,39 @@ docker compose ps        # 全部 healthy
 ```
 **通过标准**：两条各按预期；`content_hash` 落库。
 
+> 验收结论见 `docs/协作/review/2026-11-13-T1.4验收.md`：5 场景全过，但留了 3 个必须在 T1.5 前修的项（见下）。
+
 ---
 
-## T1.5 worker 消费出转写结果
+## T1.5 worker 消费出转写结果（**先修契约，再做 worker**）
+
+### 第 0 步：修 T1.4 审查遗留（一个 commit，约 20 行）
+
+1. **P1 契约（D-041）**：全局 Jackson `property-naming-strategy: SNAKE_CASE`（yml 一行），
+   响应改成 `task_id` / `content_hash` / `duration_sec` / `size_bytes` / `reused`；
+   错误码改成 `SIZE_EXCEEDED`(413) / `DURATION_EXCEEDED`(400)。以 `接入指南.md` §3.1/§3.3 为准。
+2. **P2 幂等状态失真**：命中已有任务时返回**库里的真实 status**（不要硬编码 PENDING）。
+3. **P2 越权隐患（D-040）**：`findIdByHash` 加 `AND user_id = ?`；以后所有按内容/任务的查询都带 `user_id`。
+4. 顺手：`QuotaService.consume` 返回的第二个值应是 `usedTasks` 而不是 `tasksPerDay`（当前无人使用，改名即可）。
+
+验收：`mvn -q test` 绿；真机重跑 T1.4 的 5 个场景，响应字段/错误码与 `接入指南.md` 完全一致（贴原始 JSON）。
+
+### 第 1 步：worker
 
 **要做**：worker 取 PENDING → RUNNING → 容器内 ffmpeg 抽 16k 单声道 → 调 ASR → 写 `task_result` → DONE。
 
-**验证**：`GET /api/v1/tasks/{id}` → `status=DONE` 且 `transcript` 非空（用真实 5 分钟 mp3）。
+要点：
+- 队列用 Redis（`spring.data.redis` 已配好）；**必须**用 `BRPOP`/`BLPOP` 这类阻塞取，别轮询空转。
+- 抽音轨：`ffmpeg -i <input> -vn -ac 1 -ar 16000 -f wav <tmp>`（容器内已装 ffmpeg 8.0.1）。
+- 调 ASR：容器内地址 **`http://asr:8000`**（不是宿主 8001），`TranscriptionModel` 已配好，直接复用。
+- 写结果：`task_result(transcript, ai_tier…)`；状态机 `PENDING → RUNNING → DONE`，失败进 `RETRYING`（重试次数用 `TASK_MAX_RETRIES`）。
+- 幂等/崩溃恢复先不做（T2.1/T2.3），但**不许**把任务永久卡在 RUNNING（至少 catch 后写回 RETRYING 或 DEAD）。
+- 同时补 **`GET /api/v1/tasks/{id}`**（`接入指南.md` 的 snake_case：`task_id` / `status` / `duration_sec` / `size_bytes`；
+  完成时附 `transcript` 或 `result_url`，未完成时 transcript 为 null）。前端轮询和接入方都靠它。
+
+**验证**：用真实语料 `D:\datasets\meeting-notes-samples\a_e91acf.wav`（3.9 分钟）走完整链路
+`POST /api/v1/tasks` → 轮询 `GET /api/v1/tasks/{id}` → `status=DONE` 且 `task_result.transcript` 非空（中文有标点）。
+贴：task 表状态流转、task_result 行、ASR 容器日志里的那次请求、端到端耗时。
 **通过标准**：端到端一次成功；失败时状态迁移正确（不卡 RUNNING）。
 
 ---

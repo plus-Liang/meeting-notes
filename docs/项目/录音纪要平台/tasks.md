@@ -38,7 +38,8 @@
 | **T0.4** | Spring AI 最小转写跑通 | 独立复跑 exit 0 | ✅ `25528b9` + `review/2026-11-13-T0.4验收.md` |
 | **T0.5** | 云 LLM 通道 + **无 key 可启动** | 真实摘要 + 清空 key 仍能启动 | ✅ `483d6f2` + `review/2026-11-13-T0.5验收.md`（DeepSeek 实测 3 条摘要；无 key 时 ChatModel=0、health UP） |
 
-**下一步**：T1.4–T1.8（上传接口 → worker → 三页面 → 配置自检 → 单测）。T1.1/T1.2/T1.3 已 ✅。
+**下一步**：T1.5–T1.8（worker 端到端 → 三页面 → 配置自检 → 单测）。T1.1–T1.4 已 ✅。
+**T1.5 开工前**：先修 T1.4 审查的 P1/P2（snake_case 契约 + 幂等真实状态 + `user_id` 过滤，D-040/D-041），一个 commit。
 **已处理**：`glossary."right"` 改名 `right_text`（D-037，用户拍板）；列名已在真实 PG16 空卷验证。
 
 **失败预案**：①FunASR 起不来 → whisper.cpp server ②仍不行 → 云 ASR ③全不行 → 先做 PASTE 入口不阻塞。
@@ -52,7 +53,7 @@
 | **T1.1** | 代码仓骨架 + 首个 commit + `.gitignore` 生效 | `.env` 不在版本库 | ✅ `git ls-files` 无 `.env`；`git grep 'sk-'` 工作区无命中（历史命中均为文档自查命令文本）；`6b30779` + 审查报告 |
 | **T1.2** | `docker compose up` 起 pg/redis/minio/asr/app | 干净目录一次成功 | ✅ `docker compose down -v` → `up -d --build` → **5/5 healthy**；卷创建 11:21:25Z、Flyway 11:21:40Z（干净卷实锤）；`fb45588` |
 | **T1.3** | Flyway `V1__init.sql` 生效（7 张表） | 迁移可重复执行 | ✅ 真实 PG16.16：8 表（7 业务 + `flyway_schema_history`）；重启 → `Schema "public" is up to date`（幂等） |
-| **T1.4** | 上传接口：magic number / 大小 / 时长 / **格式**校验 → MinIO → task(PENDING) | 坏文件被拒、好文件入 PENDING | 传改名 `.exe` → 400 `INVALID_MEDIA` |
+| **T1.4** | 上传接口：magic number / 大小 / 时长 / **格式**校验 → MinIO → task(PENDING) | 坏文件被拒、好文件入 PENDING | ✅ `3ce9386` + `review/2026-11-13-T1.4验收.md`（5 场景真机：400/201/幂等/413/400/429；hash 与 ffprobe 时长我独立复算一致）。**遗留 P1/P2 在 T1.5 前修：snake_case 契约、幂等状态失真、user_id 过滤（D-040/D-041）** |
 | **T1.5** | worker 消费：抽音轨 → ASR → 写结果 → DONE | 5 分钟 mp3 端到端出全文 | `curl /api/v1/tasks/{id}` → `status=DONE` |
 | **T1.6** | 三页面（提交/列表/详情）静态 HTML，结构按 spec §5 | 可用、无 JS 报错 | 手点全流程 + 截图 |
 | **T1.7** | 配置外置基线 | `配置清单.md` §2 三条命令无异常 | 见该文档 §2 |
