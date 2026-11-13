@@ -59,7 +59,15 @@ app:
     max-segment-sec: ${ASR_MAX_SEGMENT_SEC:120}
 
   llm:
+    # 第三档兜底开关（D-020）
     fallback-extractive: ${EXTRACTIVE_FALLBACK_ENABLED:true}
+    # 第二档：本地 Ollama（可选）
+    ollama:
+      enabled: ${OLLAMA_ENABLED:false}
+      base-url: ${OLLAMA_BASE_URL:http://ollama:11434/v1}
+      model: ${OLLAMA_MODEL:}
+
+  log-json: ${LOG_JSON:true}
 
   storage:
     endpoint: ${S3_ENDPOINT:http://minio:9000}
