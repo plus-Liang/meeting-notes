@@ -8,6 +8,11 @@ spring:
   application:
     name: meeting-notes
 
+  jackson:
+    # D-041：对外 JSON 一律 snake_case（task_id / content_hash / duration_sec / size_bytes / reused），
+    # 与 webhook 契约、接入指南.md 保持一致；全局生效，不逐个手写 @JsonProperty。
+    property-naming-strategy: SNAKE_CASE
+
   servlet:
     multipart:
       # 上传大小硬闸放在 servlet 层（超限直接 413，磁盘不会被灌满），流内还有第二道复核

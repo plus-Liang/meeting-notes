@@ -82,7 +82,7 @@ public class TaskService {
 
         // 2) 大小：servlet 层已有 max-file-size 硬闸；这里流式复核并计算 hash
         if (file.getSize() > maxSizeBytes) {
-            throw new ApiException(413, "TOO_LARGE", "文件 " + file.getSize() + " 字节，超过上限 " + maxSizeBytes);
+            throw new ApiException(413, "SIZE_EXCEEDED", "文件 " + file.getSize() + " 字节，超过上限 " + maxSizeBytes);
         }
         Path tmp = Files.createTempFile("mn-upload-", ".bin");
         try {
@@ -92,14 +92,15 @@ public class TaskService {
             // 3) 时长：ffprobe 读容器元数据（容器内 ffmpeg，D-010）
             long durationSec = (long) Math.ceil(probe.durationSeconds(tmp));
             if (durationSec > maxDurationSec) {
-                throw new ApiException(400, "TOO_LONG",
+                throw new ApiException(400, "DURATION_EXCEEDED",
                         "时长 " + durationSec + " 秒，超过上限 " + maxDurationSec + " 秒（D-028：可配至 120 分钟）");
             }
 
-            // 4) 幂等（N1/N10）：同内容重复提交直接返回已有任务，不重复入列、不消耗配额
-            Long existing = findIdByHash(sha256);
+            // 4) 幂等（N1/N10）：同内容重复提交直接返回已有任务（库里的真实 status，D-041），
+            //    不重复入列、不消耗配额；查询必须带 user_id（D-040，认证上线前先守住数据约束）
+            ExistingTask existing = findIdAndStatusByHash(DEFAULT_USER_ID, sha256);
             if (existing != null) {
-                return new TaskCreatedResponse(existing, "PENDING", sha256, durationSec, size, true);
+                return new TaskCreatedResponse(existing.id(), existing.status(), sha256, durationSec, size, true);
             }
 
             // 5) 配额（N8）：按向上取整分钟数消费
@@ -140,7 +141,7 @@ public class TaskService {
             while ((n = in.read(buf)) > 0) {
                 total += n;
                 if (total > maxSizeBytes) {
-                    throw new ApiException(413, "TOO_LARGE", "文件超过大小上限 " + maxSizeBytes + " 字节");
+                    throw new ApiException(413, "SIZE_EXCEEDED", "文件超过大小上限 " + maxSizeBytes + " 字节");
                 }
                 md.update(buf, 0, n);
                 out.write(buf, 0, n);
@@ -164,11 +165,16 @@ public class TaskService {
         }
     }
 
-    private Long findIdByHash(String sha256) {
+    /** 幂等命中时返回的已有任务摘要：id + 库里真实状态。 */
+    record ExistingTask(long id, String status) {
+    }
+
+    /** 按内容 hash 查已有任务；必须带 user_id（D-040），防止未来跨用户读到他人任务。 */
+    private ExistingTask findIdAndStatusByHash(long userId, String sha256) {
         return jdbc.query(
-                "SELECT id FROM task WHERE content_hash = ? LIMIT 1",
-                rs -> rs.next() ? rs.getLong(1) : null,
-                sha256);
+                "SELECT id, status FROM task WHERE content_hash = ? AND user_id = ? ORDER BY id LIMIT 1",
+                rs -> rs.next() ? new ExistingTask(rs.getLong(1), rs.getString(2)) : null,
+                sha256, userId);
     }
 
     /** 只留文件名主体与安全字符，防路径穿越；空/异常名回退为检测出的格式名。 */

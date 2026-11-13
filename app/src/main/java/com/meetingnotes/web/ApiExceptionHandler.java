@@ -30,11 +30,11 @@ public class ApiExceptionHandler {
         return ResponseEntity.status(e.getStatus()).body(new ErrorResponse(e.getCode(), e.getMessage()));
     }
 
-    /** multipart 大小超限（servlet 层先拦截，磁盘不会被灌满）→ 413 TOO_LARGE。 */
+    /** multipart 大小超限（servlet 层先拦截，磁盘不会被灌满）→ 413 SIZE_EXCEEDED（D-041）。 */
     @ExceptionHandler(MaxUploadSizeExceededException.class)
     public ResponseEntity<ErrorResponse> onTooLarge(MaxUploadSizeExceededException e) {
         return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE)
-                .body(new ErrorResponse("TOO_LARGE", "文件超过大小上限"));
+                .body(new ErrorResponse("SIZE_EXCEEDED", "文件超过大小上限"));
     }
 
     /** multipart 解析失败（非 multipart 请求、表单坏掉等）。 */

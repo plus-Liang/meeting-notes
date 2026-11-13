@@ -31,7 +31,7 @@ public class QuotaService {
         if (minutes > minutesPerDay || 1 > tasksPerDay) {
             throw quotaExceeded();
         }
-        Long usedMinutes = jdbc.query(
+        Long[] used = jdbc.query(
                 """
                 INSERT INTO quota (user_id, day, used_minutes, used_tasks)
                 VALUES (?, CURRENT_DATE, ?, 1)
@@ -40,14 +40,14 @@ public class QuotaService {
                     used_tasks   = quota.used_tasks + 1
                 WHERE quota.used_minutes + ? <= ?
                   AND quota.used_tasks + 1 <= ?
-                RETURNING used_minutes
+                RETURNING used_minutes, used_tasks
                 """,
-                rs -> rs.next() ? rs.getLong(1) : null,
+                rs -> rs.next() ? new Long[]{rs.getLong(1), rs.getLong(2)} : null,
                 userId, minutes, minutes, minutesPerDay, tasksPerDay);
-        if (usedMinutes == null) {
+        if (used == null) {
             throw quotaExceeded();
         }
-        return new long[]{usedMinutes, tasksPerDay};
+        return new long[]{used[0], used[1]};
     }
 
     private ApiException quotaExceeded() {
