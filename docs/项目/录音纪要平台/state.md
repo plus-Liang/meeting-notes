@@ -21,11 +21,13 @@ GitHub：`https://github.com/plus-Liang/meeting-notes`（main 已跟踪，最新
 - Docker 29.8.0 / Compose 5.5.1 ✅；`REGISTRY_PREFIX=docker.m.daocloud.io/`，非 library 镜像用 `MINIO_IMAGE`/`OLLAMA_IMAGE`（D-038）
 - Java 21.0.2 + Maven 3.9.9 ✅（`E:\tools`）；app 容器内 Maven 构建 12–17 分钟（首次）
 - 测试：`mvn -q test` **14 个用例全绿**（需注入 `.env` + `ASR_BASE_URL=http://localhost:8001`）
+- **协作基线（D-042）**：`docs/协作/开发提示词模板.md`（三准备+四规则，7 个可复制模板）；任务卡固定四段
 
 ## 进度
 
 - **阶段 0 全部完成**（T0.1–T0.5）；**第 1 周**：T1.1 ✅ T1.2 ✅ T1.3 ✅ **T1.4 ✅（上传接口）**
 - 审查 4 份：`review/2026-11-13-{T0.4,T0.5,T1.1T1.2,T1.4}验收.md`（全部独立上下文复跑，已随仓同步）
+- 方法沉淀：`docs/协作/11月13日-音频总结.md`（音频 6:18 + 6 张提示词卡原文 + 对照表）
 
 ## 待办（T1.5，按顺序）
 

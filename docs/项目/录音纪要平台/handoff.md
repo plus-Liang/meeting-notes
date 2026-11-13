@@ -23,7 +23,8 @@
 ## 3. 关键文件
 
 详见 `00-先看这个.md`。要点：`spec.md`（WHAT）· `plan.md`（方案）· `tasks.md` / `tasks-starter.md`（执行）·
-`decisions.md`（**45 条**）· `接入指南.md`（对外 API 契约，改动必须同步）· `docs/协作/review/`（4 份验收报告）。
+`decisions.md`（**46 条**）· `接入指南.md`（对外 API 契约，改动必须同步）· `docs/协作/review/`（4 份验收报告）。
+**协作基线（D-042）**：`docs/协作/开发提示词模板.md`（三准备+四规则 7 模板）+ `docs/协作/11月13日-音频总结.md`（出处）。
 代码仓 `D:\new\projects\meeting-notes`：`AGENT.md`（入口 + 已验证事实 §4.1）· `docker-compose.yml` · `app/` · `infra/asr/`。
 
 ## 4. 未决
