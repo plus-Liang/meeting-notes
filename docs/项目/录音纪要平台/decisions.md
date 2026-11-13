@@ -305,6 +305,37 @@
   在 `application.yml` 写死 `spring.ai.model.chat: none`（有 key 时还得改配置，违反配置驱动）。
 - **备注**：`LLM_ENABLED=true` 但没填 key 时会启动失败（显式优先）——属预期，T1.x 补友好启动日志。
 
+### D-037 `glossary` 列名 `wrong`/`"right"` 改为 `wrong_text`/`right_text`
+- **日期**：2026-11-13（T0.5 审查 P2-1，用户拍板"改名"）｜**决策人**：本人
+- **结论**：`V1__init.sql` 的 `glossary.wrong` / `glossary."right"` 改为 `wrong_text` / `right_text`，`UNIQUE (user_id, wrong_text)` 同步。
+- **依据**：`right` 是 PostgreSQL 保留字（`RIGHT JOIN`），保留原名则所有手写 SQL 都要带双引号、JPA 实体要写
+  `@Column(name = "\"right\"")`，漏一处就是线上 500。V1 当时尚未在任何正式环境跑过，改名成本≈0；等有数据后再改就要写迁移。
+- **已排除项**：保留 `"right"` + 全项目统一加引号（长期维护税，且极易漏）；用 `wrong`/`correct`（`correct` 与业务词表冲突，`_text` 后缀更清楚是"文本"）。
+- **验证**：真实 PG16 空卷 `up` → `\d glossary` 显示新列名 + 新唯一约束；`flyway_schema_history` version=1 success=t（见 `review/2026-11-13-T1.1T1.2验收.md` §1）。
+
+### D-038 镜像来源策略：`REGISTRY_PREFIX` 只管 `library/` 镜像，非 library 用独立 `*_IMAGE` 变量
+- **日期**：2026-11-13（T1.2 实测触发）｜**决策人**：本人
+- **结论**：分两层：
+  - `REGISTRY_PREFIX`（默认空）只拼接官方 `library/` 镜像与 Dockerfile 基础镜像（`postgres`/`redis`/`maven`/`temurin`）；
+  - `MINIO_IMAGE` / `OLLAMA_IMAGE`（默认空 = 官方名）**整体覆盖**镜像引用，用于"加速源不收录该镜像"的情况。
+  - 本机取值：`REGISTRY_PREFIX=docker.m.daocloud.io/`；minio/ollama 走
+    `swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/<image>`。
+- **依据**：实测 daocloud 对非 `library/` 命名空间走白名单，`minio/minio`、`ollama/ollama` 直接 `denied`；
+  而单前缀模型**表达不了**"pg 走 daocloud、minio 走华为云"的混合来源。`dockerhub.icu` 能拉到 minio 但 blob 是坏 HTML。
+  华为云 `ddn-k8s` 实测可拉可跑（minio healthy）。
+- **已排除项**：给 daocloud 之外的每个镜像都硬编码镜像名（把"国内加速"这个部署细节焊死进仓库）；要求用户自己改 compose（违反 D-021 配置全外置）；让用户先手动 `docker pull` 再起（"陌生人 30 分钟跑通"会被这一步毁掉）。
+- **备注**：`REGISTRY_PREFIX` 留空时镜像名会带 `library/` 前缀（`library/postgres:16-alpine`），Docker Hub 可解析、属正常；已在 `.env.example` 注释说明。
+
+### D-039 「无 key 可启动」的验收方法：独立容器探针，三条件缺一不可
+- **日期**：2026-11-13（T1.2 验收时一次假绿灯触发）｜**决策人**：本人
+- **结论**：验证 D-035 必须同时满足：①`LLM_ENABLED` 留空/unset（显式 `true` 是"强制启用"，不属于无 key 场景，崩是预期行为）；
+  ②`LLM_API_KEY`、`LLM_BASE_URL`、`LLM_MODEL` 三者全空；③用**独立容器/探针**验证（`docker run` 或 `compose run` 覆盖环境变量），
+  **禁止**靠 `mv .env` 来"制造无 key 环境"。
+- **依据**：本次验收中移走 `.env` 导致 `REGISTRY_PREFIX` / `MINIO_IMAGE` 一起消失 → compose 镜像引用变化、app 容器未重建 →
+  `/actuator/health` 的 200 来自**旧容器**，是假绿灯。改用 `docker run -e LLM_ENABLED= -e LLM_API_KEY= ...` 探针后：
+  12 秒 healthy、`Started in 5.129s`（见 `review/2026-11-13-T1.1T1.2验收.md` §1）。
+- **已排除项**：把 `.env` 改名/移走（污染镜像源配置、复盘难）；只读 `ChatModel` Bean 数不验 HTTP（漏掉"能起但 health 不通"）；用 H2 单测代替容器验证（`NoKeyStartupTest` 仍是单测层证据，容器层必须另验）。
+
 ---
 
 ## 面试速查（由本文件派生，勿单独维护）

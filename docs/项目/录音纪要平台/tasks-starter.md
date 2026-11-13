@@ -124,7 +124,7 @@ mvn -q -Dtest=AsrSmokeTest test
 
 ---
 
-## T1.1 代码仓骨架收尾
+## T1.1 代码仓骨架收尾 ✅ **已完成（`6b30779`）**
 
 **目标**：仓库干净、可追溯。
 **步骤**：确认 `.gitignore` 生效（`.env` 不被跟踪）；一次 commit 只做一件事；提交信息 `<type>(<scope>): <做了什么>`。
@@ -132,23 +132,28 @@ mvn -q -Dtest=AsrSmokeTest test
 
 ---
 
-## T1.2 docker compose 一键起（pg / redis / minio / asr / app）
+## T1.2 docker compose 一键起（pg / redis / minio / asr / app）✅ **已完成（`fb45588`）**
+
+> 已踩过的坑（照抄别重踩）：`REGISTRY_PREFIX=docker.m.daocloud.io/` 只对 `library/` 镜像有效；
+> minio/ollama 被 daocloud 白名单拒 → 用 `MINIO_IMAGE`/`OLLAMA_IMAGE` 整体覆盖到华为云 `ddn-k8s`（D-038）。
+> app 镜像必须 JDK 21；apt 换源要 `grep -rlE ... /etc/apt | xargs -r sed`（deb822 格式，D 系列见 `环境搭建说明.md` §7）。
 
 **验证**
 ```powershell
 docker compose down -v
-docker compose up -d
+docker compose up -d --build
 docker compose ps        # 全部 healthy
 ```
-
 **通过标准**：干净环境下一次成功，全部服务 healthy（**不要用 `sleep` 等依赖，一律 healthcheck**）。
 
 ---
 
-## T1.3 Flyway 建表生效
+## T1.3 Flyway 建表生效 ✅ **已完成（真实 PG16.16 验证）**
 
-**验证**：`docker compose exec postgres psql -U $env:POSTGRES_USER -d $env:POSTGRES_DB -c '\dt'`
-**通过标准**：看到 `task` / `task_result` / `glossary` / `speaker_profile` / `quota` / `dead_letter` / `webhook_delivery` 七张表；重复执行迁移不报错。
+**验证**：`docker compose exec -T postgres psql -U mn -d meetingnotes -c '\dt'`
+（`POSTGRES_USER=mn`，用 `-U postgres` 会报角色不存在）
+**通过标准**：看到 `task` / `task_result` / `glossary` / `speaker_profile` / `quota` / `dead_letter` / `webhook_delivery` 七张表
+（+ `flyway_schema_history` 共 8 张）；重复执行迁移不报错（`Schema "public" is up to date`）。
 
 ---
 

@@ -96,9 +96,13 @@ pip install -i https://pypi.tuna.tsinghua.edu.cn/simple <pkg>
 | **云 LLM（DeepSeek，T0.5 实测）** | `LLM_BASE_URL=https://api.deepseek.com` + `LLM_CHAT_COMPLETIONS_PATH=/v1/chat/completions` + `LLM_MODEL=deepseek-flash`；`GET /models` 实测返回 `deepseek-flash` / `deepseek-v4-pro`；`deepseek-chat` 只是别名。**thinking 模型 `LLM_MAX_TOKENS` 太小会返回空 content**（默认 1024） |
 | **无 key 可启动（D-035/D-036）** | `LlmModelSwitchEnvironmentPostProcessor` 在启动早期算 `app.llm.enabled`；无 key 时 `spring.ai.model.chat=none`，`ChatModel` Bean 数为 0。**不要**用填假 base-url 或 exclude 自动配置类来实现 |
 | **换供应商要注意 path** | 智谱 `base-url=.../api/paas/v4` 要配 `LLM_CHAT_COMPLETIONS_PATH=/chat/completions`（否则拼出 `/v4/v1/...`）；OpenAI/DeepSeek 用默认 `/v1/chat/completions` |
-| **Flyway 保留字** | `V1__init.sql` 里 `glossary."right"` 必须带双引号（`right` 是 PG 保留字）。真实 PG16 已验证。**将来写 JPA 实体要 `@Column(name = "\"right\"")`**，或趁早改名 `right_text` |
+| **Flyway 列名** | `glossary.wrong_text` / `right_text`（D-037 改名，**原名 `"right"` 是 PG 保留字**）。真实 PG16 已验证：空卷 `up` → 7 表 + `flyway_schema_history` |
 | **H2 测试绕过 Flyway** | `NoKeyStartupTest` 用 H2 + `flyway.enabled=false`，**SQL 改动它验不到** → 改迁移脚本必须手工在真实 PG16 跑一遍 |
 | 本机环境坑 | ①宿主会注入 `SERVER__PORT`（撞端口）→ 用 `--server.port=18080` 覆盖；②curl 本机端口要 `--noproxy "*"`；③`docker run -v D:\...:/mig:ro` 偶发容器卡在 `Created` 起不来 → 改用 `docker cp` |
+| **镜像来源（D-038）** | `REGISTRY_PREFIX` 只拼接 `library/` 镜像（postgres/redis/maven/temurin）；**非 library 镜像（minio/ollama）加速源会 `denied`**，用 `MINIO_IMAGE`/`OLLAMA_IMAGE` 整体覆盖。本机：前缀 `docker.m.daocloud.io/`，minio/ollama 走 `swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/<image>` |
+| **app 镜像（T1.2）** | 基础镜像 JDK **21**（原 17 与 pom 冲突）；apt 源在 deb822 格式 `/etc/apt/sources.list.d/*.sources`，换源必须 `grep -rlE ... /etc/apt | xargs -r sed -i`（`sed sources.list*` 会匹配到目录静默失效）；`ARG APT_MIRROR` 可覆盖 |
+| **无 key 验证（D-039）** | 三条件：`LLM_ENABLED` 留空 + 三个 `LLM_*` 全空 + **独立容器探针**。**禁止 `mv .env`**：会让镜像变量一起消失、容器没重建，200 来自旧容器（假绿灯）。`LLM_ENABLED=true` 无 key 崩是预期（显式优先） |
+| **连库** | `docker compose exec -T postgres psql -U mn -d meetingnotes`（`postgres` 角色不存在）；`down -v` 后 `up -d` 全 5 个服务 healthy 才算 T1.2 通过 |
 
 ## 5. 每完成一个任务的回报格式（照这个贴给人类）
 
