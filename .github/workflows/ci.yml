@@ -1,0 +1,27 @@
+# CI 骨架
+#
+# ⚠️ 默认只在手动触发（workflow_dispatch），因为项目 v0.1 之前代码还不完整，
+#    挂上 push 触发会让仓库首页一直红。
+#    等 v0.1.0 能 `docker compose up` 跑通后，把 `on:` 改成 push/pull_request 即可。
+
+name: CI
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Build & test
+        working-directory: app
+        run: mvn -B -q test
