@@ -260,6 +260,22 @@
 - **已排除项**：等 FunASR 镜像（不可得）；上云 ASR（破坏 N15 零成本 + N16 离线）；用 av 19（与 faster-whisper 1.2.1 不兼容）。
 - **备注**：①中文必须加 `initial_prompt`（否则可能繁体）；②`small` 专有名词准确率一般（"文件夹→文件家"），后续可换 `medium`/`large-v3`（需补全本机模型缓存，代码不用改）。
 
+### D-034 `ASR_BASE_URL` 不带 `/v1`（Spring AI 自己追加）
+- **日期**：2026-11-13（T0.4 实现时实测发现，审查确认）｜**决策人**：本人
+- **结论**：配置值 `ASR_BASE_URL=http://asr:8000`；**对外契约端点仍是** `http://asr:8000/v1/audio/transcriptions`。
+- **依据**（反编译证据，不是猜）：`javap -c -constants` 反编译 `spring-ai-openai-1.1.8.jar` 的 `OpenAiAudioApi`，
+  内部硬编码 `String /v1/audio/transcriptions`；若 base-url 带 `/v1` → 实际请求 `/v1/v1/audio/transcriptions` → 404。
+  容器日志佐证：`POST /v1/audio/transcriptions 200 OK`。
+- **已排除项**：给 ASR 服务加 `/v1/v1/...` 别名路由（改 infra + 重建镜像，脏且掩盖问题）；升级 Spring AI 2.0.x（要求 Spring Boot 4，违反技术栈）；保留字面 `/v1` 并在网关层改写（多一层无收益）。
+
+### D-035 无 API key 时应用必须能启动（chat 自动配置按开关跳过）
+- **日期**：2026-11-13（T0.4 审查发现的启动风险）｜**决策人**：本人
+- **结论**：`LLM_BASE_URL` 为空时，应用**仍能正常启动**；做法是加 `LLM_ENABLED`（默认按是否填了 key 自动判断），
+  关闭时跳过 OpenAI chat 自动配置，摘要走第二档（本地 Ollama）或第三档（抽取式）。
+- **依据**：Spring AI 的 `OpenAiChatAutoConfiguration` 对 `base-url` 有非空约束，默认空串会让**完整应用上下文启动失败**——
+  这会直接破坏 N15「不填任何 key 也能跑通」这条硬需求（也是 T1.2 一键启动的前置条件）。
+- **已排除项**：给 `LLM_BASE_URL` 填一个假的默认地址（能启动但一调用就 5xx，更糟）；强制用户必须填 key（破坏零成本定位）。
+
 ---
 
 ## 面试速查（由本文件派生，勿单独维护）

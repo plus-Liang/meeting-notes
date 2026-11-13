@@ -79,6 +79,21 @@ pip install -i https://pypi.tuna.tsinghua.edu.cn/simple <pkg>
 
 ---
 
+## 4.1 已验证的实现事实（别重复踩，2026-11-13 实测）
+
+| 事实 | 说明 |
+|---|---|
+| **`ASR_BASE_URL` 不带 `/v1`** | `spring.ai.openai.audio.transcription.base-url = http://asr:8000`；Spring AI 1.x 内部追加 `/v1/audio/transcriptions`（`javap` 已核对）。写 `/v1` 会 404。见 D-034 |
+| 转写属性前缀 | **`spring.ai.openai.audio.transcription.*`**（必须带 `openai`，少了整段配置不生效） |
+| `response-format` | 必须 `json`（默认 `text`，自建 ASR 返回 `{"text":...}`，用 text 会解析失败） |
+| ASR 服务 | `infra/asr/` 已建好并验证：`docker compose up -d asr` → healthy；`av==13.1.0` 必须锁定（19 会 TypeError） |
+| ASR 端口 | 容器内固定 8000，宿主机走 `${ASR_PORT}:8000`；**本机 8000 常被别的项目占用 → 用 8001 测试** |
+| 模型 | 本机 `D:\huggingface` 里只有 `small` 完整（461MB），`medium`/`large-v3` 不完整 |
+| 中文 | 必须 `initial_prompt`（否则可能繁体）；`small` 专有名词会错，靠术语回流补 |
+| pom 版本 | Boot 3.5.16 / Spring AI 1.1.8 / Java 21 / AWS SDK BOM 2.59.0（`s3` 必须由 BOM 管版本，否则 Maven 读不了 POM） |
+| 测试命令 | `$env:JAVA_HOME='E:\tools\jdk-21.0.2'; $env:ASR_BASE_URL='http://localhost:8001'; $env:ASR_SMOKE_AUDIO='D:\datasets\meeting-notes-samples\probe.wav'; mvn -q -Dtest=AsrSmokeTest test` |
+| 控制台编码 | Java `stdout.encoding=GBK`，用 **PowerShell** 跑验证（Bash 捕获中文会乱码） |
+
 ## 5. 每完成一个任务的回报格式（照这个贴给人类）
 
 ```

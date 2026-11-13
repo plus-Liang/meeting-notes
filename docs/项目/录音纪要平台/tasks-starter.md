@@ -97,7 +97,9 @@ RTF 实测：4min→xx s (RTF 0.xx) / 13min→xx s / 34min→xx min
 
 **步骤**
 1. `app/src/test/java/com/meetingnotes/AsrSmokeTest.java`：注入 `TranscriptionModel`，转写一个本地文件，断言 `text` 非空并打印。
-2. `application.yml` 的 `spring.ai.audio.transcription.base-url` 指向 `http://asr:8000/v1`（容器内）或 `http://localhost:8000/v1`（本机测试）。
+2. `application.yml` 的 `spring.ai.openai.audio.transcription.base-url` 指向 **`http://asr:8000`**
+   （⚠️ **不带 `/v1`**：Spring AI 会自己追加 `/v1/audio/transcriptions`，带了就变成 `/v1/v1/...` → 404，见 D-034）。
+   本机测试时用宿主机映射端口：`ASR_BASE_URL=http://localhost:8001`。
 3. 版本号按 `pom.xml` 里的 TODO 去官方核对最新 GA（**不要照网上旧教程**）。
 
 **验证命令**

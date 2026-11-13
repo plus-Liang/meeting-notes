@@ -100,7 +100,7 @@
 | Kimi (Moonshot) | `https://api.moonshot.cn/v1` | [platform.kimi.com/docs](https://platform.kimi.com/docs/api/overview) |
 | 阿里百炼/通义 | `https://dashscope.aliyuncs.com/compatible-mode/v1` | [阿里云 Model Studio](https://www.alibabacloud.com/help/zh/model-studio/) |
 | 本地 Ollama | `http://ollama:11434/v1` | 官方兼容层 |
-| FunASR（ASR） | 容器内地址，形如 `http://asr:8000/v1` | FunASR 官方 OpenAI 兼容服务 |
+| ASR（自建容器） | 容器内地址 `http://asr:8000`（**不带 /v1**，Spring AI 自己追加） | `infra/asr/`（实测 RTF 0.113） | 见 D-008R / D-034 |
 
 ⚠️ **上表 URL 与模型名在写代码当天必须用 curl 实测一次**，不实测不写进配置默认值。
 

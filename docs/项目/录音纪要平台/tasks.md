@@ -35,8 +35,8 @@
 | **T0.1** | 定 ASR 镜像并起 FunASR OpenAI 兼容服务，写进 `.env` | 容器 healthy，接口可访问 | `docker compose up -d asr` → `curl.exe -s localhost:8000/v1/models` 返回 200 |
 | **T0.2** | curl 转写自己的真实 mp3 | 返回中文、有标点 | `curl.exe -s -X POST .../v1/audio/transcriptions -F "file=@你的.mp3" -F "model=funasr"` → `text` 非空 |
 | **T0.3** | 记实测 RTF 与资源占用 | 写入 `state.md` | 5 分钟音频耗时；容器内存 |
-| **T0.4** | Spring AI 最小转写跑通 | 测试类打印文本 | `mvn -q -Dtest=AsrSmokeTest test` → BUILD SUCCESS |
-| **T0.5** | 云 LLM 通道跑通（智谱优先） | 拿到摘要；base-url/模型名 curl 实测 | 填入 `.env` 调用一次；实测值记进 D-007 备注 |
+| **T0.4** | Spring AI 最小转写跑通 | ✅ **已完成**（`25528b9`，审查报告 `review/2026-11-13-T0.4验收.md`） | 独立复跑 exit 0；surefire `Tests run: 1, Failures: 0` |
+| **T0.5** | 云 LLM 通道跑通（智谱优先）**+ 无 key 可启动** | 拿到摘要；base-url/模型名 curl 实测；**清空 key 后应用仍能启动**（D-035） | 填入 `.env` 调用一次打印摘要；清空 `LLM_BASE_URL` 重启 → 启动成功不崩；实测值记 D-007 |
 
 **失败预案**：①FunASR 起不来 → whisper.cpp server ②仍不行 → 云 ASR ③全不行 → 先做 PASTE 入口不阻塞。
 
