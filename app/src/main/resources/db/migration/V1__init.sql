@@ -30,6 +30,7 @@ CREATE TABLE task_result (
     keywords    JSONB,
     speaker_map JSONB,
     ai_tier     VARCHAR(16),                          -- CLOUD / LOCAL / EXTRACTIVE（D-020）
+    template    VARCHAR(32),                          -- meeting / course / interview / podcast（US-12 / D-025）
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
