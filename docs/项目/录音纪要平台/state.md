@@ -10,8 +10,10 @@ GitHub：`https://github.com/plus-Liang/meeting-notes`（main 已跟踪，可 pu
 
 ## 实测基线
 
-- `C:\Users\ljh\Videos` 2026-11-13 首次扫描：20 文件 / 8.44h / 0.90GB，9 组 mp4 与 mp3 时长一致（手工剪映转过 9 次）。
-  ⚠️ **二次检查时该目录只剩 1 个 mp4**（mp3 已不在）→ 需与本人确认去向。
+- 2026-11-13 首次扫描 `C:\Users\ljh\Videos`：20 文件 / 8.44h / 0.90GB，9 组 mp4 与 mp3 时长一致（手工剪映转过 9 次）。
+  **本人已删除其中的 mp3**（只剩 1 个 mp4）→ 已把仍存在的真实音频归档为**测试语料**：
+  `D:\datasets\meeting-notes-samples`（**11 文件 / 4.93 小时 / 552MB**，含 5 个 >30min、一对同内容 mp4/wav），
+  清单见 `测试语料-清单.md`。
 - **ASR 实测：RTF 0.105（90s）/ 0.113（13min）**；模型加载 4–8s；**8.44h ≈ 57 分钟**。
 
 ## 工具链（实测）
@@ -36,7 +38,7 @@ GitHub：`https://github.com/plus-Liang/meeting-notes`（main 已跟踪，可 pu
 
 ## 阻塞 / 风险
 
-- **待确认**：`C:\Users\ljh\Videos` 里的 mp3 去哪了（影响 README 实测表述）
+- **已解决**：原 `Videos` 里的 mp3 已被本人删除 → 真实音频已归档为测试语料（11 文件 / 4.93h）
 - **风险**：`small` 模型专有名词会错（实测"文件夹→文件家""通义→通易"）→ 靠术语回流补，或后续换 medium/large
 - **风险**：第三方镜像（pg/redis/minio）未实测拉取，需 `REGISTRY_PREFIX`（T1.2 会验证）
 - **缺口**：你实际整理单文件耗时、手机里"短视频"数量

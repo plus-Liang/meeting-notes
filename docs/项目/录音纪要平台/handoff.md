@@ -30,7 +30,7 @@
 
 ## 4. 未决
 
-- **`C:\Users\ljh\Videos` 里 mp3 去哪了**（首扫 20 文件，现只剩 1 个 mp4）——影响 README 实测表述，需本人确认。
+- **真实音频语料**：原 `Videos` 里的 mp3 已被本人删除 → 已归档 `D:\datasets\meeting-notes-samples`（11 文件 / 4.93h），见 `测试语料-清单.md`。
 - T0.5 云 LLM 实测值（智谱 base_url / 模型名）待填。
 - `small` 模型专有名词准确率一般；是否下载 medium/large-v3 完整模型待定。
 - 你实际整理单文件耗时、手机里"短视频"数量。
