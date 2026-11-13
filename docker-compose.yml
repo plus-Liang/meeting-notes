@@ -95,7 +95,7 @@ services:
       DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-meetingnotes}
       REDIS_HOST: redis
       S3_ENDPOINT: http://minio:9000
-      ASR_BASE_URL: http://asr:8000/v1
+      ASR_BASE_URL: http://asr:8000
     depends_on:
       postgres:
         condition: service_healthy

@@ -36,12 +36,18 @@ spring:
       chat:
         options:
           model: ${LLM_MODEL:}
-    audio:
-      transcription:
-        base-url: ${ASR_BASE_URL:http://asr:8000/v1}
-        api-key: ${ASR_API_KEY:not-needed}
-        options:
-          model: ${ASR_MODEL:funasr}
+      audio:
+        transcription:
+          # 契约端点：http://asr:8000/v1/audio/transcriptions
+          # Spring AI 1.x 自己追加 "/v1/audio/transcriptions"，base-url 不能再带 /v1，
+          # 否则实际请求会变成 /v1/v1/audio/transcriptions（404）。
+          base-url: ${ASR_BASE_URL:http://asr:8000}
+          api-key: ${ASR_API_KEY:not-needed}
+          options:
+            model: ${ASR_MODEL:small}
+            # 自建 ASR 返回 {"text":"..."}；Spring AI 1.1.x 默认 response-format=text，
+            # 会把整段 JSON 当成转写文本，必须显式指定 json。
+            response-format: ${ASR_RESPONSE_FORMAT:json}
 
 app:
   base-url: ${APP_BASE_URL:http://localhost:8080}
