@@ -4,7 +4,11 @@ import com.meetingnotes.upload.AudioDurationProbe;
 import com.meetingnotes.upload.MediaMagic;
 import com.meetingnotes.web.ApiException;
 import com.meetingnotes.web.TaskCreatedResponse;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DataAccessException;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -35,6 +39,8 @@ import java.util.HexFormat;
 @Service
 public class TaskService {
 
+    private static final Logger log = LoggerFactory.getLogger(TaskService.class);
+
     /** 认证体系接入前（spec US-9 属后续卡），先固定单用户。 */
     private static final long DEFAULT_USER_ID = 1L;
     private static final int HEAD_BYTES = 16;
@@ -43,24 +49,30 @@ public class TaskService {
     private final S3Client s3;
     private final AudioDurationProbe probe;
     private final QuotaService quotaService;
+    private final StringRedisTemplate redis;
     private final long maxSizeBytes;
     private final long maxDurationSec;
     private final String bucket;
+    private final String queueKey;
 
     public TaskService(JdbcTemplate jdbc,
                        S3Client s3,
                        AudioDurationProbe probe,
                        QuotaService quotaService,
+                       StringRedisTemplate redis,
                        @Value("${app.task.max-size-bytes}") long maxSizeBytes,
                        @Value("${app.task.max-duration-sec}") long maxDurationSec,
-                       @Value("${app.storage.bucket}") String bucket) {
+                       @Value("${app.storage.bucket}") String bucket,
+                       @Value("${app.worker.queue-key}") String queueKey) {
         this.jdbc = jdbc;
         this.s3 = s3;
         this.probe = probe;
         this.quotaService = quotaService;
+        this.redis = redis;
         this.maxSizeBytes = maxSizeBytes;
         this.maxDurationSec = maxDurationSec;
         this.bucket = bucket;
+        this.queueKey = queueKey;
     }
 
     public TaskCreatedResponse createUpload(MultipartFile file) throws IOException {
@@ -119,6 +131,14 @@ public class TaskService {
             putObjectEnsuringBucket(key, tmp);
             jdbc.update("UPDATE task SET source_uri = ?, updated_at = now() WHERE id = ?",
                     "s3://" + bucket + "/" + key, taskId);
+
+            // 7) 投递 worker 队列（T1.5）。入队失败不回滚任务：任务停在 PENDING，
+            //    由 T2.3 的恢复机制兜底，避免"客户端拿到 500 后重试 → 幂等命中 → 永不入队"。
+            try {
+                redis.opsForList().leftPush(queueKey, Long.toString(taskId));
+            } catch (DataAccessException e) {
+                log.error("任务 {} 入队失败（Redis 不可用），停在 PENDING，待 T2.3 恢复机制兜底", taskId, e);
+            }
 
             return new TaskCreatedResponse(taskId, "PENDING", sha256, durationSec, size, false);
         } finally {

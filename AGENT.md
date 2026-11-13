@@ -98,7 +98,7 @@ pip install -i https://pypi.tuna.tsinghua.edu.cn/simple <pkg>
 | **换供应商要注意 path** | 智谱 `base-url=.../api/paas/v4` 要配 `LLM_CHAT_COMPLETIONS_PATH=/chat/completions`（否则拼出 `/v4/v1/...`）；OpenAI/DeepSeek 用默认 `/v1/chat/completions` |
 | **Flyway 列名** | `glossary.wrong_text` / `right_text`（D-037 改名，**原名 `"right"` 是 PG 保留字**）。真实 PG16 已验证：空卷 `up` → 7 表 + `flyway_schema_history` |
 | **H2 测试绕过 Flyway** | `NoKeyStartupTest` 用 H2 + `flyway.enabled=false`，**SQL 改动它验不到** → 改迁移脚本必须手工在真实 PG16 跑一遍 |
-| 本机环境坑 | ①宿主会注入 `SERVER__PORT`（撞端口）→ 用 `--server.port=18080` 覆盖；②curl 本机端口要 `--noproxy "*"`；③`docker run -v D:\...:/mig:ro` 偶发容器卡在 `Created` 起不来 → 改用 `docker cp` |
+| 本机环境坑 | ①宿主会注入 `SERVER__PORT`（撞端口）→ 用 `--server.port=18080` 覆盖；②curl 本机端口要 `--noproxy "*"`；③`docker run -v D:\...:/mig:ro` 偶发容器卡在 `Created` 起不来 → 改用 `docker cp`；④**宿主 shell 注入了 `http_proxy`/`HTTP_PROXY`（重复键）**，代理半死时 curl 连 `127.0.0.1` 都会静默失败（exit 1 无输出/被 SIGTERM）→ 先 `unset http_proxy HTTP_PROXY https_proxy HTTPS_PROXY all_proxy ALL_PROXY` 再 curl，或用 `env -u ...` 单条清除 |
 | **镜像来源（D-038）** | `REGISTRY_PREFIX` 只拼接 `library/` 镜像（postgres/redis/maven/temurin）；**非 library 镜像（minio/ollama）加速源会 `denied`**，用 `MINIO_IMAGE`/`OLLAMA_IMAGE` 整体覆盖。本机：前缀 `docker.m.daocloud.io/`，minio/ollama 走 `swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/<image>` |
 | **app 镜像（T1.2）** | 基础镜像 JDK **21**（原 17 与 pom 冲突）；apt 源在 deb822 格式 `/etc/apt/sources.list.d/*.sources`，换源必须 `grep -rlE ... /etc/apt | xargs -r sed -i`（`sed sources.list*` 会匹配到目录静默失效）；`ARG APT_MIRROR` 可覆盖 |
 | **无 key 验证（D-039）** | 三条件：`LLM_ENABLED` 留空 + 三个 `LLM_*` 全空 + **独立容器探针**。**禁止 `mv .env`**：会让镜像变量一起消失、容器没重建，200 来自旧容器（假绿灯）。`LLM_ENABLED=true` 无 key 崩是预期（显式优先） |

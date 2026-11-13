@@ -39,6 +39,14 @@ spring:
       password: ${REDIS_PASSWORD:}
 
   ai:
+    # T1.5：收敛 Spring AI 内部重试（默认 10 次指数退避，ASR 挂掉时单次尝试要 15+ 分钟才失败，
+    # 会吞掉外层 worker 的 RETRYING 状态机）。内部只试 2 次快速失败，重试语义交给 worker。
+    retry:
+      max-attempts: ${AI_RETRY_MAX_ATTEMPTS:2}
+      backoff:
+        initial-interval: ${AI_RETRY_BACKOFF_INITIAL_MS:2000}
+        multiplier: 2
+        max-interval: ${AI_RETRY_BACKOFF_MAX_MS:10000}
     openai:
       # 三档 AI：① 云 API（填了就用）② 本地 Ollama ③ 抽取式兜底
       # 这里只配第一档；二、三档在 AiConfig 里按开关决定
@@ -79,6 +87,14 @@ app:
   media:
     # 时长探测工具（容器内 apt 装的 ffmpeg 自带 ffprobe）；换路径只改环境变量（N11）
     ffprobe-bin: ${FFPROBE_BIN:ffprobe}
+    # worker 抽音轨用（容器内 ffmpeg 8.0.1）
+    ffmpeg-bin: ${FFMPEG_BIN:ffmpeg}
+
+  worker:
+    # Redis 任务队列键（T1.5：LPUSH 生产 / BLPOP 消费）
+    queue-key: ${TASK_QUEUE_KEY:meetingnotes:task-queue}
+    # BLPOP 阻塞超时，仅用于优雅停机响应；不是轮询间隔
+    poll-timeout-sec: ${WORKER_POLL_TIMEOUT_SEC:10}
 
   asr:
     max-concurrency: ${ASR_MAX_CONCURRENCY:2}
