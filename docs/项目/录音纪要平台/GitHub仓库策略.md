@@ -97,6 +97,25 @@ git log --format='%h  %an <%ae>' -1     # 确认生效（下一次提交才会�
 
 **禁止**：`push --force` 到 main、提交 `.env`/密钥、把大媒体文件提交进去（`.gitignore` 已配）。
 
+### 5.1 日常提交：一条命令（`tools/save.ps1`）
+
+已放好一个安全版提交脚本（默认只暂存**已跟踪**文件的改动，避免盲 `git add -A`）：
+
+```powershell
+cd D:\new\projects\meeting-notes
+
+# 改的是已有文件（最常见）
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\save.ps1 -Message "feat(asr): 加 OpenAI 兼容转写服务"
+
+# 有新文件（会先列出新文件，要你确认 y）
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\save.ps1 -Message "feat(api): 新增任务查询接口" -All
+
+# 只想提交到本地、先不推
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\save.ps1 -Message "wip" -NoPush
+```
+
+它做的事：显示 `git status` → 暂存 → 显示暂存清单 → commit → push（没有 remote 时只提示、不报错）。
+
 ---
 
 ## 6. 备选：Gitee 镜像（国内可访问 + 快）
