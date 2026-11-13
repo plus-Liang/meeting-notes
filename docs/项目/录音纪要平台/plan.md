@@ -1,0 +1,269 @@
+# 技术方案：录音纪要平台（MeetingNotes）
+
+**对应规格**: `spec.md`（Feature 001）
+**Created**: 2026-11-13
+**约束来源**: `.specify/memory/constitution.md` v1.0.0（原则 I 交付形态锁定 Web / II 不自研模型）
+
+> 本文件的每一层都标注**出处**。凡写不出出处的设计，一律视为可疑设计（宪法原则 V）。
+
+---
+
+## 1. 诚实前提
+
+**没有可整体照抄的「Java 全栈录音纪要」开源项目。** 检索结果（2026-11-13）：
+
+| 检索 | 结果 |
+|---|---|
+| `meeting minutes transcription java` | 0 个仓库 |
+| `spring boot whisper transcription` | 38 个，最高 9 星（玩具/demo） |
+| `speech to text spring boot` | 150 个，均 0–5 星 |
+
+→ 所以架构**不是抄来的，是用 3 个权威来源组装的**，每一层都有可核对的官方文档/仓库。
+
+---
+
+## 2. 三个权威底座
+
+| 组件 | ⭐ | 官方定位（原文） | 本项目用它做什么 |
+|---|---|---|---|
+| [spring-projects/spring-ai](https://github.com/spring-projects/spring-ai) | 9.6k | Spring 官方 AI 框架 | Java 侧全部 AI 调用：`ChatModel`、`TranscriptionModel` |
+| [modelscope/FunASR](https://github.com/modelscope/FunASR) | 21.0k | "工业级语音识别工具箱 · ASR · VAD · 标点 · 说话人 pipeline · **OpenAI 兼容服务**" | 整个转写层（独立容器，Java 只发 HTTP） |
+| [Zackriya-Solutions/meetily](https://github.com/Zackriya-Solutions/meetily) | 32.7k | "captures, transcribes, and summarizes meetings" | **产品功能分层参考**（不抄代码） |
+
+辅助（按需，不默认引入）：whisper.cpp(55.1k，自带 server，纯 CPU)、faster-whisper(26.7k)、whisperX(25.2k，要词级时间轴/说话人时)、silero-vad(10.6k)。
+
+---
+
+## 3. 分层架构
+
+```text
+浏览器（3 个页面 + Swagger UI）
+        │  HTTP / JWT
+        ▼
+┌─────────────────────────────────────────────┐
+│ Spring Boot 3 编排层                        │
+│ ① 接入  上传 / 直链 / 粘贴        （校验+配额）│
+│ ② 存储  MinIO（对象存储，S3 协议）            │
+│ ③ 任务  任务表(PG) + 状态机 + 队列(Redis)     │
+│ ④ 转写  适配器 → OpenAI 兼容 HTTP            │
+│ ⑤ 结构  摘要/待办：ChatModel + JSON Schema   │
+│ ⑥ 回流  术语表 / 说话人档案 / 模板偏好        │
+│ ⑦ 产出  Markdown 导出 / 只读链接 / 健康检查   │
+└─────────────────────────────────────────────┘
+        │                    │
+        ▼                    ▼
+   worker 容器           ASR 服务容器
+   (ffmpeg 抽音轨)     (FunASR OpenAI 兼容)
+        │
+        ▼
+  PostgreSQL · Redis · MinIO
+```
+
+### 为什么媒体处理必须放在容器里
+
+**本机约束（实测）**：`ffmpeg`/`ffprobe`/`sherpa-onnx` 等未签名二进制被 Windows
+**Smart App Control** 拦截（`Application Control policy blocked this file`）。
+→ **结论：抽音轨、解码、ASR 全部在容器内完成，宿主机不装媒体工具。**
+（这也顺带解决了"换个环境能不能跑"的问题。）
+
+---
+
+## 4. 技术栈（锁定）
+
+| 层 | 选型 | 出处 | 说明 |
+|---|---|---|---|
+| 语言/框架 | Java 17+、Spring Boot 3.x | Spring 官方 | 面试对口 |
+| AI 编排 | Spring AI（`ChatModel`、`TranscriptionModel`） | spring-ai 仓库 | 官方自动配置，含 `OpenAiAudioTranscriptionAutoConfiguration` |
+| 转写 | FunASR 的 **OpenAI 兼容 HTTP 服务** | FunASR 官方 | Java 不碰模型 |
+| 数据库 | PostgreSQL | — | 业务 + 任务表 |
+| 队列/状态 | Redis | — | 轻量队列 + 限流 + 缓存 |
+| 对象存储 | MinIO（S3 协议） | AWS S3 SDK 兼容 | 本地可跑、可换真 S3 |
+| 迁移 | Flyway | 官方 | 替代手工建表 |
+| 部署 | Docker Compose | — | v1 不上 K8s |
+| 前端 | 静态页（HTML + 少量 JS） | — | 上限见宪法原则 I |
+
+### 为什么 SQL 任务表 + Redis 队列，而不是只用消息队列
+
+任务需要**可查、可重试、可重投、可统计**。纯消息队列里的任务是不可观测的；
+用 PG 存状态 + Redis 做分发，才能同时满足 spec 的 N1/N2/N3/N8。
+
+---
+
+## 5. LLM / ASR 供应商：全部走 OpenAI 兼容协议
+
+这是**关键设计**：因为所有 Provider 都提供 OpenAI 兼容端点，**一套适配器可切全部**。
+
+| 供应商 | OpenAI 兼容 base-url（实现前用 curl 核对官网） | 文档 |
+|---|---|---|
+| 智谱 GLM | `https://open.bigmodel.cn/api/paas/v4` | [docs.bigmodel.cn](https://docs.bigmodel.cn/) |
+| DeepSeek | `https://api.deepseek.com`（或 `/v1`） | [api-docs.deepseek.com](https://api-docs.deepseek.com/) |
+| Kimi (Moonshot) | `https://api.moonshot.cn/v1` | [platform.kimi.com/docs](https://platform.kimi.com/docs/api/overview) |
+| 阿里百炼/通义 | `https://dashscope.aliyuncs.com/compatible-mode/v1` | [阿里云 Model Studio](https://www.alibabacloud.com/help/zh/model-studio/) |
+| 本地 Ollama | `http://ollama:11434/v1` | 官方兼容层 |
+| FunASR（ASR） | 容器内地址，形如 `http://asr:8000/v1` | FunASR 官方 OpenAI 兼容服务 |
+
+⚠️ **上表 URL 与模型名在写代码当天必须用 curl 实测一次**，不实测不写进配置默认值。
+
+**由此得到的能力**：用户填哪家 key 就用哪家；**不填 key 时走本地 ASR + 本地摘要模板**，
+满足 spec N15（零成本可跑）。
+
+---
+
+## 5.1 AI 能力三档降级（D-020，支撑 N15「零成本可跑」）
+
+**关键认知：ASR 不需要 key**（本地模型），真正需要 key 的只有「摘要/待办」这一步，
+而它对质量的要求远低于转写——所以可以降级。
+
+```text
+structuring(text):
+  ① 有 LLM_BASE_URL + LLM_API_KEY 且 OFFLINE_MODE=false   → 云 API   ai_tier=CLOUD
+  ② OLLAMA_ENABLED=true 且模型可用                          → 本地 LLM ai_tier=LOCAL
+  ③ 其它（默认）                                            → 抽取式   ai_tier=EXTRACTIVE
+```
+
+| 档 | 实现要点 | 产出 | 质量 |
+|---|---|---|---|
+| ① CLOUD | Spring AI `ChatModel` + JSON Schema 约束 | summary / todos / keywords | 最好 |
+| ② LOCAL | 同上，`base-url=http://ollama:11434/v1` | 同上 | 中（受模型大小限制） |
+| ③ EXTRACTIVE | 中文分句 + 关键句打分（TextRank/LexRank 类）+ 规则待办（时间词「明天/截止/X月X日」、责任词「负责/需要/要」、人称）+ 模板摘要（前 N 句 + 关键词） | **同样的字段结构** | 一般，但零依赖 |
+
+**工程要求**：
+- 三档输出必须同构（同一个 DTO），否则上层要写三套分支；
+- `ai_tier` 必须落库并在页面/API 返回（用户有权知道质量等级）；
+- ③ 档不追求"像 AI"，README 要写清差异（D-020 诚实标注）；
+- 中文分词库选型在 T3.4 定（候选：jieba-analysis / HanLP），**编码当天核对版本与许可**。
+
+### 5.1.1 摘要模板机制（US-12：一份管线覆盖五类场景）
+
+**核心判断**：新增用户 ≠ 新增管线，而是**新增一个输出模板**（D-025）。
+输入、转写、任务、存储、接入全部复用，只有"提示词 + 输出结构 + 展示方式"不同。
+
+| 模板 | 谁用 | 输出结构（除通用字段外） |
+|---|---|---|
+| `meeting`（默认） | 远程会议 / 公司会议 | 决议、待办（含负责人/截止）、风险、下步计划 |
+| `course` | 学生 / 网课 | 知识点、考点、例题、复习顺序、不懂的地方 |
+| `interview` | 记者 / 调研 / 访谈 | 逐字稿分段、要点、**可引用金句**、待跟进问题 |
+| `podcast` | 播客听众 / 创作者 | 章节（时间轴）、Show notes、提及的书/人名/链接 |
+| `shortvideo` | 短视频 / 信息囤积者（K 类） | 核心观点、论据、**可执行动作**、是否值得收藏 |
+
+**实现要点**：
+- 提示词放 `resources/prompts/{meeting,course,interview,podcast}.txt`（**不进代码**，可改）；
+- 每个模板有各自的 JSON 输出 schema（内部结构不同），但都映射到同一 `task_result` 表；
+- **自动推荐**：按文件名/容器元数据关键词（"会议/Meeting/Zoom/腾讯会议" → meeting；"课/讲/lecture" → course）——
+  规则简单、可解释，不做模型分类；
+- 模板名落库（`task_result.template`），结果页显示"本次使用：课程模板"，可重跑换模板；
+- 未知模板名 → 报错并回落 `meeting`，不静默。
+
+## 5.2 对外接入面的实现方式（D-019，细节见 `接入指南.md`）
+
+| 面 | 实现 | 关键点 |
+|---|---|---|
+| REST API | `TaskController`（`/api/v1/tasks`）+ `OncePerRequestFilter` 校验 `Authorization: Bearer` | 错误码固定枚举（`INVALID_MEDIA`/`URL_BLOCKED`/`QUOTA_EXCEEDED`…），接入方才能处理 |
+| OpenAPI | springdoc-openapi（`/v3/api-docs` + Swagger UI） | 几乎是白送的 P1 接入面，**别自己手写文档** |
+| Webhook | `webhook_delivery` 表 + `@Scheduled` 扫描到期记录 + HMAC-SHA256 签名 | 至少一次投递；`delivery_id` 做去重键；失败退避 1s/10s/60s；耗尽后可在页面手动重投（可观测） |
+| inbox 目录 | `@Scheduled` 轮询挂载目录（`/inbox:ro`），按 `content_hash` 增量去重 | NAS/Obsidian 用户的零门槛入口 |
+| 导出 | 直接由 `task_result` 渲染 Markdown/JSON，带 token 下载 | 不做复杂模板引擎 |
+
+**接入面验证不靠口头承诺**，靠三条证据（写进 `tasks.md` T4.6）：三条 curl 全流程、
+20 行接收端验签通过、`/v3/api-docs` 返回合法 JSON。
+
+---
+
+## 5.3 链接导入实现（L1 / L2 / BYOF，D-027R）
+
+```text
+POST /api/v1/link/preview {url}
+   ↓  SSRF 校验（复用 N7：拒私网/元数据地址、限重定向次数与超时）
+   ↓  普通 GET（不伪造 UA 签名、不带 cookie，仅公开访问）
+   ↓
+Content-Type = media/*  → L2 命中：直接落 storage，建 task（source_type=LINK）
+Content-Type = text/html → L1：解析 og:title / og:image / 公开时长 → 返回确认卡片
+                             ↓ 用户确认
+                         提示"导出后上传"（手机浏览器上传，D-029）
+```
+
+| 组成 | 实现要点 | 不做 |
+|---|---|---|
+| L1 元信息 | 只解析 HTML `<meta property="og:*">`；不执行 JS、不跟随需要 cookie 的分支 | 不渲染无头浏览器（重量级，且等于变相抓取） |
+| L2 直链探测 | 读 `Content-Type`；命中就复用现有 FETCH 管线；失败返回可读原因 | 不解析平台签名、不带登录态、不处理加密分片 |
+| BYOF | `MediaFetcher` 接口 + `FETCHER_CMD` 配置；`ProcessBuilder` 调用用户自装工具；未配置时返回 `FETCHER_UNAVAILABLE` | 仓库内**不包含**任何平台解析器；README 写明责任边界 |
+| 安全 | SSRF、重定向上限（≤5）、超时（≤10s）、响应体大小上限（≤2MB，只读 head/meta） | 不把整个页面读进内存 |
+
+## 6. 核心数据模型（初版，实现时以 Flyway 脚本为准）
+
+| 表 | 关键字段 | 说明 |
+|---|---|---|
+| `task` | `id`(任务号)、`user_id`、`source_type`(UPLOAD/FETCH/PASTE/RECORD)、`source_uri`、`content_hash`(唯一，幂等键)、`duration_sec`、`size_bytes`、`status`、`attempts`、`error_code`、`created_at`、`updated_at` | 一个任务一行；`content_hash` 保证 N1 |
+| `task_result` | `task_id`、`transcript`、`summary`、`todos`(jsonb)、`keywords`(jsonb)、`speaker_map`(jsonb) | 结果与任务分离，便于重跑 |
+| `glossary` | `user_id`、`wrong`、`right`、`hits`、`priority` | 闭环回流的落点（US-3） |
+| `speaker_profile` | `user_id`、`label`、`embedding`(可选)、`note` | 说话人档案（P2） |
+| `quota` | `user_id`、`date`、`used_minutes`、`used_tasks` | N8 |
+| `dead_letter` | `task_id`、`reason`、`payload`、`created_at` | N2 |
+
+**任务状态机**（唯一合法迁移，其它一律视为 bug）：
+
+```text
+PENDING ──claim──► RUNNING ──ok──► DONE
+   ▲                  │
+   │                  ├─fail(可重试)──► RETRYING ──► RUNNING
+   │                  └─fail(超限)────► DEAD
+   └───────────────── 手动重投 ◄────────┘
+```
+
+---
+
+## 7. 关键流程（端到端，也是那条自动化测试）
+
+```text
+1. POST /api/tasks  (multipart 或 url)
+2. 校验：magic number / 大小 / 时长 / 配额 / SSRF
+3. 算 content_hash → 命中已有结果则直接返回（N10）
+4. 存 MinIO（原始文件，按 taskId 分目录）
+5. 写 task(PENDING) → Redis 投递 taskId
+6. worker 取任务 → RUNNING → ffmpeg 抽音轨(16k mono wav)
+7. 调 ASR 服务（OpenAI 兼容）→ 文本
+8. 调 ChatModel（JSON Schema 约束）→ summary/todos/keywords
+9. 写 task_result → DONE
+10. 失败分支：attempts<max → RETRYING(退避)；否则 DEAD（N2）
+11. 用户改词 → 写 glossary（US-3 回流）
+12. 下次任务：glossary 注入转写提示
+```
+
+---
+
+## 8. 部署（`docker compose up` 的服务清单）
+
+| 服务 | 作用 | 备注 |
+|---|---|---|
+| `app` | Spring Boot（API + worker 同进程起步） | 上规模再拆 worker |
+| `asr` | FunASR OpenAI 兼容服务 | 可替换为云 ASR |
+| `postgres` | 数据库 | 挂卷持久化 |
+| `redis` | 队列/缓存 | 挂卷 |
+| `minio` | 对象存储 | 挂卷 |
+| `ollama`（可选） | 本地 LLM，保证零成本可跑 | 可不开，用模板摘要兜底 |
+
+**启动顺序**：`postgres/redis/minio` → `asr` → `app`（用 healthcheck 依赖，不是 `sleep`）。
+
+---
+
+## 9. 风险与降级
+
+| 风险 | 应对 |
+|---|---|
+| ASR 容器太重/起不来 | 降级通道：切云 ASR（`TranscriptionModel` 云配置），架构不变 |
+| 本机不能装未签名二进制 | 已在容器内完成媒体处理（见 §3） |
+| 长音频超时 | VAD 分段 + 分片处理 + 断点续跑 |
+| 并发打满 | ASR 并发数可配 + 队列排队 + 明确拒绝（N9） |
+| LLM 输出格式不稳 | JSON Schema 约束 + 解析失败重试 + 模板兜底 |
+| 版权/合规 | 定位自托管，用户自担内容；README 声明；不做公开托管 |
+
+---
+
+## 10. 参考与致谢（README 也要有一份）
+
+- Spring AI — Apache-2.0 — 官方 AI 编排框架
+- FunASR（ModelScope）— MIT/Apache-2.0（以仓库 LICENSE 为准）— 中文 ASR 服务
+- Meetily — 产品分层参考
+- whisper.cpp / faster-whisper / whisperX / silero-vad — 备选转写实现
+
+> 本项目**不 fork 上述任何项目**，只参考其架构与接口；自行实现编排与业务层。
