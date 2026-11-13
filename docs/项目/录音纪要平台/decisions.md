@@ -292,6 +292,19 @@
   这会直接破坏 N15「不填任何 key 也能跑通」这条硬需求（也是 T1.2 一键启动的前置条件）。
 - **已排除项**：给 `LLM_BASE_URL` 填一个假的默认地址（能启动但一调用就 5xx，更糟）；强制用户必须填 key（破坏零成本定位）。
 
+### D-036 LLM 开关的实现方式：EnvironmentPostProcessor + 官方 `spring.ai.model.*` 开关
+- **日期**：2026-11-13（T0.5 实现，审查确认）｜**决策人**：本人
+- **结论**：用自定义 `EnvironmentPostProcessor`（`LlmModelSwitchEnvironmentPostProcessor`，order = HIGHEST+20）
+  在配置数据加载后、自动配置条件求值前算出 `app.llm.enabled` 并写入属性源；关闭时设 `spring.ai.model.chat=none`
+  （以及共用空 base-url 的 embedding / image / moderation / audio.speech），`spring.ai.model.audio.transcription`
+  保持 openai（本地 ASR 需要）。显式 `LLM_ENABLED` 优先，否则按 `LLM_API_KEY + LLM_BASE_URL + LLM_MODEL` 三者齐全自动判断；
+  已显式设置的 `spring.ai.model.*` 不被覆盖（`putIfAbsent`）。
+- **依据**：`OpenAiChatAutoConfiguration` 的 `@ConditionalOnProperty(name="spring.ai.model.chat", havingValue="openai", matchIfMissing=true)`
+  （反编译确认）——这是 Spring AI 官方模型开关，比 exclude 自动配置类或填假 base-url 都干净。实测：无 key 时 `ChatModel` Bean 数 = 0、`/actuator/health` 200 UP。
+- **已排除项**：填假 base-url（能启动但调用即 5xx）；`@SpringBootApplication(exclude=...)`（与"有 key 时要启用"冲突）；
+  在 `application.yml` 写死 `spring.ai.model.chat: none`（有 key 时还得改配置，违反配置驱动）。
+- **备注**：`LLM_ENABLED=true` 但没填 key 时会启动失败（显式优先）——属预期，T1.x 补友好启动日志。
+
 ---
 
 ## 面试速查（由本文件派生，勿单独维护）

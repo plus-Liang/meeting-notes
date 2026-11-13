@@ -93,6 +93,12 @@ pip install -i https://pypi.tuna.tsinghua.edu.cn/simple <pkg>
 | pom 版本 | Boot 3.5.16 / Spring AI 1.1.8 / Java 21 / AWS SDK BOM 2.59.0（`s3` 必须由 BOM 管版本，否则 Maven 读不了 POM） |
 | 测试命令 | `$env:JAVA_HOME='E:\tools\jdk-21.0.2'; $env:ASR_BASE_URL='http://localhost:8001'; $env:ASR_SMOKE_AUDIO='D:\datasets\meeting-notes-samples\probe.wav'; mvn -q -Dtest=AsrSmokeTest test` |
 | 控制台编码 | Java `stdout.encoding=GBK`，用 **PowerShell** 跑验证（Bash 捕获中文会乱码） |
+| **云 LLM（DeepSeek，T0.5 实测）** | `LLM_BASE_URL=https://api.deepseek.com` + `LLM_CHAT_COMPLETIONS_PATH=/v1/chat/completions` + `LLM_MODEL=deepseek-flash`；`GET /models` 实测返回 `deepseek-flash` / `deepseek-v4-pro`；`deepseek-chat` 只是别名。**thinking 模型 `LLM_MAX_TOKENS` 太小会返回空 content**（默认 1024） |
+| **无 key 可启动（D-035/D-036）** | `LlmModelSwitchEnvironmentPostProcessor` 在启动早期算 `app.llm.enabled`；无 key 时 `spring.ai.model.chat=none`，`ChatModel` Bean 数为 0。**不要**用填假 base-url 或 exclude 自动配置类来实现 |
+| **换供应商要注意 path** | 智谱 `base-url=.../api/paas/v4` 要配 `LLM_CHAT_COMPLETIONS_PATH=/chat/completions`（否则拼出 `/v4/v1/...`）；OpenAI/DeepSeek 用默认 `/v1/chat/completions` |
+| **Flyway 保留字** | `V1__init.sql` 里 `glossary."right"` 必须带双引号（`right` 是 PG 保留字）。真实 PG16 已验证。**将来写 JPA 实体要 `@Column(name = "\"right\"")`**，或趁早改名 `right_text` |
+| **H2 测试绕过 Flyway** | `NoKeyStartupTest` 用 H2 + `flyway.enabled=false`，**SQL 改动它验不到** → 改迁移脚本必须手工在真实 PG16 跑一遍 |
+| 本机环境坑 | ①宿主会注入 `SERVER__PORT`（撞端口）→ 用 `--server.port=18080` 覆盖；②curl 本机端口要 `--noproxy "*"`；③`docker run -v D:\...:/mig:ro` 偶发容器卡在 `Created` 起不来 → 改用 `docker cp` |
 
 ## 5. 每完成一个任务的回报格式（照这个贴给人类）
 

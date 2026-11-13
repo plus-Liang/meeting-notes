@@ -28,15 +28,18 @@
 
 ---
 
-## 阶段 0：底座验证（约 8h，**不通过不进第 1 周**）
+## 阶段 0：底座验证（约 8h，**不通过不进第 1 周**）—— ✅ **全部完成（2026-11-13）**
 
-| ID | 任务 | DoD | 验证命令 / 期望 |
+| ID | 任务 | DoD | 结果 / 证据 |
 |---|---|---|---|
-| **T0.1** | 定 ASR 镜像并起 FunASR OpenAI 兼容服务，写进 `.env` | 容器 healthy，接口可访问 | `docker compose up -d asr` → `curl.exe -s localhost:8000/v1/models` 返回 200 |
-| **T0.2** | curl 转写自己的真实 mp3 | 返回中文、有标点 | `curl.exe -s -X POST .../v1/audio/transcriptions -F "file=@你的.mp3" -F "model=funasr"` → `text` 非空 |
-| **T0.3** | 记实测 RTF 与资源占用 | 写入 `state.md` | 5 分钟音频耗时；容器内存 |
-| **T0.4** | Spring AI 最小转写跑通 | ✅ **已完成**（`25528b9`，审查报告 `review/2026-11-13-T0.4验收.md`） | 独立复跑 exit 0；surefire `Tests run: 1, Failures: 0` |
-| **T0.5** | 云 LLM 通道跑通（智谱优先）**+ 无 key 可启动** | 拿到摘要；base-url/模型名 curl 实测；**清空 key 后应用仍能启动**（D-035） | 填入 `.env` 调用一次打印摘要；清空 `LLM_BASE_URL` 重启 → 启动成功不崩；实测值记 D-007 |
+| **T0.1** | 起 ASR 服务（**改为自建容器**，D-008R） | 容器 healthy，接口可访问 | ✅ `infra/asr/`，`docker compose up -d asr` → healthy |
+| **T0.2** | curl 转写真实音频 | 返回中文、有标点 | ✅ `POST /v1/audio/transcriptions` → 简体带标点 |
+| **T0.3** | 记实测 RTF 与资源占用 | 写入 `state.md` | ✅ RTF **0.105 / 0.113**（8.44h ≈ 57min），见 `T0.1-ASR验证结果.md` |
+| **T0.4** | Spring AI 最小转写跑通 | 独立复跑 exit 0 | ✅ `25528b9` + `review/2026-11-13-T0.4验收.md` |
+| **T0.5** | 云 LLM 通道 + **无 key 可启动** | 真实摘要 + 清空 key 仍能启动 | ✅ `483d6f2` + `review/2026-11-13-T0.5验收.md`（DeepSeek 实测 3 条摘要；无 key 时 ChatModel=0、health UP） |
+
+**下一步**：第 1 周 T1.1–T1.8（骨架收尾 → compose 一键起 → Flyway → 上传接口 → worker → 页面 → 配置自检 → 单测）。
+**遗留（T1.3 前处理）**：`glossary."right"` 建议改名 `right_text`（见 T0.5 审查报告 P2-1）。
 
 **失败预案**：①FunASR 起不来 → whisper.cpp server ②仍不行 → 云 ASR ③全不行 → 先做 PASTE 入口不阻塞。
 
