@@ -55,7 +55,7 @@
 | **T1.3** | Flyway `V1__init.sql` 生效（7 张表） | 迁移可重复执行 | ✅ 真实 PG16.16：8 表（7 业务 + `flyway_schema_history`）；重启 → `Schema "public" is up to date`（幂等） |
 | **T1.4** | 上传接口：magic number / 大小 / 时长 / **格式**校验 → MinIO → task(PENDING) | 坏文件被拒、好文件入 PENDING | ✅ `3ce9386` + `review/2026-11-13-T1.4验收.md`（5 场景真机：400/201/幂等/413/400/429；hash 与 ffprobe 时长我独立复算一致）。**遗留 P1/P2 在 T1.5 前修：snake_case 契约、幂等状态失真、user_id 过滤（D-040/D-041）** |
 | **T1.5** | worker 消费：抽音轨 → ASR → 写结果 → DONE | 5 分钟 mp3 端到端出全文 | ✅ `7c90e9a`（契约）+ `48b4b74`（worker）+ `review/2026-11-13-T1.5验收.md`。真机：397s 中文音频 → `DONE` **31s**、transcript 1853 字；失败路径 **9s** 走完 `RUNNING→RETRYING×2→DEAD`（attempts=3、`ASR_ERROR`、dead_letter 有原因）；`GET /tasks/999999` → `404 TASK_NOT_FOUND`；重传已 DONE 文件 → `reused:true` + 真实状态；`mvn test` **14/14 绿**（需 `ASR_BASE_URL=http://localhost:8001`）。**遗留**：空文本语义改 DONE（D-048，T1.6 前置）／DEAD 重传重投（D-049，T2.1）／内部重试已收敛（D-046） |
-| **T1.6** | 三页面（提交/列表/详情）静态 HTML，结构按 spec §5 | 可用、无 JS 报错 | 手点全流程 + 截图。**前置**：D-048 空文本改 DONE（worker ~5 行 + 1 单测）；页面要按 `接入指南.md` snake_case 字段渲染、404/DEAD/空 transcript 三种状态都要有可读文案 |
+| **T1.6** | 三页面（提交/列表/详情）静态 HTML，结构按 spec §5 | 可用、无 JS 报错 | ✅ `264def4` + `review/2026-11-14-T1.6验收.md`。真机：`GET /` **200/3399B**；三页共用 `style.css`、**0 处硬编码地址**；6s 正弦波 → `DONE` + `transcript:""`（D-048）；停 ASR → `DEAD` + `error_code=ASR_ERROR`（S-3）；`mvn test` **17/17 绿**（新增 `TranscriptionWorkerTest` 3 例）。越界已修：手改生成副本（接入指南）已移植权威版；allowlist 误登记 TranscriptionWorker 已删除 |
 | **T1.7** | 配置外置基线 | `配置清单.md` §2 三条命令无异常 | 见该文档 §2 |
 | **T1.8** | 上传校验单测 | `mvn test` 全绿 | BUILD SUCCESS + 用例数入 `state.md` |
 
