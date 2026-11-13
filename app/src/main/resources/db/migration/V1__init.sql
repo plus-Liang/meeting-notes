@@ -38,13 +38,13 @@ CREATE TABLE task_result (
 CREATE TABLE glossary (
     id         BIGSERIAL PRIMARY KEY,
     user_id    BIGINT       NOT NULL DEFAULT 1,
-    wrong      VARCHAR(128) NOT NULL,
-    -- right 是 PostgreSQL 保留字（RIGHT JOIN），必须加双引号；列名本身不变（plan.md §6）
-    "right"    VARCHAR(128) NOT NULL,
+    wrong_text VARCHAR(128) NOT NULL,
+    -- D-037：原列名 wrong/"right"，因 right 是 PostgreSQL 保留字，统一改为 *_text
+    right_text VARCHAR(128) NOT NULL,
     hits       INT          NOT NULL DEFAULT 1,
     priority   INT          NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ  NOT NULL DEFAULT now(),
-    UNIQUE (user_id, wrong)
+    UNIQUE (user_id, wrong_text)
 );
 
 CREATE TABLE speaker_profile (
