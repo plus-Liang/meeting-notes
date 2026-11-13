@@ -12,7 +12,7 @@ cd D:\new
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\sync-docs-to-code.ps1
 ```
 
-作用：把 18 份项目文档同步进代码仓 `D:\new\projects\meeting-notes\docs\`，
+作用：把 **项目文档 24 份 + 验收报告 5 份**同步进代码仓 `D:\new\projects\meeting-notes\docs\`（含 `AGENT.md` 之外的 `tools/`），
 这样 WorkBuddy 打开代码仓就能读到需求（它通常只能看到自己的工作目录）。
 
 **然后**：把 **`D:\new\projects\meeting-notes`** 设为 WorkBuddy 的工作目录（打开这个文件夹）。
@@ -67,6 +67,20 @@ T0.2 通过。现在只做 T0.3（实测 RTF），跑 3 个不同长度文件，
 **核心节奏：一次一张卡。** 任务卡全在 `docs/项目/录音纪要平台/tasks-starter.md`（第一批 10 张），
 后面的在 `tasks.md`（总共 50 个任务，带 DoD 与验证命令）。
 
+### 2.1 当前这一轮（T1.6）直接粘这个
+
+```text
+T1.5 已验收通过（报告 docs/协作/review/2026-11-13-T1.5验收.md）。现在只做 T1.6（三页面 + D-048 空文本语义），
+按 docs/项目/录音纪要平台/tasks-starter.md 的【T1.6】段执行，先写规划四问+范围声明再动手。注意四条：
+1) 前置先改 D-048：ASR 返回空文本 → DONE + transcript 空串（不再抛异常），必须带 1 条单测；
+2) 三页只用静态 HTML + 原生 JS，不引前端框架/构建链；字段一律 snake_case（D-041）；
+3) 允许给 GET /api/v1/tasks/{id} 追加 error_code（nullable，只增不改），改完同步 接入指南.md 一行；
+   除此之外不动 /api/v1 已有字段、yml 键、compose、Flyway。
+4) 页面不许硬编码 localhost:8080（用相对路径）；DEAD/RETRYING/空 transcript/404 四种状态都要有可读文案。
+做完贴：改了什么（git diff --stat）/ 5 条验收的实际输出（含反例）/ mvn -q test 用例数 /
+check-maintainability.ps1 的 exit code / 测试三问（还有哪些没验证不许留空）。
+```
+
 ---
 
 ## 3. 你只需要做三种"验收动作"（不需要懂代码）
@@ -118,8 +132,8 @@ T0.2 通过。现在只做 T0.3（实测 RTF），跑 3 个不同长度文件，
 | 位置 | 内容 |
 |---|---|
 | `D:\new\projects\meeting-notes\AGENT.md` | **写代码 AI 的入口**：必读顺序 + 十条硬约束 + 环境 + 回报格式 + 禁止清单 |
-| `D:\new\projects\meeting-notes\docs\` | 18 份项目文档副本（同步脚本生成，勿手改） |
-| `docs\项目\录音纪要平台\tasks-starter.md` | **第一批 10 张任务卡**：T0.1–T0.5 + T1.1–T1.5，每张含步骤/验证命令/通过标准/失败预案 |
+| `D:\new\projects\meeting-notes\docs\` | 项目文档 24 份 + 5 份验收报告副本（同步脚本生成，勿手改） |
+| `docs\项目\录音纪要平台\tasks-starter.md` | **任务卡 T0.1–T0.5 + T1.1–T1.6（11 张）**，每张含步骤/验证命令/通过标准/失败预案；最新一张是 **T1.6 三页面** |
 | `docs\项目\录音纪要平台\tasks.md` | 全部 50 个任务 + DoD + 依赖顺序 |
 | `docs\项目\录音纪要平台\环境搭建说明.md` | 本机环境实测 + Docker/Python 源怎么配 |
 | `tools\sync-docs-to-code.ps1` | 文档改了之后重新同步（一条命令） |
