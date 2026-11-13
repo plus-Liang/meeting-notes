@@ -15,9 +15,10 @@
 
 ## 进度
 
-- 17 份项目文档 ✅（新增 `00-先看这个`、`环境搭建说明`）
-- 代码仓 `D:\new\projects\meeting-notes` ✅（3 commits，工作区干净）
-- T0.1 定 ASR 镜像 ❌（首选镜像被 daocloud 白名单拒，方案待定）
+- **GitHub 仓库已建并推送**：`https://github.com/plus-Liang/meeting-notes`（main 分支已跟踪，10 个 commit）
+- 20 份项目文档 ✅（新增 `00-先看这个`、`环境搭建说明`、`交付给WorkBuddy`、`GitHub仓库策略`）
+- 代码仓 `D:\new\projects\meeting-notes` ✅（含 `AGENT.md` + `tools\save.ps1` + 社区文件）
+- T0.1 定 ASR 镜像 ❌（首选镜像被 daocloud 白名单拒，改走自建容器）
 - T0.2–T0.5 ❌ 未开始
 
 ## 待办（按顺序）

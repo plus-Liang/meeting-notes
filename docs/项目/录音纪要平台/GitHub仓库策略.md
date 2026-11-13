@@ -1,6 +1,9 @@
 # GitHub 仓库策略（要不要建、什么时候公开）
 
 > 结论：**要建，现在就建，但先建 Private，等"零成本可跑通 + 有 demo"再转 Public。**
+>
+> **✅ 已执行（2026-11-13）**：仓库已创建并推送成功 →
+> `https://github.com/plus-Liang/meeting-notes`（`origin` 已配，`main` 已跟踪，首次 push 成功）
 
 ---
 
