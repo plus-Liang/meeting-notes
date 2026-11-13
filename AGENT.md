@@ -104,6 +104,21 @@ pip install -i https://pypi.tuna.tsinghua.edu.cn/simple <pkg>
 | **无 key 验证（D-039）** | 三条件：`LLM_ENABLED` 留空 + 三个 `LLM_*` 全空 + **独立容器探针**。**禁止 `mv .env`**：会让镜像变量一起消失、容器没重建，200 来自旧容器（假绿灯）。`LLM_ENABLED=true` 无 key 崩是预期（显式优先） |
 | **连库** | `docker compose exec -T postgres psql -U mn -d meetingnotes`（`postgres` 角色不存在）；`down -v` 后 `up -d` 全 5 个服务 healthy 才算 T1.2 通过 |
 
+## 4.2 可维护性（宪法原则 VII，NON-NEGOTIABLE）
+
+细则见 `docs/项目/录音纪要平台/可维护性要求.md`（M-1~M-10）。**每个 commit 前必跑**：
+
+```powershell
+cd D:\new; powershell -NoProfile -ExecutionPolicy Bypass -File tools\check-maintainability.ps1
+# 期望：结论：通过 ✅ / exit=0；不通过先修（已知技术债登记在 tools\maintainability-allowlist.txt，只减不增）
+```
+
+四条**违反即阻塞**：M-1 配置全外置（路径/端口/key/阈值不许写进代码）· M-2 分层单向（web → task/upload/worker → config，
+共享契约放 `common/`）· M-6 错误处理统一（`ApiException` + 固定错误码、禁空 catch、外部调用有超时）·
+M-8 测试可维护（新公共逻辑必须有测试、禁 `@Disabled`）。其余 M-3/4/5/7/9/10 见细则。
+
+**现存技术债 4 条已登记**（内层 import `web.*` 的 ApiException/DTO），T2.x 迁 `common/` 后清零，届时同步删 allowlist。
+
 ## 5. 每完成一个任务的回报格式（照这个贴给人类）
 
 > 可复制的提示词模板（需求澄清 / 规划四问 / 扩范围先确认 / 测试三问 / 证据链报错）在
@@ -154,3 +169,6 @@ exit code：<0/非0>
 - ❌ 提交 `.env`、密钥、大文件（`.gitignore` 已配，别绕过）
 - ❌ 一次改多个任务（一个任务一个 commit，`<type>(<scope>): <做了什么>`）
 - ❌ 手改 `docs/` 副本（它是从 `D:\new` 同步来的生成副本）
+- ❌ **违反可维护性硬要求**：写死路径/端口/阈值、内层反向 import `web.*`、空 `catch`、`System.out`、
+  无测试的新公共逻辑、凭空新增允许清单条目（宪法 VII；`tools\check-maintainability.ps1` 会拦）
+- ❌ 未记 `decisions.md` 就新增依赖/改技术栈/改对外契约

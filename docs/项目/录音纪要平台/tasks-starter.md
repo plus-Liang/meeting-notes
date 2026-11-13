@@ -12,6 +12,8 @@
 【范围声明】本次只改 <目录/文件>；不动 <明确列表>。要动公共组件（application.yml 配置键 / docker-compose / Flyway 迁移 /
             /api/v1 响应字段 / AGENT.md 规则）或扩大范围 → 先写"原因+影响+替代方案"等人确认。
 【验收】反例必须进：坏输入要被拒（例：exe 改名 .mp3 → 400 INVALID_MEDIA）
+【可维护性】commit 前必跑 `powershell -File tools\check-maintainability.ps1` → 必须 exit 0
+            （宪法 VII；细则 M-1~M-10 见 `可维护性要求.md`；允许清单只减不增）
 【回报·测试三问】检查了哪些场景 ｜ 实际运行了哪些测试（命令+输出+exit code）｜ 还有哪些没验证（不许留空）
 ```
 

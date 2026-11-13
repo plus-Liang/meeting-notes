@@ -1,0 +1,12 @@
+# 可维护性自检允许清单（tools\check-maintainability.ps1 读取）
+# 格式：相对路径|正则（正则匹配该违规行文本，或该检查项的关键字）
+# 纪律：每加一条都必须在 docs/协作/review/ 的报告里写明"为什么现在不修 + 什么时候修"；
+#       只允许登记已知技术债，不许用它把新问题塞进去。清理后必须删掉对应行。
+# ---- 当前已登记的技术债（2026-11-13，T1.5 前）----
+# M5 分层反向依赖：web.ApiException 与对外 DTO 目前被内层直接引用（共享契约还没迁到 common/）。
+#   计划：T2.x 把 ApiException / TaskCreatedResponse / TaskStatusResponse / ErrorResponse 迁到
+#   com.meetingnotes.common，迁完删掉下面 4 条，并把 check-maintainability.ps1 的 M5 恢复为"零容忍"。
+app/src/main/java/com/meetingnotes/task/TaskService.java|import com\.meetingnotes\.web\.
+app/src/main/java/com/meetingnotes/task/QuotaService.java|import com\.meetingnotes\.web\.
+app/src/main/java/com/meetingnotes/upload/AudioDurationProbe.java|import com\.meetingnotes\.web\.
+app/src/main/java/com/meetingnotes/worker/TranscriptionWorker.java|import com\.meetingnotes\.web\.
