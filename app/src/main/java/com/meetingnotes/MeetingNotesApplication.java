@@ -8,7 +8,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
  * MeetingNotes 应用入口。
  *
  * <p>定位：自托管「录音/网课 → 结构化纪要 + 待办」Web 应用。
- * <p>权威文档：D:\new\docs\项目\录音纪要平台\
+ * <p>权威文档：仓库 docs/项目/录音纪要平台/（生成副本）；源文档在工作区 docs/ 目录（见 AGENT.md §1）
  * <p>硬约束：
  * <ul>
  *   <li>所有配置走环境变量，禁止硬编码路径/端口/key/并发数/模型名（spec N11 / D-021）</li>

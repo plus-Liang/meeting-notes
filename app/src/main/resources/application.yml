@@ -8,6 +8,12 @@ spring:
   application:
     name: meeting-notes
 
+  servlet:
+    multipart:
+      # 上传大小硬闸放在 servlet 层（超限直接 413，磁盘不会被灌满），流内还有第二道复核
+      max-file-size: ${TASK_MAX_SIZE_BYTES:209715200}
+      max-request-size: ${TASK_MAX_SIZE_BYTES:209715200}
+
   datasource:
     url: ${DB_URL:jdbc:postgresql://postgres:5432/meetingnotes}
     username: ${DB_USER:mn}
@@ -60,9 +66,14 @@ app:
   offline-mode: ${OFFLINE_MODE:true}
 
   task:
-    max-duration-sec: ${TASK_MAX_DURATION_SEC:1800}
+    # D-028：单任务上限 30 → 60 分钟（真实库 45% 文件超 30 分钟），可配至 120
+    max-duration-sec: ${TASK_MAX_DURATION_SEC:3600}
     max-size-bytes: ${TASK_MAX_SIZE_BYTES:209715200}
     max-retries: ${TASK_MAX_RETRIES:3}
+
+  media:
+    # 时长探测工具（容器内 apt 装的 ffmpeg 自带 ffprobe）；换路径只改环境变量（N11）
+    ffprobe-bin: ${FFPROBE_BIN:ffprobe}
 
   asr:
     max-concurrency: ${ASR_MAX_CONCURRENCY:2}
