@@ -34,8 +34,13 @@ spring:
       base-url: ${LLM_BASE_URL:}
       api-key: ${LLM_API_KEY:not-needed}
       chat:
+        # Spring AI 1.1.x 默认 /v1/chat/completions；换供应商时用环境变量覆盖（智谱需 /chat/completions）。
+        # 不要在 base-url 里手写 /v1，否则会拼出 /v1/v1/chat/completions（同 D-034 的坑）。
+        completions-path: ${LLM_CHAT_COMPLETIONS_PATH:/v1/chat/completions}
         options:
           model: ${LLM_MODEL:}
+          # deepseek-flash 默认开启 thinking，max-tokens 过小会让 content 为空
+          max-tokens: ${LLM_MAX_TOKENS:1024}
       audio:
         transcription:
           # 契约端点：http://asr:8000/v1/audio/transcriptions
@@ -65,6 +70,9 @@ app:
     max-segment-sec: ${ASR_MAX_SEGMENT_SEC:120}
 
   llm:
+    # D-035：留空 = 由 LlmModelSwitchEnvironmentPostProcessor 按是否填了 key 自动判断；
+    # 显式 true/false 可强制开关。关闭时 spring.ai.model.chat=none，chat 自动配置整体跳过。
+    enabled: ${LLM_ENABLED:}
     # 第三档兜底开关（D-020）
     fallback-extractive: ${EXTRACTIVE_FALLBACK_ENABLED:true}
     # 第二档：本地 Ollama（可选）

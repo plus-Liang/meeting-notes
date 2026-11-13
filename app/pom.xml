@@ -115,6 +115,12 @@
       <artifactId>spring-boot-starter-test</artifactId>
       <scope>test</scope>
     </dependency>
+    <!-- 仅测试用：NoKeyStartupTest 不依赖外部 PostgreSQL，验证空 key 也能拉起完整上下文 -->
+    <dependency>
+      <groupId>com.h2database</groupId>
+      <artifactId>h2</artifactId>
+      <scope>test</scope>
+    </dependency>
   </dependencies>
 
   <build>

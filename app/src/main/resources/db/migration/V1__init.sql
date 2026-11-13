@@ -39,7 +39,8 @@ CREATE TABLE glossary (
     id         BIGSERIAL PRIMARY KEY,
     user_id    BIGINT       NOT NULL DEFAULT 1,
     wrong      VARCHAR(128) NOT NULL,
-    right      VARCHAR(128) NOT NULL,
+    -- right 是 PostgreSQL 保留字（RIGHT JOIN），必须加双引号；列名本身不变（plan.md §6）
+    "right"    VARCHAR(128) NOT NULL,
     hits       INT          NOT NULL DEFAULT 1,
     priority   INT          NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ  NOT NULL DEFAULT now(),

@@ -49,6 +49,22 @@
 - **依据**：这些平台均提供 OpenAI 兼容模式，一套适配器覆盖全部。
 - **已排除项**：为每家写专属 SDK（维护成本爆炸）；绑死单一供应商（用户无法自选）。
 - **备注**：各家的确切 base-url 与模型名在编码当天必须 curl 实测，未实测不写默认值。
+  - **T0.5 实测（2026-11-13，采用 DeepSeek）**：`base-url=https://api.deepseek.com`，
+    `completions-path=/v1/chat/completions` → 实际请求 `POST https://api.deepseek.com/v1/chat/completions`；
+    模型名 `deepseek-flash`。依据：官方文档 `api-docs.deepseek.com` 的 base_url / curl 示例，
+    加本机带 key 实测 `GET https://api.deepseek.com/models` → `200`，返回模型 ID
+    `deepseek-flash` / `deepseek-v4-pro`；`POST /chat/completions` 与 `/v1/chat/completions` 均 `200`。
+    `deepseek-chat` 是兼容别名（响应里 `"model":"deepseek-flash"`），不作默认模型名。
+    `mvn -q -Dtest=LlmSmokeTest test` 真实云端返回 3 条中文摘要，exit 0。
+  - **路径坑（同 D-034）**：`javap` 核对 `OpenAiChatProperties.completionsPath` 默认
+    `/v1/chat/completions`，Spring AI 把它**追加**到 base-url 后面，所以 base-url 不能自带 `/v1`。
+    换供应商用 `LLM_CHAT_COMPLETIONS_PATH` 覆盖，不要改 base-url。
+  - **智谱候选值（文档已核对、本机无 key 未做带 key 实测）**：
+    `https://open.bigmodel.cn/api/paas/v4` + `/chat/completions` + `glm-4.7-flash`（官方免费模型，
+    文档 curl 示例 `POST .../chat/completions`）。无 key 时 curl 返回 `401 {"code":"1001"}`
+    只证明端点存在，**不是跑通证据**；若换回智谱必须把 `LLM_CHAT_COMPLETIONS_PATH` 改成 `/chat/completions`。
+  - `deepseek-flash` 默认开启 thinking：若 `LLM_MAX_TOKENS` 过小，推理会吃光额度导致
+    `choices[0].message.content` 为空，故默认给 1024。
 
 ### D-008 默认中文 ASR 选 FunASR（不是 whisper 系）
 - **日期**：2026-11-13｜**决策人**：本人
