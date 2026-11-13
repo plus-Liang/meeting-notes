@@ -251,6 +251,15 @@
 - **已排除项**：不建仓只本地开发（无公开地址、无备份）；直接 Public 推骨架（半成品会留差印象、且 commit 邮箱未配好）；只建 Gitee（面试官/开源生态以 GitHub 为主）。
 - **转公开判据（6 条）**：零成本跑通 / README 首屏有定位+GIF+三步启动+"你不该用的场景" / LICENSE+CONTRIBUTING+模板齐全 / 无密钥泄露 / 作者邮箱已配 noreply / `v0.1.0` 已 tag。详见 `GitHub仓库策略.md`。
 
+### D-008R 修订 D-008：默认 ASR 改为「自建 faster-whisper small 容器」（原定 FunASR）
+- **日期**：2026-11-13（实测后修订，supersedes D-008 的"默认 FunASR"）｜**决策人**：本人
+- **结论**：默认 ASR = `infra/asr/` 自建容器（`python:3.12-slim` + `av==13.1.0` + `faster-whisper==1.2.1` + 本机模型 `small`，CPU int8）。
+- **依据**（实测，见 `T0.1-ASR验证结果.md`）：①Docker Hub 不通、公共加速源白名单拒绝现成镜像 → 外部镜像不可得；
+  ②本机已有 `small` 模型完整缓存（461MB）与 `python:3.12-slim` 镜像 → 自建零下载；
+  ③实测 **RTF 0.105 / 0.113**（8.44h ≈ 57 分钟），CPU 完全可接受；④接口为 OpenAI 兼容，Java 侧与 FunASR 等价。
+- **已排除项**：等 FunASR 镜像（不可得）；上云 ASR（破坏 N15 零成本 + N16 离线）；用 av 19（与 faster-whisper 1.2.1 不兼容）。
+- **备注**：①中文必须加 `initial_prompt`（否则可能繁体）；②`small` 专有名词准确率一般（"文件夹→文件家"），后续可换 `medium`/`large-v3`（需补全本机模型缓存，代码不用改）。
+
 ---
 
 ## 面试速查（由本文件派生，勿单独维护）

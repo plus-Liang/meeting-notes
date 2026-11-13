@@ -1,0 +1,8 @@
+# 版本已实测锁定（2026-11-13，CPU int8）
+# av 必须固定 13.x：av 19 会让 faster-whisper 1.2.1 抛
+#   TypeError: open() got an unexpected keyword argument 'metadata_errors'
+av==13.1.0
+faster-whisper==1.2.1
+fastapi==0.115.6
+uvicorn==0.34.0
+python-multipart==0.0.20

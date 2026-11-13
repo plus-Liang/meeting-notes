@@ -1,24 +1,27 @@
 # MeetingNotes —— 一键启动
 # 用法：Copy-Item .env.example .env; docker compose up -d
-# 注意：不要用 sleep 等依赖，一律 healthcheck + condition: service_healthy
+# 注意：
+#  1) 不用 sleep 等依赖，一律 healthcheck + condition: service_healthy
+#  2) 所有 ${VAR} 都有默认值，所以没有 .env 也能 `docker compose config` 通过
+#  3) 国内网络：在 .env 里设 REGISTRY_PREFIX=docker.m.daocloud.io/ 再拉第三方镜像
 
 services:
   postgres:
-    image: postgres:16-alpine
+    image: ${REGISTRY_PREFIX:-}library/postgres:16-alpine
     environment:
-      POSTGRES_DB: ${POSTGRES_DB}
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-meetingnotes}
+      POSTGRES_USER: ${POSTGRES_USER:-mn}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-mn} -d ${POSTGRES_DB:-meetingnotes}"]
       interval: 5s
       timeout: 3s
       retries: 20
 
   redis:
-    image: redis:7-alpine
+    image: ${REGISTRY_PREFIX:-}library/redis:7-alpine
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - redisdata:/data
@@ -28,53 +31,71 @@ services:
       retries: 20
 
   minio:
-    image: minio/minio:latest
+    image: ${REGISTRY_PREFIX:-}minio/minio:latest
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: ${S3_ACCESS_KEY}
-      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY}
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-minioadmin}
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "${MINIO_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
     volumes:
       - miniodata:/data
     healthcheck:
-      test: ["CMD-SHELL", "mc ready local || exit 1"]
+      # minio 镜像自带 curl；若你的镜像没有，改成 mc ready local
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9000/minio/health/live || exit 1"]
       interval: 5s
+      timeout: 3s
       retries: 30
 
-  # ASR 服务：FunASR 的 OpenAI 兼容接口。
-  # ⚠️ 镜像由 T0.1 验证后填入 .env 的 ASR_IMAGE（先不要凭猜写死）
+  # ASR 服务：自建 OpenAI 兼容服务（不用远程镜像 —— Hub 不通 / 加速源白名单拒绝）
+  # 模型不进镜像：宿主机目录挂载到 /models（只读）；容器内固定监听 8000
   asr:
-    image: ${ASR_IMAGE}
-    profiles: ["default"]
+    build:
+      context: ./infra/asr
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}
+    environment:
+      ASR_MODEL_NAME: ${ASR_MODEL_NAME:-small}
+      ASR_LANGUAGE: ${ASR_LANGUAGE:-zh}
+      ASR_COMPUTE_TYPE: ${ASR_COMPUTE_TYPE:-int8}
+      ASR_BEAM_SIZE: ${ASR_BEAM_SIZE:-1}
+      HF_HOME: /models
+      HF_HUB_OFFLINE: "1"
+    volumes:
+      - ${ASR_MODEL_HOST_DIR:-D:/huggingface}:/models:ro
     ports:
-      - "${ASR_PORT}:${ASR_PORT}"
+      - "${ASR_PORT:-8000}:8000"
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:${ASR_PORT}/v1/models >/dev/null || exit 1"]
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health').status==200 else 1)\""]
       interval: 10s
+      timeout: 5s
       retries: 60
-      start_period: 60s
+      start_period: 180s
+    restart: unless-stopped
 
   # 可选：本地 LLM（第二档降级）。不启用就不加 --profile local-llm
   ollama:
-    image: ollama/ollama:latest
+    image: ${REGISTRY_PREFIX:-}ollama/ollama:latest
     profiles: ["local-llm"]
     volumes:
       - ollamadata:/root/.ollama
     ports:
-      - "11434:11434"
+      - "${OLLAMA_PORT:-11434}:11434"
 
   app:
     build:
       context: ./app
     env_file:
-      - .env
+      # 没有 .env 也能起（全部走默认值）
+      - path: .env
+        required: false
     environment:
       # 容器内必须用服务名，不用 localhost
-      DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}
+      DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-meetingnotes}
       REDIS_HOST: redis
       S3_ENDPOINT: http://minio:9000
+      ASR_BASE_URL: http://asr:8000/v1
     depends_on:
       postgres:
         condition: service_healthy
@@ -82,11 +103,13 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+      asr:
+        condition: service_healthy
     ports:
-      - "${APP_PORT}:8080"
+      - "${APP_PORT:-8080}:8080"
     volumes:
       # P2：inbox 目录监控（宿主目录放文件即处理）
-      - ${INBOX_HOST_DIR}:/inbox:ro
+      - ${INBOX_HOST_DIR:-./inbox}:/inbox:ro
 
 volumes:
   pgdata:
