@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>提交任务 · 录音纪要平台</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Ctext y=%2713%27 font-size=%2713%27%3E%F0%9F%8E%99%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<nav>
+  <span class="brand">录音纪要平台</span>
+  <a href="index.html">提交</a>
+  <a href="tasks.html">任务列表</a>
+</nav>
+<main>
+  <div class="card">
+    <h1>提交转写任务</h1>
+    <p class="hint">
+      支持常见音/视频格式（按文件头识别，不看扩展名）。
+      单文件上限 <b>200 MB</b>、时长上限 <b>60 分钟</b>（可由服务端配置调整）。
+    </p>
+    <p><input type="file" id="file" style="margin-top:8px"></p>
+    <p><button id="submit">上传并开始转写</button></p>
+    <p id="msg" class="hint" hidden></p>
+    <div id="result" hidden>
+      <p class="ok-text" id="ok-line"></p>
+      <p class="hint">
+        <a href="#" id="detail-link">查看任务详情 →</a>
+        （同内容重复上传不会重复处理，直接返回原任务）
+      </p>
+    </div>
+  </div>
+</main>
+<script src="app.js"></script>
+<script>
+(function () {
+  var MAX_UPLOAD_BYTES = 200 * 1024 * 1024; /* 与服务端 TASK_MAX_SIZE_BYTES 默认一致，仅前端提示，服务端仍是权威 */
+  var btn = document.getElementById('submit');
+  var fileInput = document.getElementById('file');
+  var msg = document.getElementById('msg');
+  var result = document.getElementById('result');
+
+  function show(kind, text) {
+    msg.hidden = false;
+    msg.className = kind === 'error' ? 'error-text' : 'hint';
+    msg.textContent = text;
+  }
+
+  btn.addEventListener('click', function () {
+    var file = fileInput.files && fileInput.files[0];
+    if (!file) { show('error', '请先选择一个音/视频文件'); return; }
+    if (file.size > MAX_UPLOAD_BYTES) {
+      show('error', '文件 ' + fmtBytes(file.size) + ' 超过 200 MB 上限，请切分后再试');
+      return;
+    }
+    btn.disabled = true;
+    result.hidden = true;
+    show('info', '上传中…（大文件可能需要一些时间）');
+
+    var form = new FormData();
+    form.append('file', file);
+    fetch('api/v1/tasks', { method: 'POST', body: form }).then(function (resp) {
+      return resp.json().then(function (data) { data.__httpStatus = resp.status; return data; });
+    }).then(function (data) {
+      btn.disabled = false;
+      if (data.__httpStatus === 201) {
+        rememberTask(data.task_id, file.name);
+        document.getElementById('ok-line').textContent =
+          '已受理：任务 #' + data.task_id + '（' + statusText(data.status) +
+          '，时长 ' + fmtDuration(data.duration_sec) + '）' +
+          (data.reused ? ' · 命中已有任务，未重复处理' : '');
+        document.getElementById('detail-link').href = 'task.html?id=' + data.task_id;
+        result.hidden = false;
+        show('info', '');
+      } else {
+        show('error', '提交失败（' + (data.code || data.__httpStatus) + '）：' + (data.message || '未知错误'));
+      }
+    }, function () {
+      btn.disabled = false;
+      show('error', '服务暂时不可用，请稍后重试');
+    });
+  });
+})();
+</script>
+</body>
+</html>

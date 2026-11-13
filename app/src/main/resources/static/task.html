@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>任务详情 · 录音纪要平台</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Ctext y=%2713%27 font-size=%2713%27%3E%F0%9F%8E%99%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<nav>
+  <span class="brand">录音纪要平台</span>
+  <a href="index.html">提交</a>
+  <a href="tasks.html">任务列表</a>
+</nav>
+<main>
+  <div class="card" id="card"><p class="hint">加载中…</p></div>
+</main>
+<script src="app.js"></script>
+<script>
+(function () {
+  var card = document.getElementById('card');
+  var id = new URLSearchParams(location.search).get('id');
+  if (!id || !/^\d+$/.test(id)) {
+    card.innerHTML = '<h1>任务不存在</h1><p class="hint">请从<a href="tasks.html">任务列表</a>进入。</p>';
+    return;
+  }
+
+  function errorTextOf(code) {
+    return ERROR_TEXT[code] || ('未知错误码：' + code);
+  }
+
+  function render(data) {
+    if (data.__httpStatus === 404) {
+      card.innerHTML = '<h1>任务不存在</h1>' +
+        '<p class="hint">任务 #' + escapeHtml(id) + ' 不存在或不可见（404 TASK_NOT_FOUND）。' +
+        '请从<a href="tasks.html">任务列表</a>进入。</p>';
+      return true;
+    }
+    if (data.__httpStatus === 0) {
+      card.innerHTML = '<h1>服务暂时不可用</h1><p class="hint">正在自动重试…</p>';
+      return false; /* 网络抖动继续轮询 */
+    }
+    var status = data.status;
+    var head = '<h1>任务 #' + data.task_id + ' · ' + statusText(status) + '</h1>' +
+      '<dl class="meta">' +
+      '<dt>时长</dt><dd>' + fmtDuration(data.duration_sec) + '</dd>' +
+      '<dt>大小</dt><dd>' + fmtBytes(data.size_bytes) + '</dd>' +
+      '</dl>';
+    var body = '';
+    if (status === 'PENDING') {
+      body = '<p class="hint">排队中，正在等待空闲的转写线程…（每 3 秒自动刷新）</p>';
+    } else if (status === 'RUNNING') {
+      body = '<p class="hint">转写中，请稍候…（每 3 秒自动刷新）</p>';
+    } else if (status === 'RETRYING') {
+      body = '<p class="error-text">转写遇到问题，正在自动重试，请稍候（每 3 秒自动刷新）。</p>' +
+        '<p class="hint">原因：' + errorTextOf(data.error_code) + '</p>';
+    } else if (status === 'DEAD') {
+      body = '<p class="error-text">转写失败。原因：' + errorTextOf(data.error_code) + '</p>' +
+        '<p class="hint">请检查 ASR 服务是否正常后，可通过 API 重投该任务。</p>';
+    } else if (status === 'DONE') {
+      if (data.transcript === '') {
+        body = '<p class="empty-tip">未识别到语音内容：这段音频里没有可识别的人声' +
+          '（可能是纯音乐、静音或无人声）。</p>';
+      } else {
+        body = '<div class="transcript">' + escapeHtml(data.transcript) + '</div>';
+      }
+    } else {
+      body = '<p class="hint">未知状态：' + escapeHtml(status) + '</p>';
+    }
+    card.innerHTML = head + body;
+    return status === 'DONE' || status === 'DEAD';
+  }
+
+  function escapeHtml(s) {
+    return String(s === undefined || s === null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  /* PENDING/RUNNING/RETRYING 每 3 秒轮询（D-024），到 DONE/DEAD 或 404 停 */
+  pollUntil('api/v1/tasks/' + id, render, render);
+})();
+</script>
+</body>
+</html>

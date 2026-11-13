@@ -44,14 +44,20 @@ public class TaskController {
         return ResponseEntity.status(HttpStatus.CREATED).body(resp);
     }
 
+    /** 首页 → 提交页（T1.6）。静态资源由 Spring Boot 提供，这里只做根路径转发。 */
+    @GetMapping("/")
+    public String home() {
+        return "forward:/index.html";
+    }
+
     /**
      * 查任务状态（前端轮询 / 接入方）。未到 DONE 时 transcript 恒为 null；
-     * 查询带 user_id（D-040），不存在时 404 TASK_NOT_FOUND。
+     * error_code 仅 RETRYING/DEAD 有值（S-3）；查询带 user_id（D-040），不存在时 404 TASK_NOT_FOUND。
      */
     @GetMapping("/tasks/{id}")
     public TaskStatusResponse status(@PathVariable("id") long id) {
         TaskStatusResponse resp = jdbc.query("""
-                SELECT t.id, t.status, t.duration_sec, t.size_bytes, t.created_at,
+                SELECT t.id, t.status, t.duration_sec, t.size_bytes, t.created_at, t.error_code,
                        CASE WHEN t.status = 'DONE' THEN r.transcript END AS transcript
                 FROM task t
                 LEFT JOIN task_result r ON r.task_id = t.id
@@ -68,7 +74,8 @@ public class TaskController {
                     Long size = rs.wasNull() ? null : sizeBytes;
                     return new TaskStatusResponse(rs.getLong("id"), rs.getString("status"),
                             duration, size,
-                            rs.getObject("created_at", OffsetDateTime.class), rs.getString("transcript"));
+                            rs.getObject("created_at", OffsetDateTime.class), rs.getString("transcript"),
+                            rs.getString("error_code"));
                 },
                 id, DEFAULT_USER_ID);
         if (resp == null) {

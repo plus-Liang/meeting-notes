@@ -6,7 +6,14 @@ ARG REGISTRY_PREFIX=""
 FROM ${REGISTRY_PREFIX}library/maven:3.9-eclipse-temurin-21 AS build
 WORKDIR /build
 COPY pom.xml .
-RUN mvn -B -q dependency:go-offline
+# 国内网络：Maven 中央仓库直连不稳定（同 APT_MIRROR / PIP_INDEX_URL 的既有模式），默认走阿里云镜像；
+# 留空 MAVEN_MIRROR 可恢复直连中央仓库。settings.xml 只影响 build 阶段，不进运行镜像。
+ARG MAVEN_MIRROR=https://maven.aliyun.com/repository/public
+RUN if [ -n "$MAVEN_MIRROR" ]; then \
+      mkdir -p /root/.m2 \
+      && printf '<settings><mirrors><mirror><id>mirror</id><mirrorOf>central</mirrorOf><url>%s</url></mirror></mirrors></settings>' "$MAVEN_MIRROR" > /root/.m2/settings.xml ; \
+    fi \
+ && mvn -B -q dependency:go-offline
 COPY src ./src
 RUN mvn -B -q -DskipTests package
 

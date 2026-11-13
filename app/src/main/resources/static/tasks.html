@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>任务列表 · 录音纪要平台</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Ctext y=%2713%27 font-size=%2713%27%3E%F0%9F%8E%99%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<nav>
+  <span class="brand">录音纪要平台</span>
+  <a href="index.html">提交</a>
+  <a href="tasks.html">任务列表</a>
+</nav>
+<main>
+  <div class="card">
+    <h1>任务列表</h1>
+    <p class="hint">
+      这里记录<b>本浏览器</b>提交过的任务（跨浏览器/清缓存后不保留）。
+      未完成任务每 3 秒自动刷新状态。
+    </p>
+    <div id="list"><p class="hint">加载中…</p></div>
+  </div>
+</main>
+<script src="app.js"></script>
+<script>
+(function () {
+  var listEl = document.getElementById('list');
+  var pollers = {};
+
+  function render() {
+    var index = loadTaskIndex();
+    if (!index.length) {
+      listEl.innerHTML = '<p class="hint">还没有任务。去 <a href="index.html">提交</a> 一个音/视频文件吧。</p>';
+      return;
+    }
+    listEl.innerHTML = index.map(function (item) {
+      return '<div class="task-row" data-id="' + item.id + '">' +
+        '<span>#' + item.id + ' ' + escapeHtml(item.name) + '</span>' +
+        '<span><span class="badge" id="badge-' + item.id + '">加载中</span> ' +
+        '<a href="task.html?id=' + item.id + '">详情 →</a></span></div>';
+    }).join('');
+    refreshAll();
+  }
+
+  function refreshAll() {
+    loadTaskIndex().forEach(function (item) {
+      var badge = document.getElementById('badge-' + item.id);
+      if (!badge) return;
+      getJson('api/v1/tasks/' + item.id).then(function (data) {
+        paint(badge, data);
+        schedulePoll(item.id, badge, data);
+      });
+    });
+  }
+
+  function paint(badge, data) {
+    if (data.__httpStatus === 404) { badge.textContent = '不存在'; badge.className = 'badge dead'; return; }
+    if (data.__httpStatus === 0) { badge.textContent = '服务不可用'; badge.className = 'badge dead'; return; }
+    var status = data.status;
+    badge.textContent = statusText(status);
+    badge.className = 'badge ' + (status === 'DONE' ? 'done' : (status === 'DEAD' ? 'dead' : 'busy'));
+  }
+
+  /* 已到终态的任务不再轮询；未完成的进 3 秒轮询（D-024） */
+  function schedulePoll(id, badge, data) {
+    var finished = data.status === 'DONE' || data.status === 'DEAD';
+    if (finished || pollers[id]) return;
+    pollers[id] = pollUntil('api/v1/tasks/' + id,
+      function (d) { paint(badge, d); },
+      function (d) { return d.status === 'DONE' || d.status === 'DEAD' || d.__httpStatus === 404; });
+  }
+
+  function escapeHtml(s) {
+    return String(s === undefined || s === null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  render();
+})();
+</script>
+</body>
+</html>

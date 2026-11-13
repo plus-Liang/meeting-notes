@@ -1,0 +1,58 @@
+/* 三页共用样式（T1.6）：静态页 + 原生 JS，不引框架/构建链 */
+* { box-sizing: border-box; }
+body {
+  font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+  margin: 0;
+  background: #f5f6f8;
+  color: #1f2329;
+}
+nav {
+  background: #fff;
+  border-bottom: 1px solid #e5e6eb;
+  padding: 14px 24px;
+  display: flex;
+  gap: 20px;
+  align-items: baseline;
+}
+nav .brand { font-weight: 700; font-size: 17px; }
+nav a { color: #245bdb; text-decoration: none; font-size: 14px; }
+main { max-width: 760px; margin: 28px auto; padding: 0 16px; }
+.card {
+  background: #fff;
+  border: 1px solid #e5e6eb;
+  border-radius: 10px;
+  padding: 22px;
+  margin-bottom: 18px;
+}
+h1 { font-size: 19px; margin: 0 0 14px; }
+.hint { color: #86909c; font-size: 13px; line-height: 1.7; }
+.error-text { color: #f53f3f; font-size: 14px; margin-top: 10px; }
+.ok-text { color: #00b42a; font-size: 14px; margin-top: 10px; }
+button {
+  background: #245bdb; color: #fff; border: 0; border-radius: 6px;
+  padding: 9px 22px; font-size: 14px; cursor: pointer;
+}
+button:disabled { background: #94bfff; cursor: not-allowed; }
+.badge {
+  display: inline-block; padding: 2px 10px; border-radius: 999px;
+  font-size: 12px; background: #f2f3f5; color: #4e5969;
+}
+.badge.done { background: #e8ffea; color: #00b42a; }
+.badge.dead { background: #ffece8; color: #f53f3f; }
+.badge.busy { background: #e8f3ff; color: #165dff; }
+.task-row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 12px 4px; border-bottom: 1px solid #f2f3f5; font-size: 14px;
+}
+.task-row a { color: #245bdb; text-decoration: none; }
+.transcript {
+  white-space: pre-wrap; line-height: 1.9; font-size: 15px;
+  background: #fafbfc; border: 1px solid #f2f3f5; border-radius: 8px; padding: 16px;
+}
+.empty-tip {
+  background: #fff7e8; border: 1px solid #ffe4ba; color: #d25f00;
+  border-radius: 8px; padding: 14px; font-size: 14px;
+}
+dl.meta { display: grid; grid-template-columns: auto 1fr; gap: 6px 18px; font-size: 13px; }
+dl.meta dt { color: #86909c; }
+dl.meta dd { margin: 0; }

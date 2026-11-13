@@ -160,17 +160,10 @@ public class TranscriptionWorker implements SmartLifecycle {
             } catch (RuntimeException e) {
                 throw new ProcessingException("ASR_ERROR", "ASR 转写调用失败：" + e.getMessage(), e);
             }
-            if (text == null || text.isBlank()) {
-                throw new ProcessingException("ASR_ERROR", "ASR 返回空文本", null);
-            }
 
-            // 4) 写结果 + DONE
-            jdbc.update("""
-                    INSERT INTO task_result (task_id, transcript) VALUES (?, ?)
-                    ON CONFLICT (task_id) DO UPDATE SET transcript = EXCLUDED.transcript, created_at = now()
-                    """, taskId, text);
-            jdbc.update("UPDATE task SET status = 'DONE', updated_at = now() WHERE id = ?", taskId);
-            log.info("任务 {} 完成，转写 {} 字", taskId, text.length());
+            // 4) 写结果 + DONE。D-048：空文本（null/空白）是业务结果（纯音乐/静音/无人声），
+            //    不是故障 → 正常 DONE + transcript 落空串，不算失败、不重试。
+            persistResult(taskId, text);
         } finally {
             if (dir != null) {
                 deleteRecursively(dir);
@@ -178,6 +171,21 @@ public class TranscriptionWorker implements SmartLifecycle {
             if (wav != null) {
                 Files.deleteIfExists(wav);
             }
+        }
+    }
+
+    /** D-048：null/空白归一化为空串，正常落 task_result 并置 DONE（不算失败、不重试）。 */
+    void persistResult(long taskId, String text) {
+        String normalized = text == null ? "" : text;
+        jdbc.update("""
+                INSERT INTO task_result (task_id, transcript) VALUES (?, ?)
+                ON CONFLICT (task_id) DO UPDATE SET transcript = EXCLUDED.transcript, created_at = now()
+                """, taskId, normalized);
+        jdbc.update("UPDATE task SET status = 'DONE', updated_at = now() WHERE id = ?", taskId);
+        if (normalized.isEmpty()) {
+            log.info("任务 {} 完成：未识别到语音内容（空 transcript，D-048）", taskId);
+        } else {
+            log.info("任务 {} 完成，转写 {} 字", taskId, normalized.length());
         }
     }
 
