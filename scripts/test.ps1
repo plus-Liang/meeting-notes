@@ -24,12 +24,24 @@ else { Write-Host '[test.ps1] 找不到 mvn.cmd：请设 MAVEN_BIN 或 MAVEN_HOM
 
 if (-not $env:JAVA_HOME) { $env:JAVA_HOME = 'E:\tools\jdk-21.0.2' }
 $env:PATH = "$env:JAVA_HOME\bin;$env:PATH"
+# T3.0 F-1b：surefire 只管 fork JVM；Maven 父进程转发也要 UTF-8，否则中文日志照样乱码
+$env:MAVEN_OPTS = "-Dfile.encoding=UTF-8"
 
 # ---- 2) 注入 .env（只打印 key 名，不打印 value）----
+# 规则（T3.0）：①跳过 ASR_BASE_URL（容器内地址，本机测试不可达）；②shell 已显式设置的 key 不被 .env 覆盖——
+# 否则"ASR_PORT 指错必红"这类反例会被 .env 的默认值悄悄救活（假绿灯）。
 $envFile = Join-Path $repo '.env'
 if (Test-Path $envFile) {
     Get-Content $envFile | ForEach-Object {
         if ($_ -match '^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$') {
+            if ($Matches[1] -eq 'ASR_BASE_URL') {
+                Write-Host '[test.ps1] env 跳过 ASR_BASE_URL（http://asr:8000 是容器内地址，本机解析不了）'
+                return
+            }
+            if ([Environment]::GetEnvironmentVariable($Matches[1])) {
+                Write-Host ("[test.ps1] env 保留外部值 {0}" -f $Matches[1])
+                return
+            }
             Set-Item -Path "env:$($Matches[1])" -Value $Matches[2]
             Write-Host ("[test.ps1] env <- {0}" -f $Matches[1])
         }
