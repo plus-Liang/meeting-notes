@@ -764,7 +764,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\check-maintainability.
 
 ---
 
-## T2.9 本周单测/验收 + 三处收口（约 1.5h；**不加新功能**）
+## T2.9 本周单测/验收 + 三处收口（约 1.5h；**不加新功能**）✅ **已完成（`c9ad68c`；我实测 429+Retry-After、preflight 两分支、回归四连；3 处遗留转 T3.0）**
 
 > 现状：本周功能卡（T2.1–T2.5、T2.10–T2.12、T2.2/T2.3/T2.4、T2.7/T2.8）全部已完成，`scripts\test.ps1` 一直是绿的（**50/50**）。
 > 所以 T2.9 不是"补测试"，而是**把三件悬而未决的事收掉 + 出一份整周回归证据**：
@@ -810,6 +810,92 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\restore.ps1 -BackupD
 【可维护性】restore preflight 用与现有脚本一致的风格（`Write-Host` 提示 + exit 码表更新到文件头注释）；`backup.ps1`/`restore.ps1` 仍 ≤300 行。
 
 【回报·测试三问】检查了哪些场景 ｜ 实际命令 + HTTP 码/退出码/日志（脱敏）｜ 还有哪些没验证（**不许留空**）。
+
+---
+
+## T3.0 W3 前置小修（约 0.5h，**W2 关账条件**，D-066 / D-067）
+
+> 现状：T2.9 验收发现三处"没真正收掉"的问题，而 W3 每张卡都要跑测试/发请求，必须先修：
+> ①`scripts/test.ps1` 把 `.env` 里**容器内地址** `ASR_BASE_URL=http://asr:8000` 注进测试进程 → **干净 shell 跑全量必红**（`UnknownHostException: asr`）；
+> ②`surefire argLine` 的 `-Dfile.encoding=UTF-8` 只给 fork 的 JVM，maven 父进程仍按系统编码转发 → **中文日志仍乱码**；
+> ③配额日切与 `Retry-After` 都按**容器 UTC**，中国用户实际早上 8 点才重置（D-067）。
+
+【规划四问】
+- **改哪里**：①`scripts/test.ps1`：注入 `.env` 时**跳过 `ASR_BASE_URL`**（容器地址不进测试进程），且 shell 显式设的值不被 `.env` 覆盖；
+  另加 `$env:MAVEN_OPTS="-Dfile.encoding=UTF-8"`（父进程也要）；②`docker-compose.yml`：`app` 与 `postgres` 各加 `TZ: ${TZ:-Asia/Shanghai}`
+  （公共面，Lead 已报备，**人类点头后再动**；未批就先只做 ①）；③`.env.example` 增 `TZ=Asia/Shanghai`（`配置清单.md` 我写）。
+- **复用什么**：现有 `test.ps1` 结构；D-066/D-067 的口径；compose 现有 `${VAR:-default}` 写法。
+- **影响哪些功能**：测试可复现性 + 控制台可读性 + 配额日切时区；**不动业务代码、API、表结构、测试断言**。
+- **怎么验证**：见下（含反例）。
+
+【范围声明】
+- 做：①②③ + 必要注释；`scripts/*.ps1` 保持 **UTF-8 带 BOM**。
+- 不动：业务代码、`application.yml`、Flyway、`/api/v1`、`docs/`（配置清单我改）。
+- 禁：用 `-UnitOnly` 绕过冒烟；把 `.env` 的 `ASR_BASE_URL` 改成 `localhost`（容器内还要 `asr:8000`）；只设一处编码就宣称修好。
+
+【验收】（反例必须进）
+```powershell
+# ① 干净 shell：不设任何 ASR 变量（新开一个 PowerShell/清空 env）
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\test.ps1     # 期望 50/50、exit 0
+# ② 反例：故意指错端口 → 冒烟仍必须红（证明不是假绿灯）
+$env:ASR_PORT='9999'; powershell -NoProfile -ExecutionPolicy Bypass -File scripts\test.ps1; echo "EXPECTED_NONZERO=$LASTEXITCODE"
+# ③ 中文可读：日志里应有 "worker 已启动" / "转写结果已落库"，不得出现 ����
+# ④ 时区（人类批准 TZ 后）：两边都必须 CST
+docker compose exec -T app date; docker compose exec -T postgres date
+#    再触发一次 429：Retry-After 必须 < 86400 且 ≈ 距"本地零点"的秒数（贴计算过程）
+# ⑤ 回归：上传→DONE、health UP、check-maintainability exit 0
+```
+**通过标准**：干净 shell 全量 **50/50 exit 0**；`ASR_PORT=9999` 必红；中文行可读；TZ 两边一致且 `Retry-After` 语义对；回归全过。
+
+【可维护性】改动集中、每个行为有注释说明"为什么"（为什么跳过 `.env` 的地址 / 为什么父进程也要编码）；脚本 ≤300 行。
+
+【回报·测试三问】检查了哪些场景 ｜ 实际命令 + 输出（含反例的退出码）+ exit code ｜ 还有哪些没验证（**不许留空**）。
+
+---
+
+## T3.1 摘要生成：云 `ChatModel` → `summary` / `keywords` / `ai_tier`（约 2.5h）
+
+> 现状：只有转写全文；`task_result` 的 `summary/keywords/ai_tier` **全空**，代码里**没有业务级 `ChatModel` 调用**
+> （`LlmModelSwitchEnvironmentPostProcessor` 只决定 bean 开不开）。本卡做 W3 第一块：把"文字"变成"纪要"。
+
+【规划四问】
+- **改哪里**：
+  ① 新增 `ai/` 包：`SummaryService`（+ 内部 `Pending`/结果记录），入参 `taskId + transcript`；调用已注入的 `ChatModel`，
+     提示词要求**只输出 JSON**：`{"summary": "...", "keywords": ["..."]}`，并明确"**不得编造 transcript 里没有的人名/数字/日期/结论**"；
+     用 Jackson 解析（解析失败 → 记 WARN，不重试不阻塞）；写 `task_result.summary` / `keywords`(JSONB) / `ai_tier='CLOUD'`；
+  ② `TranscriptionWorker.persistResult` 落库后调用（`try/catch` 包住：AI 失败只 WARN，**任务仍 DONE，summary 留空**）——
+     **只许 +2~5 行**（文件已 290 行，超 300 就先把摘要调用抽成独立协作类）；
+  ③ `TaskStatusResponse` + `GET /api/v1/tasks/{id}` **只增** `summary`、`keywords`、`ai_tier` 三个 snake_case 字段（无则 `null`）；
+  ④ 单测 **≥3**：提示词构造（含"禁止编造"约束）/ JSON 解析成功 / 解析失败与异常时降级不抛。
+- **复用什么**：Spring AI 的 `ChatModel`（无 key 时 bean 不存在 → **跳过摘要**，不要 new 一个）；`ObjectMapper`；现有 `task_result` 列；
+  `ai_tier` 列与 D-020 三档定义（本卡只落 `CLOUD`）。
+- **影响哪些功能**：任务 DONE 后多一次 AI 调用（秒级）；详情 API 增字段；**不影响转写/状态机/幂等**。
+- **怎么验证**：3 个**有语音**且内容不同（不同 content_hash）的样本 → DONE → 摘要非空、可逐句在 transcript 找到依据。
+
+【范围声明】
+- 做：①~④；`.env.example` 无需加键（用现有 `LLM_*`）；API 增字段（只增不改，Lead 已报备）。
+- 不做：三档降级（T3.3）、todos（T3.2）、模板（T3.9）、术语回流（T3.5/T3.6）、批量/导出（T3.7）；**不改表结构**（列已存在）。
+- 禁：把 AI 输出直接当 transcript；LLM 失败把任务置 DEAD（转写成果不能因摘要丢失）；把提示词里的"输出 JSON"省略（必须可判）；
+  在日志里打印 transcript 全文（隐私）。
+
+【验收】（反例必须进）
+```powershell
+# ① 造 3 个不同 hash 的「有语音」样本：probe.wav 前后各拼 0.5s 静音（ffmpeg），保证内容唯一且有人声
+#    逐个上传 → 等 DONE，记录 3 个 task_id
+# ② 查详情：summary 非空、keywords 是数组、ai_tier=CLOUD
+curl.exe -s --noproxy "*" http://localhost:8080/api/v1/tasks/<id>
+docker compose exec -T postgres psql -U mn -d meetingnotes -t -A -c "select task_id, ai_tier, length(summary) from task_result order by task_id desc limit 3"
+# ③ 人工比对（必做）：摘要里每个专名/数字/结论都能在 transcript 原文找到；贴 3 份对照（脱敏）
+# ④ 反例：临时清空 LLM_API_KEY + 重启 app（无 ChatModel）→ 上传仍 DONE、summary 为 null、无 500；恢复 key 重启
+# ⑤ `scripts\test.ps1` ≥53 用例 exit 0；check-maintainability exit 0；`TranscriptionWorker` ≤300 行
+# ⑥ 回归：上传/列表/详情/错误四连（404/405/415/400）不变
+```
+**通过标准**：3 个样本摘要非空且**无编造**；`ai_tier=CLOUD`；无 key 时优雅跳过（DONE + null）；单测 ≥53；脚本 exit 0。
+
+【可维护性】`ai/` 包与 `worker`/`task` 单向依赖（`worker → ai`，不许反向）；提示词集中在一处（常量或资源文件），**不散落在业务代码**；
+新公共逻辑必须有测试；对外字段 snake_case。
+
+【回报·测试三问】检查了哪些场景 ｜ 实际命令 + 输出（3 份摘要对照 + exit code）｜ 还有哪些没验证（**不许留空**）。
 
 ---
 
