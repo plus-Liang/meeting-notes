@@ -879,6 +879,15 @@
   4. 目标：LOCAL 档**真实产出 `ai_tier=LOCAL`**；若仍失败（小模型不守 JSON 等），允许保留"降级 EXTRACTIVE + WARN"，但必须在报告里写清是哪一种，且级联语义不变。
 - **依据**：F-11（`review/2026-11-14-T3.3验收.md` §7、T3.4 验收 §8）；实测：8192 → 124.9s 触顶 + `RestClientException … application/octet-stream`（误导性症状）；512 → 16.8s 返回、散文包裹（T3.4 `JsonExtractor` 已能抽出）；直连 ollama HTTP 200 + 合法 JSON。
 - **已排除项**：把全局 `LLM_MAX_TOKENS` 调小（会截断云档摘要，A 让 B 的指标）；让本地档无限等（必须有读超时，否则 worker 被拖死）；加更多键（只加这两个，够用为止）。
+### D-082 T3.5/T3.11 验收通过；M5/M9 按"清账"处理（allowlist 技术债清零）；F-14 本地档输出长度待约束
+- **日期**：2026-11-14（T3.5 + T3.11 验收）｜**决策人**：本人
+- **结论**：
+  1. **T3.5 通过**（`9a34fcf` + 复核 `9f05c69`）：改词回流（corrections→glossary hits 递增/priority 保原值）、待办勾选/删除持久（`done` 放 jsonb，`TodoItem` 不动，web 视图映射）、三个写端点契约与错误码按批准草案落地。
+  2. **M5/M9 不做豁免、做清账**：`ApiException`/`TaskCreatedResponse` 迁 `com.meetingnotes.common` → M5 零容忍；M9 改为**只扫注释文本**（不是放宽检查项）→ 误报消失；allowlist **技术债清零（净减 5 行）**。我独立造红证明 M9 仍能抓真 TODO。
+  3. **T3.11 通过**（`64434bb`）：两键生效（启动日志可见），LOCAL 失败模式从"120s 超时误诊"变为"512 精确截断 → 降级"，属卡允许结论；云档回归正常。
+  4. **F-14（新，P2）**：`ai_tier=LOCAL` 仍未达成——1.5B 对合并提示词输出冗长，512 token 必 `length` 截断。修法二选一：**约束提示词输出长度**（改 `StructuringPrompt`，T3.4 曾禁改，需单独立项）或**调大本地预算**（D-081 的两键已允许，但需实测多少够）。排 **T3.8 前评估**，不阻塞 T3.6。
+- **依据**：`review/2026-11-14-T3.5-T3.11验收.md`；我独立实测 task 119（改词/勾选/删除/反例）、120（LOCAL 512 截断）、121（CLOUD 回归）；M9 红/绿各一次；133/133 exit 0。
+- **已排除项**：把 M9 误报登记进 allowlist（越堆越多，且 allowlist 只登记技术债）；继续用 allowlist 塞 M5 新 import（违反其自身纪律）；为让 LOCAL 成功而改云档 8192/120s（A 让 B）。
 ---
 
 ## 面试速查（由本文件派生，勿单独维护）

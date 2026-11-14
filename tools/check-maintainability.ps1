@@ -120,11 +120,26 @@ foreach ($rel in $javaLines.Keys) {
 }
 
 # M9 TODO/FIXME 不许留在主代码
+# T3.5 复核（2026-11-14）：只扫**注释文本**（// 行注释、/* 或 * 开头的块注释行、行尾 // ...），
+# 不扫标识符与字符串字面量——否则 result.todo() 这类合法标识符、@JsonProperty("todo") 这类键名会误报。
+# 字符串内的 // 通过"引号计数"跳过（URL 如 http://... 不算注释）。
+function Get-JavaCommentText([string]$line) {
+    $t = $line.Trim()
+    if ($t.StartsWith('//') -or $t.StartsWith('/*') -or $t.StartsWith('*')) { return $t }
+    $inStr = $false
+    for ($i = 0; $i -lt $line.Length - 1; $i++) {
+        $c = $line[$i]
+        if ($c -eq '"') { $inStr = -not $inStr }
+        elseif (-not $inStr -and $c -eq '/' -and $line[$i + 1] -eq '/') { return $line.Substring($i) }
+    }
+    return ''
+}
 foreach ($rel in $javaLines.Keys) {
     $ln = 0
     foreach ($line in $javaLines[$rel]) {
         $ln++
-        if ($line -match '\b(TODO|FIXME|XXX)\b' -and -not (Is-Allowed $rel $line)) {
+        $comment = Get-JavaCommentText $line
+        if ($comment -match '\b(TODO|FIXME|XXX)\b' -and -not (Is-Allowed $rel $line)) {
             [void]$blocking.Add(("M9 遗留 TODO {0}:{1} → {2}" -f $rel, $ln, $line.Trim()))
         }
     }

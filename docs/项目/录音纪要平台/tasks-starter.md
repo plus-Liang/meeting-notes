@@ -1120,7 +1120,7 @@ CLOUD 回归不变；空音频 null 语义不变；单测 ≥90 exit 0；可维�
 
 **【回报·测试三问】** 检查了哪些场景（EXTRACTIVE × 3 新样本 / CLOUD × 1 / 空音频 / 错误四连 / 容错两反例）｜ 实际命令 + 输出（3 条 taskId + `ai_tier` + summary/kw/todos；T3.3 基线同列对比表；变异红/绿；exit code）｜ 还有哪些没验证（**不许留空**；F-11 本地档预算就写"待用户批准新键"；`finish_reason=length` 实机未触发可写"留 T3.8"）。
 
-## T3.5 改词回流（`glossary`）+ 待办勾选/删除（约 3h）
+## T3.5 改词回流（`glossary`）+ 待办勾选/删除（约 3h）✅ **已完成（`9a34fcf` + 复核 `9f05c69`；我独立实测 task 119 改词/重复改词 hits 1→2/勾选/删除持久/反例 400/404/415、详情 11 键不变；133/133；M5/M9 清账 allowlist 清零且我造红验闸门；见 `review/2026-11-14-T3.5-T3.11验收.md`）**
 
 > **现状**：`task`/`task_result`/`glossary` 三张表列都已存在（`glossary`: `user_id`/`wrong_text`/`right_text`/`hits`/`priority`，`UNIQUE(user_id, wrong_text)`，D-037）；
 > 但 web 层只有「提交 / 列表 / 详情」三个只读端点，**没有任何写回接口**；`todos` 是 jsonb 数组，元素只有 `action/owner/deadline`（无 `done`）。
@@ -1174,7 +1174,7 @@ docker compose exec -T postgres psql -U mn -d meetingnotes -t -A -c "select user
 
 **【回报·测试三问】** 检查了哪些场景（改词/重复改词/勾选/取消/删除/越界/非法输入/回归）｜ 实际命令 + 输出（curl 原样 + psql 查询结果 + taskId；变异红/绿；exit code）｜ 还有哪些没验证（**不许留空**；T3.6 注入、前端 UI、并发改同一任务可写"留 T3.6/T4.x"）。
 
-## T3.11 本地档独立预算（F-11，约 1h，**用户 2026-11-14 已批 D-081**）
+## T3.11 本地档独立预算（F-11，约 1h，**用户 2026-11-14 已批 D-081**）✅ **已完成（`64434bb`；两键三处一致、独立超时通道不碰云路由；实机 LOCAL 512 精确截断→降级（33s、无 500）、云档回归 CLOUD；变异造红后绿。遗留 F-14：`ai_tier=LOCAL` 未达成，见验收报告）**
 
 > **现状**：LOCAL 档（ollama + qwen2.5:1.5b）在 app 内**必然失败**：本地 `ChatModel` 继承了云档的
 > `spring.ai.openai.chat.options.max-tokens`（=8192，推理模型要这么多）与 120s 读超时 →

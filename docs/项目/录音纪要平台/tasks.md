@@ -38,7 +38,7 @@
 | **T0.4** | Spring AI 最小转写跑通 | 独立复跑 exit 0 | ✅ `25528b9` + `review/2026-11-13-T0.4验收.md` |
 | **T0.5** | 云 LLM 通道 + **无 key 可启动** | 真实摘要 + 清空 key 仍能启动 | ✅ `483d6f2` + `review/2026-11-13-T0.5验收.md`（DeepSeek 实测 3 条摘要；无 key 时 ChatModel=0、health UP） |
 
-**下一步**：第 3 周 **T3.5 改词回流（glossary）+ 待办勾选**（T3.4 已把抽取式提质 + JSON 容错收口；F-11 本地档预算仍待用户批准）→ T3.6 术语注入 → T3.7/T3.9/T3.10 → T3.8 周验收。**阶段 1 全 ✅；W2 全 ✅；W3 T3.0/T3.1/T3.2/T3.3/T3.4 ✅**。
+**下一步**：第 3 周 **T3.6 术语注入（glossary → 提示词，US-3 闭环）**（T3.5 改词回流/待办勾选 + T3.11 本地档预算已验收；配额已用 100/120 分钟、47/50 任务，实机只跑 1 条短样本）→ T3.7/T3.9/T3.10 → T3.8 周验收。**阶段 1 全 ✅；W2 全 ✅；W3 T3.0~T3.5 + T3.11 ✅**。
 **T1.5 开工前**（已完成）：先修 T1.4 审查的 P1/P2（snake_case 契约 + 幂等真实状态 + `user_id` 过滤，D-040/D-041），一个 commit（`7c90e9a`）。
 **已处理**：`glossary."right"` 改名 `right_text`（D-037，用户拍板）；列名已在真实 PG16 空卷验证。
 
@@ -94,13 +94,13 @@
 | **T3.2** | 待办抽取：JSON Schema + 解析失败重试 | 含 `action/owner/deadline` | ✅ `cd35a6b` + `review/2026-11-14-T3.2验收.md`（D-069 落地/D-071～D-073）。`ai/TodoService`：严格 JSON + 严禁猜 owner/deadline（未知 null）+ 空 action 丢弃 + 解析失败 WARN 截 200 字不重试 + 无 ChatModel 跳过；worker 改为 transcript → 摘要 → 待办 → **最后** DONE（`finalizeResult`，**298 行**）；详情 API 只增 `todos`；F-2 路由断言换 `assertSame` 双向 + customizer 端到端。我复跑：干净 shell **68/68**、维护性 exit 0；F-2 两层变异各造一次红；task 85 首次 DONE 即 summary 172/8 keywords/2 todos、日志四步顺序正确；无 key task 86 = DONE+全 null 无 500；22 条待办可追溯 0 编造。遗留 F-5～F-10 → **T3.3** |
 | **T3.3** | **三档级联降级 + `ai_tier` 落库** + T3.2 遗留收口 | 按 ①→②→③ 判定并级联降档；`ai_tier` 诚实落实际档 | ✅ `991f429` + `review/2026-11-14-T3.3验收.md`（D-075/D-076/D-077 落地）。`ai/AiStructuringRouter`（首选档 + 级联 + D-077 离线硬门禁 WARN）、`ai/StructuringService`（**一次**调用出 summary/keywords/todos、失败降档不重试、⑦预算代码层截断）、`ai/ExtractiveStructurer`、`ai/TodoGrounding`（D-076 三档统一依据校验）、`config/OllamaChatModelConfig`（LOCAL 独立 ChatModel）、`TodoService` 收编为 todos 解析器、删除 `SummaryService`；worker **295 行**、详情 API 零改动（`ai_tier` 已有）。F-5/F-6/F-7/F-8 收口。我复跑：97/97 exit 0、维护性 exit 0、双变异各造一次红、三档实机 **95 CLOUD / 96 EXTRACTIVE / 97 离线门禁 EXTRACTIVE+WARN / 98+101 LOCAL 失败→降级 EXTRACTIVE+WARN / 100 空音频四字段 null**、错误四连与详情 11 键不变。**遗留 F-11**：LOCAL 档未产出 `ai_tier=LOCAL`（1.5B + max_tokens 8192 触顶 124.9s；512 时输出带散文致 JSON 解析失败）→ T3.4/T3.8 |
 | **T3.4** | **抽取式提质 + 结构化输出容错** | EXTRACTIVE 摘要非"前 N 字截断"、kw ≥5、todos ≥1；模型输出带散文/围栏也能解析 | ✅ `27d7ed8` + `review/2026-11-14-T3.4验收.md`（D-080）。四级分句 fallback（`ai/ExtractiveSegmenter`：句末标点→逗号/空格→连接词边界→50 字窗口）、打分加**结尾加分**、拼接**丢句不截句**、keywords 阈值 3→2 + 口头禅表 + 数字过滤、todos 触发词扩充 + 口头前缀剥离、`ai/JsonExtractor`（```json 围栏 + 括号配对 + 转义处理）接入 `parse`。**同时抓出并修复 T3.3 遗留 bug**（`summaryOf` 循环上界用 `indexes.size()` 被 remove 缩小 → 少选一半句子，实机 104 暴露）。我复跑：120/120 exit 0、维护性 exit 0、双变异各造一次红（17/3F、28/8F）、**我独立实机 108/109 EXTRACTIVE（181/156 字、kw 10、todos 4/3、非前缀）**、110 CLOUD 141 字、112 空音频四字段 null、错误四连与详情 11 键不变 |
-| **T3.5** | 改词 → 写 `glossary`；待办可勾选 | 改一次即入库；勾选持久 | 改「章总」→「张总」→ DB 有记录；刷新后仍勾选 |
+| **T3.5** | 改词 → 写 `glossary`；待办可勾选/删除 | 改一次即入库；勾选持久 | ✅ `9a34fcf` + 复核 `9f05c69` + `review/2026-11-14-T3.5-T3.11验收.md`。三个写端点（corrections / PATCH todos / DELETE todos）+ `glossary` upsert（hits 递增、priority 保原值）+ `done` 放 jsonb（视图 record，`TodoItem` 不动）；**M5/M9 按纪律清账**：`ApiException`/`TaskCreatedResponse` 迁 `com.meetingnotes.common`，M5 零容忍、M9 只扫注释，allowlist **技术债清零（净减 5 行）**。我独立实测（task 119）：改词 `replaced_count=1`、重复改 0 且 hits 1→2、勾选/删除刷新后持久、反例 400/404/415 全对、详情 11 键不变；133/133 exit 0；M9 闸门我独立造红（真 TODO 被抓）+ 还原绿 |
 | **T3.6** | 术语注入下次转写（US-3 闭环） | 第二次输出正确 | 按 US-3 Independent Test 走一遍 |
 | **T3.7** | 导出 Markdown + `PASTE` 入口（含 ass） | 文件含三节；srt 秒出纪要 | 下载确认；传 srt 跳过转写 |
 | **T3.8** | 本周单测（Schema 畸形、三档选择、模板选择） | `mvn test` 全绿 | BUILD SUCCESS + 用例数 |
 | **T3.9** | **摘要模板机制**（US-12）：会议/课程/访谈/播客 4 模板 + 提交时可选 + 按文件名自动推荐 + 落库 | 同音频换模板 → 结构不同且都可用 | 用"腾讯会议"命名的文件 → 自动选会议模板；手工选课程 → 输出含知识点/考点 |
 | **T3.10** | **格式扩展校验**：amr / opus / ass 可解可转 | 三种格式各传一个真实样本 → DONE | 各格式转写成功，失败时给出"请转 mp3"提示 |
-| **T3.11** | **本地档独立预算（F-11，D-081 已批）** | LOCAL 档真实产出 `ai_tier=LOCAL`（或明确记录失败降级） | 加 `LLM_LOCAL_MAX_TOKENS=512` / `LLM_LOCAL_TIMEOUT_SEC=180` 两键，只影响本地档；重建后传新样本 → `ai_tier=LOCAL` + 无 500；云档回归不变 |
+| **T3.11** | **本地档独立预算（F-11，D-081 已批）** | LOCAL 档真实产出 `ai_tier=LOCAL`（或明确记录失败降级） | ✅ `64434bb` + `review/2026-11-14-T3.5-T3.11验收.md`。新增 `LLM_LOCAL_MAX_TOKENS=512` / `LLM_LOCAL_TIMEOUT_SEC=180`（三处一致），`OllamaChatModelConfig` 建**独立超时通道**（不碰云的 120s/ASR 900s 路由）。我独立实测：启动日志 `max_tokens=512 / timeout=180s`；task 120 → LOCAL 调用 `finish_reason=length, completion=512`（预算精确生效，不再是 120s 超时误诊）→ 降级 EXTRACTIVE、33s 完成、无 500；task 121 云档回归 `ai_tier=CLOUD`；变异 512→8192 单测造红后还原绿。**遗留 F-14**：`ai_tier=LOCAL` 未达成（1.5B 输出冗长），需约束提示词输出长度或调大本地预算 → T3.8 前评估 |
 
 **W3 过关**：US-3 Independent Test 通过（闭环成立）；N15 三档有证据；US-12 四场景有证据。
 
