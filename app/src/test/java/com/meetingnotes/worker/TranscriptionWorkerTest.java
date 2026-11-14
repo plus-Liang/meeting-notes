@@ -14,6 +14,8 @@ import org.springframework.jdbc.core.ResultSetExtractor;
 import org.springframework.test.util.ReflectionTestUtils;
 import software.amazon.awssdk.services.s3.S3Client;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
@@ -104,5 +106,35 @@ class TranscriptionWorkerTest {
         verify(jdbc).update(contains("'DEAD'"), eq("ASR_ERROR"), eq(10L));
         verify(jdbc).update(contains("dead_letter"), eq(10L), contains("服务不可达"));
         verify(listOps, org.mockito.Mockito.never()).rightPush(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString());
+    }
+
+    /* ---- T2.3 崩溃恢复：启动时回收 RUNNING 僵尸（独立 StartupRecovery）---- */
+
+    @Test
+    void startupRecoveryRequeuesRunningTasksAsPending() {
+        com.meetingnotes.worker.StartupRecovery recovery = new com.meetingnotes.worker.StartupRecovery(
+                jdbc, redis, "meetingnotes:task-queue");
+        doReturn(List.of(5L, 7L)).when(jdbc).query(contains("WHERE status = 'RUNNING'"),
+                ArgumentMatchers.<org.springframework.jdbc.core.RowMapper<Long>>any());
+        when(redis.opsForList()).thenReturn(listOps);
+
+        recovery.run(null);
+
+        verify(jdbc).query(contains("WHERE status = 'RUNNING'"),
+                ArgumentMatchers.<org.springframework.jdbc.core.RowMapper<Long>>any());
+        verify(listOps).leftPush("meetingnotes:task-queue", "5");
+        verify(listOps).leftPush("meetingnotes:task-queue", "7");
+    }
+
+    @Test
+    void startupRecoveryWithNoZombiesLogsZeroAndPushesNothing() {
+        com.meetingnotes.worker.StartupRecovery recovery = new com.meetingnotes.worker.StartupRecovery(
+                jdbc, redis, "meetingnotes:task-queue");
+        doReturn(List.of()).when(jdbc).query(contains("WHERE status = 'RUNNING'"),
+                ArgumentMatchers.<org.springframework.jdbc.core.RowMapper<Long>>any());
+
+        recovery.run(null);
+
+        verify(listOps, org.mockito.Mockito.never()).leftPush(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString());
     }
 }
