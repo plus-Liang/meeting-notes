@@ -42,15 +42,17 @@
 
 ---
 
-## 3. 当前进度与下一张卡（阶段 1）
+## 3. 当前进度与下一张卡（第 2 周收尾）
 
 | 阶段 | 状态 |
 |---|---|
 | 阶段 0 底座（T0.1–T0.5） | ✅ 全过：RTF **0.105/0.113**、无 key 可启动（`ChatModel` Bean=0）、5/5 healthy |
-| 阶段 1（T1.1–T1.5） | ✅ 全过。T1.5 验收报告 `docs/协作/review/2026-11-13-T1.5验收.md`：397s 中文音频 → **31s** 出 1853 字；停 ASR 失败路径 **9s** 走完 `RETRYING×2 → DEAD` |
-| **下一张卡** | **T1.6 三页面**（`docs/项目/录音纪要平台/tasks-starter.md` 的 T1.6 段；含 D-048 前置改动：空文本 → DONE） |
+| 阶段 1（T1.1–T1.9） | ✅ 全过（含 T1.9 测试入口）。T1.5 实测：397s 中文音频 → **31s** 出 1853 字；停 ASR **9s** 走完 `RETRYING×2 → DEAD` |
+| 第 2 周（T2.1–T2.12） | ✅ **11/12**：幂等/DEAD 复活、崩溃恢复、ASR 超时、健康检查四项、契约收口、列表 API、结构化日志、备份恢复；**仅 T2.9 未做** |
+| **下一张卡** | **T2.9 本周验收 + 三处收口**（`docs/项目/录音纪要平台/tasks-starter.md` 的 T2.9 段）：429 真 HTTP 复验、测试日志一行修、`restore.ps1` preflight `exit 20` |
 
 任务总表 `tasks.md`；起栈 `docker compose up -d`（5/5 healthy 才算通过）。**一次只做一张卡，先贴证据再要下一张。**
+完成后按 §5 格式回报；`state.md`/`handoff.md` 里的"下一步"与本节同步更新。
 
 ---
 
@@ -102,6 +104,12 @@ pip install -i https://pypi.tuna.tsinghua.edu.cn/simple <pkg>
 | **T1.5 worker 事实** | Redis **BLPOP**（阻塞取，非轮询）单线程；容器内 ffmpeg 抽 16k 单声道 → 复用 `TranscriptionModel`；成功写 `task_result` + `DONE`；失败 `attempts+1` → `RETRYING` 重新入队（队尾）→ 耗尽 `DEAD` + `dead_letter`。**`error_code` 列宽 64 只放稳定码**（`ASR_ERROR`/`STORAGE_ERROR`），完整原因写 `dead_letter.reason`（TEXT）——把异常消息塞进 `error_code` 会让写回失败、任务反卡 RUNNING |
 | **Spring AI 内部重试（D-046）** | `OpenAiAudioTranscriptionModel` 走 `RetryUtils.DEFAULT_RETRY_TEMPLATE`，**默认 10 次指数退避**（ASR 挂掉时单次尝试 7 分钟才交给外层）→ 已用 `spring.ai.retry.max-attempts=2` / `backoff 2s~10s` 收敛；**重试语义只归 worker 状态机** |
 | **`GET /api/v1/tasks/{id}`（T1.5）** | 查询带 `user_id`（D-040）；不存在 → `404 TASK_NOT_FOUND`（固定码第 7 个，D-047）；`duration_sec` 等 INT4 列必须 `getLong + wasNull`（强转 `Long` 会 500）；`transcript: ""` = 未识别到语音、任务仍是 DONE（D-048） |
+| **ASR 超时（T2.2/D-058）** | connect **5s** + read **900s**，由 `config/AsrHttpClientConfig` 统一设置（`ASR_CONNECT_TIMEOUT_SEC`/`ASR_TIMEOUT_SEC`）；**探活/其它调用不许复用 900s**（健康探活另用 2s，D-059）。停 ASR 到 DEAD 由 78s 降到 **7.7s** |
+| **健康检查（T2.4/D-059）** | `health/MinioHealthIndicator`（headBucket + 2s）与 `health/AsrHealthIndicator`（GET `{base-url}/health` + 独立 2s 工厂）；readiness 组 = `readinessState,db,redis,minio,asr`；任一依赖挂 → `/actuator/health` **503 DOWN**；测试里用 `management.health.minio/asr.enabled=false` 关闭 |
+| **结构化日志（T2.7/D-062）** | `LOG_JSON`（默认 true）→ Boot 内建 `logging.structured.format.console=logstash`；`taskId` 是**独立字段**（MDC，处理结束清理）；查一个任务：`docker compose logs app \| grep '"taskId":"<id>"'`；`LOG_JSON=false` 回退可读文本 |
+| **备份/恢复（T2.8/D-063）** | `scripts/backup.ps1`（`pg_dump -Fc` + MinIO volume tar + manifest 行数/sha256）、`scripts/restore.ps1 -Force`；**恢复前 postgres/minio 必须先 running**；备份**不含 `.env`**；自动备份交宿主 cron（README 有示例） |
+| **错误码两层（D-047/D-057）** | 业务码 **7 个**（含 `TASK_NOT_FOUND`/`QUOTA_EXCEEDED`/`STORAGE_ERROR`/`ASR_ERROR`）+ 通用码 **5 个**（`INVALID_PARAM`/`NOT_FOUND`/`METHOD_NOT_ALLOWED`/`UNSUPPORTED_MEDIA_TYPE`/`INTERNAL_ERROR`）；兜底 handler **不得吞框架状态码** |
+| **worker 并发（D-061）** | v1 **单消费线程串行**（`SmartLifecycle` + Redis BLPOP）；`app.asr.max-concurrency` 是 P2 计划中配置，别自己加线程池 |
 
 ## 4.2 可维护性（宪法原则 VII，NON-NEGOTIABLE）
 
@@ -116,7 +124,8 @@ cd D:\new; powershell -NoProfile -ExecutionPolicy Bypass -File tools\check-maint
 共享契约放 `common/`）· M-6 错误处理统一（`ApiException` + 固定错误码、禁空 catch、外部调用有超时）·
 M-8 测试可维护（新公共逻辑必须有测试、禁 `@Disabled`）。其余 M-3/4/5/7/9/10 见细则。
 
-**现存技术债 4 条已登记**（内层 import `web.*` 的 ApiException/DTO），T2.x 迁 `common/` 后清零，届时同步删 allowlist。
+**现存技术债 2 条已登记**（`task/QuotaService`、`upload/AudioDurationProbe` 内层 import `web.*` 的 ApiException/DTO），
+计划 T4.x 迁 `common/` 后清零，届时同步删 allowlist（`tools\maintainability-allowlist.txt` 只减不增）。
 
 ## 5. 每完成一个任务的回报格式（照这个贴给人类）
 

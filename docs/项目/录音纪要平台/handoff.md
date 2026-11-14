@@ -18,8 +18,8 @@
 
 ## 3. 关键文件
 
-`00-先看这个.md` · `开工准备清单.md` · `架构一页纸.md` · `可维护性要求.md` · `spec.md`/`plan.md`/`tasks.md`/`tasks-starter.md` · `decisions.md`（**68 条**）· `接入指南.md` · `review/2026-11-14-T2.7-T2.8验收.md`（最新）· `配置清单.md`（§2 第 5 条反查已补 `getProperty`）· `scripts/backup.ps1`/`restore.ps1` · `rules/dev.md`。
+`00-先看这个.md` · `开工准备清单.md` · `架构一页纸.md` · `可维护性要求.md` · `spec.md`/`plan.md`/`tasks.md`/`tasks-starter.md` · `decisions.md`（**69 条**，最新 D-065 文档口径对齐）· `接入指南.md` · `review/2026-11-14-T2.7-T2.8验收.md`（最新）· `配置清单.md`（§2 第 5 条反查已补 `getProperty`）· `scripts/backup.ps1`/`restore.ps1` · `rules/dev.md`。
 
 ## 4. 未决
 
-T2.9 三处收口 · 第 3 周 T3.x · 认证 T4.6 · 真机 UI T4.13 · 发布硬门禁 + 回滚 · 可维护性技术债 3 条 · 死配置 16 键（T4.12）· README 两节（我写）。
+T2.9 三处收口 · 第 3 周 T3.x · 认证 T4.6 · 真机 UI T4.13 · 发布硬门禁 + 回滚 · 可维护性技术债 2 条（M5 反向依赖）· 死配置 16 键（T4.12）· README 两节已补（D-063）。

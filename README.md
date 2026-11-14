@@ -76,13 +76,15 @@ meeting-notes/
 │     ├─ java/com/meetingnotes/
 │     └─ resources/
 │        ├─ application.yml
-│        └─ db/migration/V1__init.sql
-└─ infra/asr/              ASR 服务说明（FunASR OpenAI 兼容）
+│        └─ db/migration/   V1__init.sql、V2__task_content_hash_unique.sql
+└─ infra/asr/              ASR 服务（自建 faster-whisper，OpenAI 兼容 HTTP，见 D-031）
 ```
 
 ---
 
 ## 开发顺序（不许乱）
+
+> 这是**计划顺序**；实际进度以 `AGENT.md` §3 与 `docs/项目/录音纪要平台/state.md` 为准（当前已完成到第 2 周，下一步 T2.9）。
 
 1. **阶段 0**：`tasks.md` 的 T0.1–T0.5 —— 先把 ASR 服务与 Spring AI 跑通，**不通过不写业务**
 2. 然后做 `PASTE` 入口（不依赖模型，最快验证编排链路）
@@ -99,7 +101,7 @@ meeting-notes/
 | 不自研 ASR/LLM 模型，只做编排 | 宪法原则 II / D-005 |
 | **所有配置走环境变量**，无硬编码路径/端口/key/并发数/模型名 | N11 / D-021 |
 | 不填 key 也能完整跑通（三档 AI 降级） | N15 / D-020 |
-| 单任务 ≤30 分钟 / ≤200MB | spec §4 |
+| 单任务 ≤60 分钟（可配 120）/ ≤200MB；批量 ≤20 | spec §4 / D-028 |
 | 媒体处理全在容器内（本机 SAC 拦未签名二进制） | D-010 |
 
 ---
