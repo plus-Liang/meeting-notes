@@ -6,7 +6,7 @@
 
 ## 实测基线
 
-- 全栈 **5/5 healthy**；health 四项依赖齐；单测 **68/68** exit 0（干净 shell，含 2 个冒烟）；可维护性 exit 0；`TranscriptionWorker` **288 行**（上限 300）。
+- 全栈 **5/5 healthy**；health 四项依赖齐；单测 **68/68** exit 0（干净 shell，含 2 个冒烟）；可维护性 exit 0；`TranscriptionWorker` **298 行**（上限 300）。
 - **T3.2**：F-1 修好并实测——task 85 **首次观测到 DONE 时** summary 172 字 / keywords 8 / todos 2 已就绪；日志四步顺序正确；
   无 key task 86 = `DONE + 全 null` 无 500；22 条待办逐条可追溯、**0 编造**；F-2 两层变异各造一次红。
 - **T3.1**（历史）：3 样本 CLOUD 摘要 160~170 字、keywords 8 个；F-1（DONE 早于摘要 3.3s）已由 T3.2 收口。

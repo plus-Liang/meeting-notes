@@ -15,7 +15,7 @@
 6. 启动期副作用尽力而为（rules/dev.md）；健康四项进 readiness（D-059）；ollama 探活同样不许拖垮启动（T3.3）。
 7. **改 `.env`/配置**（D-070）：先备份 → **绝对路径**（.NET 用进程 CWD）→ 禁 BOM；中文控制台 GBK，管道按 GBK 解码。
 8. 测试入口 `scripts/test.ps1`：跳过容器地址、shell 已设不覆盖；**不准改断言/编数字**；**验收样本任务行不删**（D-073）。
-9. `TranscriptionWorker` **288 行**（上限 300）；commit 前 `check-maintainability` → exit 0；**禁止手改代码仓 `docs/` 与 allowlist**；死配置 16 / yml 55 键（D-054）。
+9. `TranscriptionWorker` **298 行**（上限 300）；commit 前 `check-maintainability` → exit 0；**禁止手改代码仓 `docs/` 与 allowlist**；死配置 16 / yml 55 键（D-054）。
 ## 3. 关键文件
 
 `00-先看这个.md` · `开工准备清单.md` · `架构一页纸.md` · `可维护性要求.md` · **`踩坑与复盘-面试用.md`（K-01~K-30；G 节=AI 写码方 7 坑 + 7 闸门）** · `spec.md`/`plan.md`（§5.1 三档）/`tasks.md`/`tasks-starter.md` · `decisions.md`（**77 条**，最新 D-071/072/073）· `接入指南.md` · `review/2026-11-14-T3.2验收.md`（最新，16 份）· `配置清单.md` · `scripts/backup.ps1`/`restore.ps1` · `rules/dev.md`（§4.1 配置文件铁律）。
