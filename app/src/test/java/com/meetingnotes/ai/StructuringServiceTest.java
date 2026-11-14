@@ -58,6 +58,8 @@ class StructuringServiceTest {
     private JdbcTemplate jdbc;
     @Mock
     private OllamaProbe probe;
+    @Mock
+    private GlossaryTermSource termSource;
 
     private final TodoService todoService = new TodoService();
     private final ObjectMapper mapper = new ObjectMapper();
@@ -65,12 +67,12 @@ class StructuringServiceTest {
     /** 首选档 = CLOUD（有 key + 非离线）；本地档是否可用由 localProvider 决定。 */
     private StructuringService newService(boolean extractiveEnabled) {
         AiStructuringRouter router = new AiStructuringRouter(true, false, false, "", probe);
-        return new StructuringService(cloudProvider, localProvider, router, todoService, jdbc, extractiveEnabled);
+        return new StructuringService(cloudProvider, localProvider, router, todoService, termSource, jdbc, extractiveEnabled);
     }
 
     private StructuringService extractiveOnlyService() {
         AiStructuringRouter router = new AiStructuringRouter(false, false, false, "", probe);
-        return new StructuringService(cloudProvider, localProvider, router, todoService, jdbc, true);
+        return new StructuringService(cloudProvider, localProvider, router, todoService, termSource, jdbc, true);
     }
 
     private static ChatResponse response(String text, String finishReason) {
@@ -313,5 +315,40 @@ class StructuringServiceTest {
 
         verify(jdbc).update(contains("UPDATE task_result"), anyString(), anyString(), anyString(),
                 eq("EXTRACTIVE"), eq(22L));
+    }
+
+    // ---- T3.6 术语注入（glossary → 提示词，US-3 闭环） ----
+
+    @Test
+    void glossaryInjectionReachesThePrompt() {
+        // 词表非空：注入段（含"术语表"与改写指令）必须真的进 Prompt 内容
+        when(termSource.inject()).thenReturn(new GlossaryTermSource.GlossaryInjection(
+                "【术语表（原文说法 → 正确写法）】章总→张总", 1));
+        when(cloudProvider.getIfAvailable()).thenReturn(cloudModel);
+        when(cloudModel.call(any(Prompt.class))).thenReturn(response(VALID_JSON, "stop"));
+
+        newService(true).structure(30L, TRANSCRIPT);
+
+        ArgumentCaptor<Prompt> captor = ArgumentCaptor.forClass(Prompt.class);
+        verify(cloudModel).call(captor.capture());
+        String prompt = captor.getValue().getContents();
+        assertTrue(prompt.contains("术语表"), "注入段必须进提示词：" + prompt.substring(0, 120));
+        assertTrue(prompt.contains("一律改用正确写法"), "改写指令必须进提示词");
+        assertTrue(prompt.contains("章总→张总"), "词条必须进提示词");
+        assertTrue(prompt.contains("\"summary\""), "JSON 结构约束原样保留（T3.6 不改字段定义）");
+    }
+
+    @Test
+    void emptyGlossaryKeepsPromptByteIdentical() {
+        // 空表回归判据：不注入任何内容——提示词里没有"术语表"字样（termSource 未打桩返回 null，同样按空处理）
+        when(cloudProvider.getIfAvailable()).thenReturn(cloudModel);
+        when(cloudModel.call(any(Prompt.class))).thenReturn(response(VALID_JSON, "stop"));
+
+        newService(true).structure(31L, TRANSCRIPT);
+
+        ArgumentCaptor<Prompt> captor = ArgumentCaptor.forClass(Prompt.class);
+        verify(cloudModel).call(captor.capture());
+        assertFalse(captor.getValue().getContents().contains("术语表"), "空词表不得改变提示词");
+        verify(termSource, times(1)).inject();
     }
 }

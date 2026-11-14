@@ -43,6 +43,7 @@ public class StructuringService {
     private final ObjectProvider<ChatModel> localModel;
     private final AiStructuringRouter router;
     private final TodoService todoService;
+    private final GlossaryTermSource termSource;
     private final JdbcTemplate jdbc;
     private final boolean extractiveEnabled;
     private final ObjectMapper mapper = new ObjectMapper();
@@ -51,12 +52,14 @@ public class StructuringService {
                               @Qualifier("localOllamaChatModel") ObjectProvider<ChatModel> localModel,
                               AiStructuringRouter router,
                               TodoService todoService,
+                              GlossaryTermSource termSource,
                               JdbcTemplate jdbc,
                               @Value("${app.llm.fallback-extractive:true}") boolean extractiveEnabled) {
         this.cloudModel = cloudModel;
         this.localModel = localModel;
         this.router = router;
         this.todoService = todoService;
+        this.termSource = termSource;
         this.jdbc = jdbc;
         this.extractiveEnabled = extractiveEnabled;
     }
@@ -70,10 +73,17 @@ public class StructuringService {
             log.info("transcript 为空（D-048 无语音内容），跳过结构化，ai_tier 留 null");
             return false;
         }
+        GlossaryTermSource.GlossaryInjection injection = termSource.inject();
+        if (injection == null || injection.termCount() <= 0) {
+            log.info("术语注入：0 条（跳过）");
+            injection = GlossaryTermSource.GlossaryInjection.EMPTY;
+        } else {
+            log.info("术语注入：{} 条（≤20）/ 长度 {} 字", injection.termCount(), injection.text().length());
+        }
         AiTier tier = router.preferredTier();
         log.info("结构化首选档：{}", tier);
         while (tier != null) {
-            StructuringResult result = attempt(tier, transcript);
+            StructuringResult result = attempt(tier, transcript, injection.text());
             if (result != null) {
                 persist(taskId, result);
                 return true;
@@ -89,11 +99,11 @@ public class StructuringService {
     }
 
     /** 单档尝试：任何失败都返回 null（由上层降级），异常不外抛。 */
-    private StructuringResult attempt(AiTier tier, String transcript) {
+    private StructuringResult attempt(AiTier tier, String transcript, String glossaryText) {
         try {
             return switch (tier) {
-                case CLOUD -> fromModel(cloudModel, AiTier.CLOUD, transcript);
-                case LOCAL -> fromModel(localModel, AiTier.LOCAL, transcript);
+                case CLOUD -> fromModel(cloudModel, AiTier.CLOUD, transcript, glossaryText);
+                case LOCAL -> fromModel(localModel, AiTier.LOCAL, transcript, glossaryText);
                 case EXTRACTIVE -> extractive(transcript);
             };
         } catch (RuntimeException e) {
@@ -112,13 +122,14 @@ public class StructuringService {
     }
 
     /** 云档/本地档：一次调用 → 诊断 → 解析 → 依据校验。 */
-    private StructuringResult fromModel(ObjectProvider<ChatModel> provider, AiTier tier, String transcript) {
+    private StructuringResult fromModel(ObjectProvider<ChatModel> provider, AiTier tier,
+                                        String transcript, String glossaryText) {
         ChatModel model = provider.getIfAvailable();
         if (model == null) {
             log.warn("{} 档没有可用的 ChatModel（未配置该档），跳过", tier);
             return null;
         }
-        ChatResponse response = model.call(new Prompt(StructuringPrompt.build(transcript)));
+        ChatResponse response = model.call(new Prompt(StructuringPrompt.build(transcript, glossaryText)));
         String finishReason = finishReasonOf(response);
         String content = contentOf(response);
         if ("length".equalsIgnoreCase(finishReason)) {
