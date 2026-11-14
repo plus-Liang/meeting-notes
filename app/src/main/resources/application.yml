@@ -99,6 +99,8 @@ app:
   asr:
     max-concurrency: ${ASR_MAX_CONCURRENCY:2}
     timeout-sec: ${ASR_TIMEOUT_SEC:900}
+    # T2.2 / D-058：连接/首字节超时（停 ASR 时快速失败，不等 DNS/连接阶段挂死）
+    connect-timeout-sec: ${ASR_CONNECT_TIMEOUT_SEC:5}
     max-segment-sec: ${ASR_MAX_SEGMENT_SEC:120}
 
   llm:
