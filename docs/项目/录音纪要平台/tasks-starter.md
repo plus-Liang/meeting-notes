@@ -540,6 +540,47 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\check-maintainability.
 
 ---
 
+## T2.3 崩溃恢复：启动回收 RUNNING 僵尸（US-2 场景②，约 1h）
+
+> 为什么现在做：T2.1 的"幂等 + 复活"已经能救 DEAD，但**进程被杀在 RUNNING** 的任务没人管——`docker restart app` 后它会永远 RUNNING
+> （卡片 spec US-2 场景②要求"处理中杀进程重启 → 恢复或明确可重试"）。这是"不丢任务"的最后一环。
+
+【规划四问】
+- **改哪里**：`TranscriptionWorker` 启动时（`@PostConstruct`/`ApplicationRunner`，在开始 BLPOP 之前）执行一次回收：
+  ```sql
+  UPDATE task SET status='PENDING', updated_at=now()
+  WHERE status='RUNNING' RETURNING id
+  ```
+  然后把这些 id 逐个 `leftPush` 回队列；**单实例前提**下"启动时的 RUNNING 必然是僵尸"（多实例要改成按 `updated_at` 阈值，写进注释即可，不实现）。
+  回收数量写一条 INFO 日志（0 也要写，证明跑过）。
+- **复用什么**：`TaskService.enqueue` 的逻辑（worker 里已有 `rightPush`/`leftPush` 用法）、T1.8 的状态机语义、T2.1 的幂等。
+- **影响哪些功能**：worker 启动流程（**不改 API/不改表结构**）；重启后任务不卡死。
+- **怎么验证**：处理一个真实音频的中途 `docker restart app` → 重启后该任务最终到 `DONE`（或重试到 `DEAD`），**不允许停在 RUNNING**。
+
+【范围声明】
+- 做：启动回收 + 单测（`status='RUNNING'` → 回 PENDING 并入队；`DONE/DEAD/PENDING` 不受影响）。
+- 不动：失败分级、幂等逻辑、队列键、`/api/v1`、表结构。
+- 禁：启动时把所有任务无脑重置；用 `updated_at` 阈值当唯一判据又不说清单实例假设；回收时不看状态（会把 DONE 也重跑）。
+
+【验收】（反例必须进）
+```powershell
+# ① 真机：传一个较大的音频（如 probe.wav），在 RUNNING 时重启
+curl.exe -s --noproxy "*" -X POST -F "file=@D:\datasets\meeting-notes-samples\probe.wav" http://localhost:8080/api/v1/tasks
+docker restart meeting-notes-app-1
+# 重启后轮询：期望最终 DONE（最多等到 attempts 用尽 → DEAD，但绝不长时间 RUNNING）
+# ② 日志里能看到"回收 N 个 RUNNING 僵尸"，且 app 启动后队列里有该 id
+# ③ 回归：正常上传仍 DONE；DEAD 复古仍可复活（T2.1 的验收 ③ 不准坏）
+cd app; powershell -NoProfile -ExecutionPolicy Bypass -File ..\scripts\test.ps1   # 期望 ≥38 用例 exit 0
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\check-maintainability.ps1   # exit 0
+```
+**通过标准**：重启后任务有终态、日志有回收记录、回归不坏；测试三问不许留空。
+
+【可维护性】回收 SQL 带 `RETURNING id` 一次拿全，别 N+1；注释写清"单实例假设，多实例需改阈值"。
+
+【回报·测试三问】检查了哪些场景 ｜ 实际运行的命令 + 日志摘录 + exit code ｜ 还有哪些没验证（**不许留空**）。
+
+---
+
 ## 每张卡做完都要给你的回报
 
 ```text
