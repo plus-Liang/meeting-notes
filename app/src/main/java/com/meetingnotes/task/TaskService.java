@@ -80,9 +80,18 @@ public class TaskService {
     }
 
     public TaskCreatedResponse createUpload(MultipartFile file) throws IOException {
+        return createUpload(file, null);
+    }
+
+    /** 音频上传（T3.9 起带可选 template：显式 / 文件名自动推荐 / 默认 meeting；非法值 400 不静默回落）。 */
+    public TaskCreatedResponse createUpload(MultipartFile file, String template) throws IOException {
         if (file == null || file.isEmpty()) {
             throw new ApiException(400, "INVALID_MEDIA", "multipart 字段 file 缺失或为空文件");
         }
+
+        // T3.9：模板解析先行（显式优先 → 文件名推荐 → 默认；非法显式值 400，先于一切副作用）
+        TemplateResolver.Resolution resolution = TemplateResolver.resolve(template, file.getOriginalFilename());
+        log.info("模板：{}（来源：{}）", resolution.template(), resolution.source());
 
         // 1) magic number：读前 16 字节判断，不落盘、不信扩展名/MIME
         byte[] head = new byte[HEAD_BYTES];
@@ -129,6 +138,11 @@ public class TaskService {
                 if (newId == null) {
                     return null; // 冲突：同用户已有同内容任务，回查交给事务外（事务内不能留未决状态）
                 }
+                // T3.9：提交事务内先写模板行（零迁移：task_result.template 列已存在）。worker 的
+                // saveTranscript 与结构化 persist 只更新各自列，不会把它覆盖成 NULL；幂等命中路径
+                // （newId == null）不写——旧任务保留自己的模板。
+                jdbc.update("INSERT INTO task_result (task_id, template) VALUES (?, ?)",
+                        newId, resolution.template());
                 // 5) 配额（N8）：只在"本请求确实新建了任务"时消费；429 抛出 → 事务回滚
                 int minutes = (int) Math.max(1, Math.ceil(durationSec / 60.0));
                 quotaService.consume(DEFAULT_USER_ID, minutes);

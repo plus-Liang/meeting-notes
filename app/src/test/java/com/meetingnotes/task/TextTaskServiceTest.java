@@ -264,4 +264,49 @@ class TextTaskServiceTest {
             }
         };
     }
+
+    /* ---- T3.9 模板：提交事务内写 template 行；非法值 400；字幕不做文件名推荐 ---- */
+
+    @Test
+    void pasteWritesTemplateRowInsideSubmitTransaction() {
+        txExecutesCallback();
+        stubInsertInserts(9L);
+        when(redis.opsForList()).thenReturn(listOps);
+
+        TaskCreatedResponse resp = newService().createPaste("一段会议文本", "  COURSE ");
+
+        assertEquals(9L, resp.taskId());
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(jdbc).update(sql.capture(), eq(9L), eq("course"));
+        assertTrue(sql.getValue().contains("INSERT INTO task_result"),
+                "提交事务内先写模板行（零迁移）：" + sql.getValue());
+        assertTrue(sql.getValue().contains("template"), "INSERT 必须带 template 列");
+    }
+
+    @Test
+    void pasteWithInvalidTemplateRejected400WithoutAnySideEffect() {
+        ApiException e = assertThrows(ApiException.class,
+                () -> newService().createPaste("一段会议文本", "weekly"));
+
+        assertEquals(400, e.getStatus());
+        assertEquals("INVALID_PARAM", e.getCode());
+        assertEquals("template 只支持 meeting/course/interview/podcast/shortvideo", e.getMessage(),
+                "不静默回落（US-12 case 4），message 逐字固定（D-085）");
+        verify(transactionTemplate, never()).execute(any());
+        verify(s3, never()).putObject(any(PutObjectRequest.class), any(RequestBody.class));
+    }
+
+    @Test
+    void subtitleTakesExplicitTemplateButNeverRecommendsFromFilename() {
+        // 字幕不做自动推荐：文件名含"会议"关键字但不采纳；显式 MEETING → meeting
+        txExecutesCallback();
+        stubInsertInserts(12L);
+        when(redis.opsForList()).thenReturn(listOps);
+        byte[] srt = "1\n00:00:01,000 --> 00:00:02,000\n会议开始\n".getBytes(StandardCharsets.UTF_8);
+
+        TaskCreatedResponse resp = newService().createSubtitle(multipart("会议记录_2026.srt", srt), "MEETING");
+
+        assertEquals(12L, resp.taskId());
+        verify(jdbc).update(contains("INSERT INTO task_result"), eq(12L), eq("meeting"));
+    }
 }

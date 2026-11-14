@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.ArgumentMatchers;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -17,6 +18,7 @@ import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowMapper;
 
 import java.util.List;
 
@@ -28,6 +30,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -189,7 +192,8 @@ class StructuringServiceTest {
 
         assertFalse(newService(false).structure(15L, TRANSCRIPT), "第三档被开关关掉时降级链耗尽 → 三字段留空");
 
-        verifyNoInteractions(jdbc);
+        // T3.9：structure 会先 SELECT 模板（只读），这里的红线是**没有任何写库**（persist 不发生）
+        verify(jdbc, never()).update(anyString(), any(Object[].class));
     }
 
     @Test
@@ -350,5 +354,51 @@ class StructuringServiceTest {
         verify(cloudModel).call(captor.capture());
         assertFalse(captor.getValue().getContents().contains("术语表"), "空词表不得改变提示词");
         verify(termSource, times(1)).inject();
+    }
+
+    // ---- T3.9 模板机制 ----
+
+    @Test
+    void structureReadsTemplateFromTaskResultAndUsesItsPrompt() {
+        // task_result 里落了 course → 提示词必须切换到 course 模板（角色行/关注点都换）
+        when(jdbc.query(contains("COALESCE(template"), ArgumentMatchers.<RowMapper<String>>any(), eq(40L)))
+                .thenReturn(List.of("course"));
+        when(cloudProvider.getIfAvailable()).thenReturn(cloudModel);
+        when(cloudModel.call(any(Prompt.class))).thenReturn(response(VALID_JSON, "stop"));
+
+        newService(true).structure(40L, TRANSCRIPT);
+
+        ArgumentCaptor<Prompt> captor = ArgumentCaptor.forClass(Prompt.class);
+        verify(cloudModel).call(captor.capture());
+        String prompt = captor.getValue().getContents();
+        assertTrue(prompt.contains("课堂知识点"), "course 模板关注点必须进提示词：" + prompt.substring(0, 120));
+        assertFalse(prompt.contains("会议纪要助手"), "course 不得复用 meeting 角色行");
+    }
+
+    @Test
+    void missingTemplateRowFallsBackToMeeting() {
+        // 旧任务 / task_result 无行（jdbc 未打桩返回空列表）→ 回落 meeting，结构化照常
+        when(cloudProvider.getIfAvailable()).thenReturn(cloudModel);
+        when(cloudModel.call(any(Prompt.class))).thenReturn(response(VALID_JSON, "stop"));
+
+        newService(true).structure(41L, TRANSCRIPT);
+
+        ArgumentCaptor<Prompt> captor = ArgumentCaptor.forClass(Prompt.class);
+        verify(cloudModel).call(captor.capture());
+        assertTrue(captor.getValue().getContents().contains("会议纪要助手"), "查不到模板行必须回落 meeting");
+    }
+
+    @Test
+    void persistSqlUpdatesOnlyItsOwnColumnsAndNeverTouchesTemplate() {
+        when(cloudProvider.getIfAvailable()).thenReturn(cloudModel);
+        when(cloudModel.call(any(Prompt.class))).thenReturn(response(VALID_JSON, "stop"));
+
+        newService(true).structure(42L, TRANSCRIPT);
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(jdbc).update(sql.capture(), anyString(), anyString(), anyString(), eq("CLOUD"), eq(42L));
+        assertTrue(sql.getValue().contains("summary") && sql.getValue().contains("ai_tier"),
+                "persist 只更新 summary/keywords/todos/ai_tier：" + sql.getValue());
+        assertFalse(sql.getValue().contains("template"), "T3.9 坑 3：结构化不得把 template 覆盖成 NULL");
     }
 }

@@ -73,6 +73,9 @@ public class StructuringService {
             log.info("transcript 为空（D-048 无语音内容），跳过结构化，ai_tier 留 null");
             return false;
         }
+        // T3.9：读提交时落库的模板（旧任务/无行 → meeting），传给提示词组装；worker 不加参数
+        String template = templateOf(taskId);
+        log.info("结构化模板：{}", template);
         GlossaryTermSource.GlossaryInjection injection = termSource.inject();
         if (injection == null || injection.termCount() <= 0) {
             log.info("术语注入：0 条（跳过）");
@@ -83,7 +86,7 @@ public class StructuringService {
         AiTier tier = router.preferredTier();
         log.info("结构化首选档：{}", tier);
         while (tier != null) {
-            StructuringResult result = attempt(tier, transcript, injection.text());
+            StructuringResult result = attempt(tier, transcript, injection.text(), template);
             if (result != null) {
                 persist(taskId, result);
                 return true;
@@ -98,12 +101,12 @@ public class StructuringService {
         return false;
     }
 
-    /** 单档尝试：任何失败都返回 null（由上层降级），异常不外抛。 */
-    private StructuringResult attempt(AiTier tier, String transcript, String glossaryText) {
+    /** 单档尝试：任何失败都返回 null（由上层降级），异常不外抛。EXTRACTIVE 不做模板分化（F-18，只落 template）。 */
+    private StructuringResult attempt(AiTier tier, String transcript, String glossaryText, String template) {
         try {
             return switch (tier) {
-                case CLOUD -> fromModel(cloudModel, AiTier.CLOUD, transcript, glossaryText);
-                case LOCAL -> fromModel(localModel, AiTier.LOCAL, transcript, glossaryText);
+                case CLOUD -> fromModel(cloudModel, AiTier.CLOUD, transcript, glossaryText, template);
+                case LOCAL -> fromModel(localModel, AiTier.LOCAL, transcript, glossaryText, template);
                 case EXTRACTIVE -> extractive(transcript);
             };
         } catch (RuntimeException e) {
@@ -123,13 +126,13 @@ public class StructuringService {
 
     /** 云档/本地档：一次调用 → 诊断 → 解析 → 依据校验。 */
     private StructuringResult fromModel(ObjectProvider<ChatModel> provider, AiTier tier,
-                                        String transcript, String glossaryText) {
+                                        String transcript, String glossaryText, String template) {
         ChatModel model = provider.getIfAvailable();
         if (model == null) {
             log.warn("{} 档没有可用的 ChatModel（未配置该档），跳过", tier);
             return null;
         }
-        ChatResponse response = model.call(new Prompt(StructuringPrompt.build(transcript, glossaryText)));
+        ChatResponse response = model.call(new Prompt(StructuringPrompt.build(transcript, glossaryText, template)));
         String finishReason = finishReasonOf(response);
         String content = contentOf(response);
         if ("length".equalsIgnoreCase(finishReason)) {
@@ -198,6 +201,17 @@ public class StructuringService {
     private static StructuringResult withGroundedTodos(StructuringResult result, String transcript) {
         return new StructuringResult(result.summary(), result.keywords(),
                 TodoGrounding.validate(result.todos(), transcript), result.aiTier());
+    }
+
+    /** 读提交时落库的模板（T3.9）：COALESCE 兜 NULL（旧任务）→ meeting；查不到行同样按 meeting。 */
+    private String templateOf(long taskId) {
+        List<String> rows = jdbc.query(
+                "SELECT COALESCE(template, 'meeting') FROM task_result WHERE task_id = ?",
+                (rs, i) -> rs.getString(1), taskId);
+        if (rows == null || rows.isEmpty() || rows.get(0) == null || rows.get(0).isBlank()) {
+            return TemplatePrompts.DEFAULT_TEMPLATE;
+        }
+        return rows.get(0);
     }
 
     private void persist(long taskId, StructuringResult result) {

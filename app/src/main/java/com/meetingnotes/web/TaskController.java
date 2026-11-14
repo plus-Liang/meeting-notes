@@ -27,13 +27,14 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 /**
- * 任务入口 API（T1.4 上传 / T1.5 状态查询 / T3.5 改词回流与待办勾选删除）。
+ * 任务入口 API（T1.4 上传 / T1.5 状态查询 / T3.5 改词回流与待办勾选删除 / T3.7 PASTE / T3.9 模板参数）。
+ * 导出端点在 {@link TaskExportController}（T3.9 抽出，行为不变）。
  *
  * <p>认证（API_TOKEN / 401，spec US-9）在后续卡接入，先固定单用户；
  * 所有查询必须带 user_id（D-040）。
@@ -72,15 +73,18 @@ public class TaskController {
     }
 
     @PostMapping(value = "/tasks", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    public ResponseEntity<TaskCreatedResponse> upload(@RequestPart("file") MultipartFile file)
+    public ResponseEntity<TaskCreatedResponse> upload(@RequestPart("file") MultipartFile file,
+                                                      @RequestPart(value = "template", required = false) String template)
             throws IOException {
         // T3.7：字幕（.srt/.ass，按文件名后缀大小写不敏感）先于魔数闸分派——纯文本过不了
         // MediaMagic.detect，必须在这里转成文本任务；其余后缀仍走原音频路径（逐字节不动）。
-        String name = file.getOriginalFilename() == null ? "" : file.getOriginalFilename().toLowerCase();
+        // T3.9：template 为可选表单字段（显式/文件名自动推荐/默认的解析在各 service 内做）。
+        String name = file.getOriginalFilename() == null ? ""
+                : file.getOriginalFilename().toLowerCase(Locale.ROOT);
         if (name.endsWith(".srt") || name.endsWith(".ass")) {
-            return ResponseEntity.status(HttpStatus.CREATED).body(textTaskService.createSubtitle(file));
+            return ResponseEntity.status(HttpStatus.CREATED).body(textTaskService.createSubtitle(file, template));
         }
-        TaskCreatedResponse resp = taskService.createUpload(file);
+        TaskCreatedResponse resp = taskService.createUpload(file, template);
         return ResponseEntity.status(HttpStatus.CREATED).body(resp);
     }
 
@@ -88,58 +92,8 @@ public class TaskController {
     @PostMapping(value = "/tasks", consumes = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<TaskCreatedResponse> paste(@RequestBody PasteRequest body) {
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(textTaskService.createPaste(body == null ? null : body.text()));
-    }
-
-    /**
-     * 导出 Markdown（T3.7 / US-2）：三节固定顺序（摘要/关键词/待办），待办带 done 勾选状态。
-     * format 目前只支持 md；任务不存在 → 404；无内容（未 DONE/transcript 空）→ 400。
-     */
-    @GetMapping("/tasks/{id}/export")
-    public ResponseEntity<String> export(@PathVariable("id") long id,
-                                         @RequestParam(name = "format", required = false) String format) {
-        if (!"md".equals(format)) {
-            throw new ApiException(400, "INVALID_PARAM", "format 目前只支持 md");
-        }
-        record ExportRow(String status, String transcript, String summary, String keywords, String todos) {
-        }
-        List<ExportRow> rows = jdbc.query("""
-                SELECT t.status,
-                       CASE WHEN t.status = 'DONE' THEN r.transcript END AS transcript,
-                       r.summary, r.keywords::text AS keywords, r.todos::text AS todos
-                FROM task t
-                LEFT JOIN task_result r ON r.task_id = t.id
-                WHERE t.id = ? AND t.user_id = ?
-                """, (rs, i) -> new ExportRow(rs.getString("status"), rs.getString("transcript"),
-                rs.getString("summary"), rs.getString("keywords"), rs.getString("todos")),
-                id, DEFAULT_USER_ID);
-        if (rows.isEmpty()) {
-            throw new ApiException(404, "TASK_NOT_FOUND", "任务 " + id + " 不存在");
-        }
-        ExportRow row = rows.get(0);
-        if (row.transcript() == null || row.transcript().isBlank()) {
-            throw new ApiException(400, "INVALID_PARAM", "任务没有可导出的内容（未完成或无转写文本）");
-        }
-        List<String> keywords = null;
-        List<TodoItemView> todos = null;
-        try {
-            if (row.keywords() != null && !row.keywords().isBlank()) {
-                keywords = mapper.readValue(row.keywords(), new TypeReference<List<String>>() { });
-            }
-            JsonNode todosNode = row.todos() == null || row.todos().isBlank()
-                    ? null : mapper.readTree(row.todos());
-            if (todosNode != null && todosNode.isArray()) {
-                todos = TodoItemView.listFrom(todosNode);
-            }
-        } catch (Exception e) {
-            keywords = null;
-            todos = null;
-        }
-        String markdown = TaskMarkdownExporter.export(row.summary(), keywords, todos);
-        return ResponseEntity.ok()
-                .contentType(new MediaType("text", "markdown", StandardCharsets.UTF_8))
-                .header("Content-Disposition", "attachment; filename=\"task-" + id + ".md\"")
-                .body(markdown);
+                .body(textTaskService.createPaste(body == null ? null : body.text(),
+                        body == null ? null : body.template()));
     }
 
     /** 首页 → 提交页（T1.6）。静态资源由 Spring Boot 提供，这里只做根路径转发。 */
@@ -197,7 +151,7 @@ public class TaskController {
         TaskStatusResponse resp = jdbc.query("""
                 SELECT t.id, t.status, t.duration_sec, t.size_bytes, t.created_at, t.error_code,
                        CASE WHEN t.status = 'DONE' THEN r.transcript END AS transcript,
-                       r.summary, r.keywords, r.ai_tier, r.todos
+                       r.summary, r.keywords, r.ai_tier, r.todos, r.template
                 FROM task t
                 LEFT JOIN task_result r ON r.task_id = t.id
                 WHERE t.id = ? AND t.user_id = ?
@@ -239,7 +193,7 @@ public class TaskController {
                             duration, size,
                             rs.getObject("created_at", OffsetDateTime.class), rs.getString("transcript"),
                             rs.getString("error_code"), rs.getString("summary"), keywords,
-                            rs.getString("ai_tier"), todos);
+                            rs.getString("ai_tier"), todos, rs.getString("template"));
                 },
                 id, DEFAULT_USER_ID);
         if (resp == null) {

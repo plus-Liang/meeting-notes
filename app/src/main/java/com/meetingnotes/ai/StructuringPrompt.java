@@ -11,22 +11,27 @@ package com.meetingnotes.ai;
  *
  * <p>T3.6：glossary 术语注入段拼在"要求"之前（{@code glossaryText} 为空串/null 时**逐字节不变**——
  * 空词表不改变任何行为）；JSON 结构约束、字段定义、预算公式一个字不改。
+ * <p>T3.9：按 {@code template} 从 {@link TemplatePrompts} 取模板主体（角色行/JSON 示例/summary 关注点），
+ * 注入顺序不变：模板主体 → glossary 注入段 → 共用要求 → transcript；
+ * {@code meeting} 与 T3.9 之前的提示词**逐字节一致**（回归不变量）。
  */
 final class StructuringPrompt {
 
     private StructuringPrompt() {
     }
 
-    static String build(String transcript, String glossaryText) {
+    static String build(String transcript, String glossaryText, String template) {
+        TemplatePrompts.Spec spec = TemplatePrompts.spec(template);
         String injection = glossaryText == null || glossaryText.isBlank() ? ""
                 : glossaryText + "\n输出中遇到上述原文说法，一律改用正确写法。\n";
-        return """
-                你是会议纪要助手。请阅读下面的转写全文，只输出**一个**严格的 JSON 对象（不要输出任何其它文字或代码块标记）：
-                {"summary": "不超过 200 字的会议摘要", "keywords": ["关键词1", "关键词2"], "todos": [{"action": "要做的具体事项", "owner": "负责人", "deadline": "截止时间"}]}
-                """
-                + injection + """
+        return spec.roleLine() + "\n"
+                + spec.shapeLine() + "\n"
+                + injection
+                + """
                 要求：
-                1. summary 覆盖主要议题与结论，不超过 200 字；
+                """
+                + spec.summaryRule() + "\n"
+                + """
                 2. keywords 抽取 3~8 个关键名词/术语（最多 10 个）；
                 """
                 + TodoService.promptSection() + """

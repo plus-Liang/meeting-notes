@@ -18,6 +18,8 @@ import software.amazon.awssdk.services.s3.S3Client;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.contains;
@@ -88,6 +90,20 @@ class TranscriptionWorkerTest {
 
         verify(jdbc).update(contains("task_result"), eq(7L), eq("你好，会议开始。"));
         verify(jdbc).update(contains("'DONE'"), eq(7L));
+    }
+
+    /* ---- T3.9 坑 3：worker 只更新自己的列，不得把提交时写好的 template 覆盖成 NULL ---- */
+
+    @Test
+    void saveTranscriptSqlNeverTouchesTemplateColumn() {
+        TranscriptionWorker worker = newWorker();
+        worker.finalizeResult(30L, "会议内容");
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(jdbc).update(sql.capture(), eq(30L), eq("会议内容"));
+        assertTrue(sql.getValue().contains("ON CONFLICT (task_id)"), "upsert 幂等保留：" + sql.getValue());
+        assertFalse(sql.getValue().contains("template"),
+                "T3.9 坑 3：worker 不得把 template 写成 NULL：" + sql.getValue());
     }
 
     /* ---- F-1/T3.2（D-069）+ T3.3 F-7：DONE 顺序 —— transcript → 结构化（一次调用）→ 最后 DONE ---- */

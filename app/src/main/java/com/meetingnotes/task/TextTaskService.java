@@ -20,6 +20,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
+import java.util.Locale;
 
 /**
  * 文本任务提交（T3.7 / D-084）：PASTE（JSON 文本）与字幕（srt/ass 解析后）共用一条路径。
@@ -69,11 +70,21 @@ public class TextTaskService {
 
     /** JSON 文本 PASTE 入口（controller 已保证非 null body）。 */
     public TaskCreatedResponse createPaste(String text) {
-        return createTextTask(text);
+        return createPaste(text, null);
+    }
+
+    /** PASTE 入口（T3.9 起带可选 template；文本路径不做文件名推荐：显式值否则 meeting）。 */
+    public TaskCreatedResponse createPaste(String text, String template) {
+        return createTextTask(text, template);
     }
 
     /** 字幕入口：413 大小闸 → 解码 → 解析 → 得到最终文本后与 PASTE 同路（解析为空 → 400）。 */
     public TaskCreatedResponse createSubtitle(MultipartFile file) {
+        return createSubtitle(file, null);
+    }
+
+    /** 字幕入口（T3.9 起带可选 template；字幕同样**不做**文件名自动推荐：显式值否则 meeting）。 */
+    public TaskCreatedResponse createSubtitle(MultipartFile file, String template) {
         if (file == null || file.isEmpty()) {
             throw new ApiException(400, "INVALID_MEDIA", "multipart 字段 file 缺失或为空文件");
         }
@@ -82,14 +93,15 @@ public class TextTaskService {
                     "字幕文件 " + file.getSize() + " 字节，超过上限 " + SubtitleParser.MAX_SUBTITLE_BYTES);
         }
         String content = SubtitleParser.decode(getBytes(file));
-        String name = file.getOriginalFilename() == null ? "" : file.getOriginalFilename().toLowerCase();
+        String name = file.getOriginalFilename() == null ? ""
+                : file.getOriginalFilename().toLowerCase(Locale.ROOT);
         String text = name.endsWith(".ass")
                 ? SubtitleParser.parseAss(content)
                 : SubtitleParser.parseSrt(content);
         if (text.isBlank()) {
             throw new ApiException(400, "INVALID_PARAM", "字幕文件没有可识别文本");
         }
-        return createTextTask(text);
+        return createTextTask(text, template);
     }
 
     private byte[] getBytes(MultipartFile file) {
@@ -100,7 +112,7 @@ public class TextTaskService {
         }
     }
 
-    private TaskCreatedResponse createTextTask(String rawText) {
+    private TaskCreatedResponse createTextTask(String rawText, String explicitTemplate) {
         String text = rawText == null ? "" : rawText.trim();
         if (text.isEmpty()) {
             throw new ApiException(400, "INVALID_PARAM", "text 不能为空");
@@ -108,6 +120,9 @@ public class TextTaskService {
         if (text.length() > MAX_TEXT_CHARS) {
             throw new ApiException(400, "INVALID_PARAM", "text 不能超过 " + MAX_TEXT_CHARS + " 字符");
         }
+        // T3.9：模板解析（文本/字幕不做文件名推荐：显式值否则 meeting；非法显式值 400 不静默回落）
+        TemplateResolver.Resolution resolution = TemplateResolver.resolveText(explicitTemplate);
+        log.info("模板：{}（来源：{}）", resolution.template(), resolution.source());
         byte[] bytes = text.getBytes(StandardCharsets.UTF_8);
         String sha256 = sha256Hex(bytes);
         Long taskId = transactionTemplate.execute(tx -> {
@@ -122,6 +137,10 @@ public class TextTaskService {
             if (newId == null) {
                 return null;
             }
+            // T3.9：提交事务内先写模板行（零迁移）；worker/结构化只更新各自列，不会覆盖成 NULL。
+            // 幂等命中路径（newId == null）不写——旧任务保留自己的模板（F-17：幂等键不含 template）。
+            jdbc.update("INSERT INTO task_result (task_id, template) VALUES (?, ?)",
+                    newId, resolution.template());
             quotaService.consume(DEFAULT_USER_ID, 0);
             try {
                 s3.putObject(PutObjectRequest.builder().bucket(bucket).key(objectKey(newId)).build(),

@@ -221,4 +221,36 @@ class TaskServiceValidationTest {
         verify(jdbc, never()).update(contains("'PENDING'"), eq(9L));
         verify(listOps, never()).leftPush(any(), any());
     }
+
+    /* ---- T3.9 模板：非法值先行 400；文件名自动推荐 + 提交事务内落 template 行 ---- */
+
+    @Test
+    void uploadWithInvalidTemplateRejected400BeforeAnySideEffect() throws IOException {
+        ApiException e = assertThrows(ApiException.class,
+                () -> newService(209715200L, 3600L).createUpload(wav(64), "weekly"));
+
+        assertEquals(400, e.getStatus());
+        assertEquals("INVALID_PARAM", e.getCode());
+        assertEquals("template 只支持 meeting/course/interview/podcast/shortvideo", e.getMessage(),
+                "不静默回落（US-12 case 4），message 逐字固定（D-085）");
+        verify(probe, never()).durationSeconds(any());
+        verify(transactionTemplate, never()).execute(any());
+        verify(quotaService, never()).consume(anyLong(), anyInt());
+    }
+
+    @Test
+    void uploadRecommendsTemplateFromFilenameAndPersistsRow() throws IOException {
+        when(probe.durationSeconds(any())).thenReturn(90.0);
+        runCallbackForReal();
+        doReturn(15L).when(jdbc).query(contains("ON CONFLICT (user_id, content_hash)"),
+                ArgumentMatchers.<ResultSetExtractor<Long>>any(), eq(1L), any(), any(), any());
+        when(redis.opsForList()).thenReturn(listOps);
+
+        // 不传 template：文件名"公开课Lecture03" 命中 course 关键字 → course（来源：文件名）
+        MockMultipartFile file = new MockMultipartFile("file", "公开课Lecture03.wav", null, wav(64).getBytes());
+        com.meetingnotes.common.TaskCreatedResponse resp = newService(209715200L, 3600L).createUpload(file, null);
+
+        assertEquals(15L, resp.taskId());
+        verify(jdbc).update(contains("INSERT INTO task_result"), eq(15L), eq("course"));
+    }
 }
