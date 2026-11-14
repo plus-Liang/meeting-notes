@@ -24,6 +24,8 @@ public class ApiExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(ApiExceptionHandler.class);
 
+    private static final String REQUEST_REJECTED_MSG = "请求无法被处理，请检查路径、方法与参数";
+
     @ExceptionHandler(ApiException.class)
     public ResponseEntity<ErrorResponse> onApiException(ApiException e) {
         if ("QUOTA_EXCEEDED".equals(e.getCode())) {
@@ -34,12 +36,50 @@ public class ApiExceptionHandler {
         return ResponseEntity.status(e.getStatus()).body(new ErrorResponse(e.getCode(), e.getMessage()));
     }
 
-    /** 兜底：任何未映射异常 → 500 INTERNAL_ERROR。只记日志，响应体不带异常细节（防泄漏堆栈/SQL）。 */
+    /**
+     * 兜底（T2.12 / D-057）：框架自身异常按其语义返回，只有真未知异常才 500 INTERNAL_ERROR。
+     * 通用码分层：INVALID_PARAM(400) / NOT_FOUND(404) / METHOD_NOT_ALLOWED(405) / UNSUPPORTED_MEDIA_TYPE(415)。
+     * 响应体只带固定文案，不透传异常 detail（防泄漏堆栈/SQL）。
+     */
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> onUnexpected(Exception e) {
+        if (e instanceof org.springframework.web.ErrorResponse er) {
+            return ResponseEntity.status(er.getStatusCode())
+                    .body(new ErrorResponse(genericCodeFor(er.getStatusCode().value()), REQUEST_REJECTED_MSG));
+        }
+        // 部分框架异常未实现 ErrorResponse 接口，显式映射（Spring 6：这四类是最常见的客户端错误）
+        if (e instanceof org.springframework.web.HttpRequestMethodNotSupportedException) {
+            return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED)
+                    .body(new ErrorResponse("METHOD_NOT_ALLOWED", REQUEST_REJECTED_MSG));
+        }
+        if (e instanceof org.springframework.web.HttpMediaTypeNotSupportedException) {
+            return ResponseEntity.status(HttpStatus.UNSUPPORTED_MEDIA_TYPE)
+                    .body(new ErrorResponse("UNSUPPORTED_MEDIA_TYPE", REQUEST_REJECTED_MSG));
+        }
+        if (e instanceof org.springframework.web.servlet.resource.NoResourceFoundException) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(new ErrorResponse("NOT_FOUND", REQUEST_REJECTED_MSG));
+        }
+        if (e instanceof org.springframework.beans.TypeMismatchException
+                || e instanceof org.springframework.web.bind.MissingServletRequestParameterException
+                || e instanceof org.springframework.http.converter.HttpMessageNotReadableException) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(new ErrorResponse("INVALID_PARAM", REQUEST_REJECTED_MSG));
+        }
         log.error("未捕获异常", e);
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .body(new ErrorResponse("INTERNAL_ERROR", "服务器内部错误，请稍后重试；若持续出现请联系管理员"));
+    }
+
+    /** 框架异常 HTTP 状态 → 通用错误码（D-057 分层，未列举的状态归 INTERNAL_ERROR，不发明新码）。 */
+    private static String genericCodeFor(int statusCode) {
+        return switch (statusCode) {
+            case 400 -> "INVALID_PARAM";
+            case 404 -> "NOT_FOUND";
+            case 405 -> "METHOD_NOT_ALLOWED";
+            case 415 -> "UNSUPPORTED_MEDIA_TYPE";
+            default -> "INTERNAL_ERROR";
+        };
     }
 
     /** multipart 大小超限（servlet 层先拦截，磁盘不会被灌满）→ 413 SIZE_EXCEEDED（D-041）。 */

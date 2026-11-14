@@ -30,4 +30,43 @@ class ApiExceptionHandlerTest {
         assertEquals(413, resp.getStatusCode().value());
         assertEquals("SIZE_EXCEEDED", resp.getBody().code());
     }
+
+    /* ---- T2.12 / D-057：框架 4xx 不再被吞成 500 ---- */
+
+    @Test
+    void frameworkErrorResponseKeepsItsStatusWithGenericCode() {
+        // Spring 的 ErrorResponseException（404 路径类）→ 404 NOT_FOUND，不再 500
+        ResponseEntity<ErrorResponse> resp = handler.onUnexpected(
+                new org.springframework.web.ErrorResponseException(org.springframework.http.HttpStatus.NOT_FOUND));
+
+        assertEquals(404, resp.getStatusCode().value());
+        assertEquals("NOT_FOUND", resp.getBody().code());
+    }
+
+    @Test
+    void methodNotSupportedMapsTo405() {
+        ResponseEntity<ErrorResponse> resp = handler.onUnexpected(
+                new org.springframework.web.HttpRequestMethodNotSupportedException("DELETE"));
+
+        assertEquals(405, resp.getStatusCode().value());
+        assertEquals("METHOD_NOT_ALLOWED", resp.getBody().code());
+    }
+
+    @Test
+    void unsupportedMediaTypeMapsTo415() {
+        ResponseEntity<ErrorResponse> resp = handler.onUnexpected(
+                new org.springframework.web.HttpMediaTypeNotSupportedException("application/json"));
+
+        assertEquals(415, resp.getStatusCode().value());
+        assertEquals("UNSUPPORTED_MEDIA_TYPE", resp.getBody().code());
+    }
+
+    @Test
+    void typeMismatchMapsTo400InvalidParam() {
+        ResponseEntity<ErrorResponse> resp = handler.onUnexpected(
+                new org.springframework.beans.TypeMismatchException("abc", Long.class));
+
+        assertEquals(400, resp.getStatusCode().value());
+        assertEquals("INVALID_PARAM", resp.getBody().code());
+    }
 }

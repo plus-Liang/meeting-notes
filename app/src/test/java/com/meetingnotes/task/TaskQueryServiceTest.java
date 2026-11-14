@@ -105,16 +105,32 @@ class TaskQueryServiceTest {
     }
 
     @Test
-    void controllerRejectsBadLimitAndBeforeIdWith400InvalidMedia() {
+    void controllerRejectsBadParamsWith400InvalidParam() {
         com.meetingnotes.web.TaskController controller = new com.meetingnotes.web.TaskController(
                 org.mockito.Mockito.mock(com.meetingnotes.task.TaskService.class),
                 newService(),
                 jdbc);
 
-        assertEquals(400, assertThrows(ApiException.class, () -> controller.list(null, "51", null)).getStatus());
-        assertEquals("INVALID_MEDIA", assertThrows(ApiException.class, () -> controller.list(null, "51", null)).getCode());
+        assertEquals("INVALID_PARAM", assertThrows(ApiException.class, () -> controller.list(null, "51", null)).getCode());
         assertEquals(400, assertThrows(ApiException.class, () -> controller.list(null, "0", null)).getStatus());
-        assertEquals(400, assertThrows(ApiException.class, () -> controller.list(null, "abc", null)).getStatus());
-        assertEquals(400, assertThrows(ApiException.class, () -> controller.list(null, null, "not-a-number")).getStatus());
+        assertEquals("INVALID_PARAM", assertThrows(ApiException.class, () -> controller.list(null, "abc", null)).getCode());
+        assertEquals("INVALID_PARAM", assertThrows(ApiException.class, () -> controller.list(null, null, "not-a-number")).getCode());
+    }
+
+    @Test
+    void controllerValidatesStatusFilterStrictly() throws Exception {
+        com.meetingnotes.task.TaskService taskService = org.mockito.Mockito.mock(com.meetingnotes.task.TaskService.class);
+        com.meetingnotes.web.TaskController controller = new com.meetingnotes.web.TaskController(
+                taskService, newService(), jdbc);
+
+        // 非法 status → 400 INVALID_PARAM，不再静默空列表（T2.12）
+        ApiException e = assertThrows(ApiException.class, () -> controller.list("BOGUS", null, null));
+        assertEquals(400, e.getStatus());
+        assertEquals("INVALID_PARAM", e.getCode());
+
+        // 合法 status 原样透传（ 不触发 400）
+        stubRows(1, 3L);
+        com.meetingnotes.task.TaskQueryService.TaskListResponse resp = controller.list("DONE", null, null);
+        assertEquals(1, resp.items().size());
     }
 }

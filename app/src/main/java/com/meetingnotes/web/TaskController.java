@@ -30,6 +30,10 @@ public class TaskController {
     /** 认证接入前固定单用户（与 TaskService 一致）。 */
     private static final long DEFAULT_USER_ID = 1L;
 
+    /** T2.12：status 过滤只允许任务状态机的五个值，其它 → 400 INVALID_PARAM（不再静默空列表）。 */
+    private static final java.util.Set<String> ALLOWED_STATUS_FILTER =
+            java.util.Set.of("PENDING", "RUNNING", "RETRYING", "DONE", "DEAD");
+
     private final TaskService taskService;
     private final TaskQueryService taskQueryService;
     private final JdbcTemplate jdbc;
@@ -69,10 +73,10 @@ public class TaskController {
             try {
                 lim = Integer.parseInt(limit.trim());
             } catch (NumberFormatException e) {
-                throw new ApiException(400, "INVALID_MEDIA", "limit 必须是数字");
+                throw new ApiException(400, "INVALID_PARAM", "limit 必须是数字");
             }
             if (lim < 1 || lim > TaskQueryService.MAX_LIMIT) {
-                throw new ApiException(400, "INVALID_MEDIA",
+                throw new ApiException(400, "INVALID_PARAM",
                         "limit 取值范围 1.." + TaskQueryService.MAX_LIMIT);
             }
         }
@@ -81,10 +85,18 @@ public class TaskController {
             try {
                 before = Long.parseLong(beforeId.trim());
             } catch (NumberFormatException e) {
-                throw new ApiException(400, "INVALID_MEDIA", "before_id 必须是数字");
+                throw new ApiException(400, "INVALID_PARAM", "before_id 必须是数字");
             }
         }
-        return taskQueryService.list(DEFAULT_USER_ID, status, lim, before);
+        String statusFilter = null;
+        if (status != null && !status.isBlank()) {
+            statusFilter = status.trim();
+            if (!ALLOWED_STATUS_FILTER.contains(statusFilter)) {
+                throw new ApiException(400, "INVALID_PARAM",
+                        "status 只允许 PENDING/RUNNING/RETRYING/DONE/DEAD");
+            }
+        }
+        return taskQueryService.list(DEFAULT_USER_ID, statusFilter, lim, before);
     }
 
     /**
