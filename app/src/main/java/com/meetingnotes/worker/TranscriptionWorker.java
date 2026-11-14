@@ -108,11 +108,17 @@ public class TranscriptionWorker implements SmartLifecycle {
             if (taskId == null) {
                 continue; // BLPOP 超时，回到阻塞等待（无空转轮询）
             }
+            // T2.7：taskId 放 MDC（结构化日志的独立字段），处理/失败全程贯穿，finally 清防止线程复用串号
+            org.slf4j.MDC.put("taskId", taskId.trim());
             try {
-                process(Long.parseLong(taskId.trim()));
-            } catch (Exception e) {
-                log.error("任务 {} 处理异常", taskId, e);
-                markFailure(Long.parseLong(taskId.trim()), e);
+                try {
+                    process(Long.parseLong(taskId.trim()));
+                } catch (Exception e) {
+                    log.error("处理异常", e);
+                    markFailure(Long.parseLong(taskId.trim()), e);
+                }
+            } finally {
+                org.slf4j.MDC.remove("taskId");
             }
         }
         log.info("worker 已停止");
@@ -127,7 +133,7 @@ public class TranscriptionWorker implements SmartLifecycle {
             return;
         }
         jdbc.update("UPDATE task SET status = 'RUNNING', updated_at = now() WHERE id = ?", taskId);
-        log.info("任务 {} 开始转写（第 {} 次尝试）", taskId, ((Number) row.get("attempts")).intValue() + 1);
+        log.info("开始转写（第 {} 次尝试）", ((Number) row.get("attempts")).intValue() + 1);
 
         int attempts = ((Number) row.get("attempts")).intValue();
         Path dir = null;
@@ -148,10 +154,12 @@ public class TranscriptionWorker implements SmartLifecycle {
             } catch (RuntimeException e) {
                 throw new ProcessingException("STORAGE_ERROR", "从对象存储拉取文件失败：" + e.getMessage(), e);
             }
+            log.info("拉取媒体对象完成（{} bytes）", Files.size(input));
 
             // 2) ffmpeg 抽 16k 单声道 wav（卡片指定参数）
             wav = Files.createTempFile("mn-wav-", ".wav");
             extractMono16k(input, wav);
+            log.info("ffmpeg 抽音轨完成（16k 单声道 wav）");
 
             // 3) ASR 转写（复用 TranscriptionModel，容器内 http://asr:8000）
             String text;
@@ -160,6 +168,7 @@ public class TranscriptionWorker implements SmartLifecycle {
             } catch (RuntimeException e) {
                 throw new ProcessingException("ASR_ERROR", "ASR 转写调用失败：" + e.getMessage(), e);
             }
+            log.info("ASR 转写完成（{} 字）", text == null ? 0 : text.length());
 
             // 4) 写结果 + DONE。D-048：空文本（null/空白）是业务结果（纯音乐/静音/无人声），
             //    不是故障 → 正常 DONE + transcript 落空串，不算失败、不重试。
@@ -183,9 +192,9 @@ public class TranscriptionWorker implements SmartLifecycle {
                 """, taskId, normalized);
         jdbc.update("UPDATE task SET status = 'DONE', updated_at = now() WHERE id = ?", taskId);
         if (normalized.isEmpty()) {
-            log.info("任务 {} 完成：未识别到语音内容（空 transcript，D-048）", taskId);
+            log.info("转写结果已落库（未识别到语音内容，空 transcript，D-048）");
         } else {
-            log.info("任务 {} 完成，转写 {} 字", taskId, normalized.length());
+            log.info("转写结果已落库（transcript {} 字）", normalized.length());
         }
     }
 

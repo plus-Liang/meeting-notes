@@ -55,9 +55,14 @@ public class StartupRecovery implements ApplicationRunner {
                 redis.opsForList().leftPush(queueKey, Long.toString(id));
             } catch (RuntimeException e) {
                 // Redis 尚未就绪：任务已回 PENDING，等待后续入队重试/人工兜底，不让启动流程崩
-                log.error("启动恢复：任务 {} 回 PENDING 成功但入队失败（Redis 不可用）", id, e);
+                log.atError()
+                        .addKeyValue("taskId", id)
+                        .setCause(e)
+                        .log("启动恢复：任务回 PENDING 成功但入队失败（Redis 不可用）");
             }
         }
-        log.info("启动恢复：回收 {} 个 RUNNING 僵尸任务重新入队", stuck.size());
+        log.atInfo()
+                .addKeyValue("recovered", stuck.size())
+                .log("启动恢复：回收 RUNNING 僵尸任务重新入队");
     }
 }
