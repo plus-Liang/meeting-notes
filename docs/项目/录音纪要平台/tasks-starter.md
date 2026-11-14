@@ -983,19 +983,25 @@ curl.exe -s --noproxy "*" http://localhost:8080/api/v1/tasks/<id>   # todos 是�
 > ④ **三档输出同构**：统一一个 DTO（`summary` / `keywords` / `todos` / `ai_tier`），上层不写三套分支；
 >    `ai_tier` 必须落 `task_result.ai_tier`（CLOUD/LOCAL/EXTRACTIVE）。**空 transcript（D-048 无语音）→ 跳过结构化，`ai_tier` 也留 null**（没有可结构化内容，别假装有档位）。
 > ⑤ 顺序不变，仍守 F-1/D-069：transcript → 结构化（摘要+待办）→ **最后** DONE。
->    **可选优化（推荐但不强制）**：把"摘要 + 待办"两次 LLM 调用**合并成一次**（同构 JSON 一次出），
->    DONE 前最坏等待从 2×120s 降到 120s（F-7）；若时间紧就留下次，但要在这里写一句"没做"。
+>    **F-7（本轮必做，不再可选）**：把"摘要 + 待办"两次 LLM 调用**合并成一次**（同构 JSON 一次出 summary/keywords/todos）。
+>    理由：① DONE 前最坏等待 2×120s → **120s**；② transcript 只交一次，token 减半（推理模型的思考量随 prompt 涨）；
+>    ③ **降级语义一致**——不会出现"摘要成功、待办失败"的混合态（现在两次调用互相独立，可以一成一败）。
+>    注意（写码方自己提的风险，采纳）：合并后输出 JSON **更大**，必须和 F-5 的**代码层截断 20 条**联动，否则
+>    `finish_reason=length` 会把整个结构化输出截崩；同时保留"解析失败 → WARN（截 200 字）+ 不重试 + 三字段一起留空"的旧语义。
+> ⑥ **诊断信息（做不动可跳过，跳过要在报告写一句）**：改用 `model.call(new Prompt(...))` 拿 `ChatResponse`，
+>    在"content 为空/解析失败"的 WARN 里带上 `finish_reason` 与 `usage`（尤其 `reasoning_tokens`）——
+>    T3.2 就是靠手工复现才知道是 reasoning 吃光 token（K-29），以后要能从日志直接看出来。可选尝试 `response_format: json_object`。
 
 【规划四问】
-- **改哪里**：`ai/AiTier.java`（新）、`ai/AiStructuringRouter`（新，或并入现有 config）、`ai/SummaryService`/`ai/TodoService`（改为按档执行/复用同一 ChatModel 选择）、`ai/ExtractiveStructurer`（新）、`worker/TranscriptionWorker`（调用点改一处）、`web/`（**不改**，`ai_tier` 已在 T3.1 返回）、`application.yml`（F-8 一行默认值）、单测 3~4 个文件。
+- **改哪里**：`ai/AiTier.java`（新）、`ai/AiStructuringRouter`（新，或并入现有 config）、`ai/StructuringService`（新：**一次** LLM 调用出 summary/keywords/todos；`SummaryService`/`TodoService` 保留还是收编由实现方定，但对外行为按 DTO 统一）、`ai/ExtractiveStructurer`（新）、`worker/TranscriptionWorker`（调用点改一处）、`web/`（**不改**，`ai_tier` 已在 T3.1 返回）、`application.yml`（F-8 一行默认值）、单测 3~4 个文件。
 - **复用什么**：T3.1 `SummaryService` 结构与"解析失败 WARN 截 200 字不重试"；T3.2 `TodoService` 的"未知→null/空 action 丢弃"；`AsrHttpClientConfig` 的 120s 路由；`LlmModelSwitchEnvironmentPostProcessor`（无 key 时 bean 不存在 → 用它而不是 `new`）；**`task_result.todos/summary/keywords/ai_tier` 列都已存在，不要新迁移**。
-- **影响哪些功能**：无 key 时从"全 null"变成"有抽取式结果"（用户可见变化）；`ai_tier` 三个取值；启动期多一次 ≤2s 的 ollama 探活（失败只 WARN）；LLM 调用次数 2→1（若做合并）。
+- **影响哪些功能**：无 key 时从"全 null"变成"有抽取式结果"（用户可见变化）；`ai_tier` 三个取值；启动期多一次 ≤2s 的 ollama 探活（失败只 WARN）；**LLM 调用 2→1（F-7 必做）**，DONE 前最坏等待 240s→120s；`summary` 与 `todos` 从"可能一成一败"变成"要么都成、要么都空"。
 - **怎么验证**：见【验收】，反例是"删 key 仍产出"和"ollama 配了但没起也要能启动"。
 
 【范围声明】
 - 做：tier 判定 + LOCAL 接线 + EXTRACTIVE 最小实现 + 同构 DTO + `ai_tier` 落库 + F-5/F-6/F-8 收口 + 单测。
 - 不做：T3.4 的抽取式**质量提升**（分词库选型/TextRank 深做/规则待办精细化）、T3.9 模板、前端展示（T4.13）、待办勾选（T3.5）；不改表结构、不新增迁移、不加新配置键（`OLLAMA_*`/`OFFLINE_MODE` 都是已有键）。
-- 禁：把 EXTRACTIVE 结果标成 CLOUD（`ai_tier` 必须诚实，D-020）；无 key/ollama 不可达时抛异常或 500；启动期因探活失败而失败；删改已有断言；为省事把待办塞进 summary。
+- 禁：把 EXTRACTIVE 结果标成 CLOUD（`ai_tier` 必须诚实，D-020）；无 key/ollama 不可达时抛异常或 500；启动期因探活失败而失败；删改已有断言；为省事把待办塞进 summary；**删证据行**（要做新反例 → 用**未上传过的样本**，如 `a_1113.wav` / `a_11月7日.wav`，别靠删任务行让 probe.wav 幂等失效，D-073）。
 - **公共面**：只允许 `application.yml` 里 `LLM_MAX_TOKENS` 默认值这一处（用户 2026-11-14 已批准，F-8）；其它公共面要动先报。
 
 【验收】（反例必须进；**证据任务行不删**，报告里写 taskId，D-073）
@@ -1008,11 +1014,11 @@ docker compose exec -T postgres psql -U mn -d meetingnotes -t -A -c "select task
 docker compose logs app --since 5m | Select-String 'ollama' ; curl.exe -s --noproxy "*" http://localhost:8080/actuator/health
 # ④ 空音频（纯静音/纯音乐样本）→ transcript="" + summary/todos=null + ai_tier=null（不是 EXTRACTIVE）
 # ⑤ 变异验证：把 tier 判定顺序/返回值写反（例如 CLOUD 判成 EXTRACTIVE）→ 新单测必须红，验完还原
-# ⑥ 顺序不变（F-1 回归）：taskId 日志链仍是 转写落库 → 摘要 → 待办 → DONE
+# ⑤b 变异验证二：把"合并调用"改回两次调用（或把 DTO 某字段写死 null）→ 相关单测必须红，还原后必须再绿（K-30：touch 防 Maven 增量编译）\n# ⑥ 顺序不变（F-1 回归）：taskId 日志链仍是 转写落库 → 结构化（一次调用）→ DONE；贴一条完整时间线\n# ⑥b 合并调用证据：日志/单测证明**一次** LLM 调用同时产出 summary+keywords+todos（不是两次），失败时三字段**一起**留空\n# ⑥c 新反例要新任务 → 用未上传过的样本（a_1113.wav / a_11月7日.wav），禁止删证据行（D-073）
 # ⑦ 回归：错误四连（404/405/415/400）、列表、详情字段只增不减；全量 `scripts\test.ps1` ≥76 用例 exit 0；
 #    check-maintainability exit 0；worker ≤300 行；干净 shell（不预置环境变量）
 ```
-**通过标准**：三档都能选对且 `ai_tier` 诚实落库；**删 key 后仍产出非空 summary（EXTRACTIVE）且无 500**；ollama 不可达时应用照常启动；空 transcript 的 null 语义不被破坏；单测 ≥76 exit 0；F-5/F-6/F-8 三处收口各有一条可判据。
+**通过标准**：三档都能选对且 `ai_tier` 诚实落库；**删 key 后仍产出非空 summary（EXTRACTIVE）且无 500**；ollama 不可达时应用照常启动；空 transcript 的 null 语义不被破坏；**F-7 合并成一次调用**（三字段同生同灭、DONE 前最坏 120s）；单测 ≥76 exit 0；F-5/F-6/F-8 三处收口各有一条可判据。
 
 【可维护性】tier 判定集中在一个类（不要散在 service 里 if/else）；三档同构 DTO；`ai/` 单向依赖（`worker → ai`，不许反向）；
 新增分支必须有测试（每个档位至少一条）；EXTRACTIVE 不用第三方分词库（T3.4 再定）；commit 前 `check-maintainability.ps1` exit 0。
