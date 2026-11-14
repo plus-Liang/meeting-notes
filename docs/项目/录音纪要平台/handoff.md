@@ -4,7 +4,8 @@
 
 1. **T3.5 改词回流（glossary）+ 待办勾选**（卡在 `tasks-starter.md` T3.4 之后）：用户改错词 → 替换该任务文本 + 写 `glossary`（wrong_text/right_text/hits）；待办勾选/删除持久化（`todos` jsonb 元素加 `done`，**无 DDL**）；**新增端点属公共面 → 开工确认先给 API 契约草案，批准后再写码**。
 2. 之后：T3.6 术语注入（US-3 闭环）→ T3.7/T3.9/T3.10 → T3.8 周验收 → 第 4 周 T4.x → 第 5 周。
-3. **待用户拍板**：F-11 本地档独立 `LLM_LOCAL_MAX_TOKENS` / `LLM_LOCAL_TIMEOUT_SEC`（新增配置键；不批则 LOCAL 档永远降级 EXTRACTIVE）。
+2. **T3.11 本地档独立预算（F-11，D-081 已批）**：`LLM_LOCAL_MAX_TOKENS=512` / `LLM_LOCAL_TIMEOUT_SEC=180` 两键，只影响 LOCAL 档；目标是 `ai_tier=LOCAL` 真实可达（排 T3.5 之后）。
+3. 之后：T3.6 术语注入（US-3 闭环）→ T3.7/T3.9/T3.10 → T3.8 周验收 → 第 4 周 T4.x → 第 5 周。
 
 ## 2. 别踩的坑
 

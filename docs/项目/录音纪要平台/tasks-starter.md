@@ -1174,6 +1174,60 @@ docker compose exec -T postgres psql -U mn -d meetingnotes -t -A -c "select user
 
 **【回报·测试三问】** 检查了哪些场景（改词/重复改词/勾选/取消/删除/越界/非法输入/回归）｜ 实际命令 + 输出（curl 原样 + psql 查询结果 + taskId；变异红/绿；exit code）｜ 还有哪些没验证（**不许留空**；T3.6 注入、前端 UI、并发改同一任务可写"留 T3.6/T4.x"）。
 
+## T3.11 本地档独立预算（F-11，约 1h，**用户 2026-11-14 已批 D-081**）
+
+> **现状**：LOCAL 档（ollama + qwen2.5:1.5b）在 app 内**必然失败**：本地 `ChatModel` 继承了云档的
+> `spring.ai.openai.chat.options.max-tokens`（=8192，推理模型要这么多）与 120s 读超时 →
+> 1.5B/CPU 生成超 120s 触顶（实测 124.9s，报误导性 `RestClientException … content type [application/octet-stream]`），
+> 而临时把 `max_tokens` 调到 512 时 **16.8s 就返回**（输出带散文，T3.4 的 `JsonExtractor` 已能抽出 JSON）。
+> 结果：`ai_tier` 实际只有 CLOUD / EXTRACTIVE 两种，第二档等于"挂名"。
+>
+> **目标**：给 LOCAL 档一套**独立预算**，让它真实产出 `ai_tier=LOCAL`；**云档/ASR 的预算与超时一个字不改**。
+
+**主任务**：
+1. **新增 2 个配置键（只这两个，别多加）**，三处一致（`.env.example` / `application.yml` 的 fallback / `配置清单.md` 已写好）：
+   - `LLM_LOCAL_MAX_TOKENS` 默认 **512**；
+   - `LLM_LOCAL_TIMEOUT_SEC` 默认 **180**。
+2. **`config/OllamaChatModelConfig` 消费这两个值**：本地 `ChatModel` 的 `maxTokens` 用本地键（不再读云档的 `spring.ai.openai.chat.options.max-tokens`）；
+   读超时用本地值——**必须建独立超时通道**（自己的 `RestClient.Builder`/`HttpClient`，connect 仍 5s），
+   **不许改 `AsrHttpClientConfig` 里云的 120s / ASR 的 900s 路由**（回归要能验云档仍 120s）。
+3. **可观测**：启动/首次调用打一条 INFO 说明本地档预算（`max_tokens=… / timeout=…s`）；失败时 WARN 里带这两值 + 失败原因（沿用现有降级 WARN，不许改级联语义）。
+4. **不改**：`AiStructuringRouter` 判档顺序、`StructuringService` 级联、`ai_tier` 语义、web/表结构、worker；不加新业务码。
+
+**【规划四问】**（开工确认回述）
+- 改哪里：`application.yml`（2 键）、`.env.example`（2 键）、`config/OllamaChatModelConfig`（预算注入 + 独立超时）、单测 1~2 个文件；`AsrHttpClientConfig` **不改**。
+- 复用什么：现有 D-058/D-068 的"按用途分超时"思想（这里只是给本地档第三条通道）、`OllamaProbe` 2s 探活不动。
+- 影响哪些功能：只影响 LOCAL 档（从"必失败"变"可能成功"）；云档/离线门禁/抽取式/契约全不变。
+- 怎么验证：见【验收】。
+
+**【范围声明】**
+- 做：2 个键 + 本地 `ChatModel` 预算/超时 + 单测 + 实机（LOCAL 成功或明确失败降级）+ 云档回归。
+- 不做：不加第 3 个键（如本地 temperature/上下文长度）；不改云档 max_tokens 8192；不改 120s 云路由；不动 `AiStructuringRouter`/`TodoGrounding`；不做前端。
+- 禁：为让 LOCAL 成功而放宽云的 8192 或超时（A 让 B）；用 `ollama pull`（本网络不通，模型已在镜像里）；删/改已有断言；删证据行（D-073）。
+
+**【验收】**
+```powershell
+# ① 三处一致（硬判据）
+Select-String -Path .env.example,app\src\main\resources\application.yml -Pattern 'LLM_LOCAL_MAX_TOKENS|LLM_LOCAL_TIMEOUT_SEC'
+#    期望：.env.example 两行 + yml 两个 fallback（512 / 180）；配置清单.md 两行已就位
+# ② 单测：本地 ChatModel 的 maxTokens=512、超时=180s（反射/属性断言，必须能造红）；全量 ≥131 exit 0；check-maintainability exit 0
+# ③ 实机 LOCAL：.env 设 OLLAMA_ENABLED=true / OLLAMA_MODEL=qwen2.5:1.5b / LLM_API_KEY 空 / OFFLINE_MODE=false（改前备份，D-070）
+#    → docker compose up -d app → 传**新样本**（先看 reused=false）→ 期望：
+#    docker compose exec -T postgres psql -U mn -d meetingnotes -t -A -c "select task_id, ai_tier, length(summary) from task_result order by task_id desc limit 1"
+#    **ai_tier=LOCAL** + summary 非空 + 耗时（贴日志 "结构化已落库" 与上一行时间差）；若失败：必须 WARN 带 reason 且 ai_tier=EXTRACTIVE（两者都能接受，写清是哪种）
+# ④ LOCAL 失败路径仍降级：临时把 OLLAMA_MODEL 改成不存在的模型（探活仍 200、调用必失败）→ 期望 ai_tier=EXTRACTIVE + WARN，无 500，应用照常
+# ⑤ 云档回归：恢复 key（OFFLINE_MODE=false）→ 重建 → 传新样本 → ai_tier=CLOUD 且正常；再确认云档超时仍是 120s（改的是本地通道，别串线）
+# ⑥ 空音频（新静音样本）→ 四字段 null；错误四连 404/405/415/400；详情 11 键不变
+# ⑦ 变异：把本地 max_tokens 改回继承云档 8192（或本地 timeout 改回 120）→ 单测必须红 → 还原 → touch → 绿（K-30）
+# ⑧ 收尾：`.env` 恢复基线哈希 2BCC440F1C9E；证据行不删；`git diff --name-only` 只含配置/代码/测试（允许 `.env.example`、`application.yml`——本卡是**批准过的公共面**）
+```
+**通过标准**：2 键三处一致且在本地档生效（单测可判 + 实机可判）；**LOCAL 档有明确结论**（`ai_tier=LOCAL`，或失败降级 + WARN 写清原因）；
+云档/空音频/错误四连/详情 11 键全不变；全量 ≥131 exit 0；可维护性 exit 0；worker 不动；零新业务码；证据行不删。
+
+**【可维护性】** 本地档预算集中在 `OllamaChatModelConfig`（一个类里说清"为什么本地和云不一样"）；超时值不许散落魔法数；键名与 `配置清单.md` 一致；commit 前 `check-maintainability.ps1` exit 0。
+
+**【回报·测试三问】** 检查了哪些场景（LOCAL 成功/LOCAL 失败降级/云端回归/空音频/错误四连）｜ 实际命令 + 输出（taskId + `ai_tier` + 耗时 + 日志；三处一致 grep；变异红/绿；exit code）｜ 还有哪些没验证（**不许留空**；`ollama pull` 不通、模型换新版本未验可写"已知环境限制"）。
+
 ---
 
 ## 每张卡做完都要给你的回报

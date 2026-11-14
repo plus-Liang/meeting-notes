@@ -868,6 +868,17 @@
   4. **F-11（本地档独立 max_tokens/超时）仍未批**：在用户批准前，LOCAL 档维持"尝试→降级 EXTRACTIVE"，`ai_tier` 实际只有 CLOUD/EXTRACTIVE；本卡（T3.4）未动任何配置键。
 - **依据**：`review/2026-11-14-T3.4验收.md` §2/§6；task 104（bug 证据）、108/109（我独立提质证据）、110/112（回归）；K-34。
 - **已排除项**：把 104 当"模型质量差"（实为代码 bug）；用"字数够"当摘要质量判据（字数够但前缀截断——104 就是 67 字也"非空"）；把 T3.3 缺陷隐瞒不写（验收方自己的验收漏了这条，必须留痕）。
+### D-081 批准新增本地档独立预算键（F-11）：`LLM_LOCAL_MAX_TOKENS=512` / `LLM_LOCAL_TIMEOUT_SEC=180`
+- **日期**：2026-11-14（T3.4 验收后；用户明确批准）｜**决策人**：用户（我提案）
+- **结论**：
+  1. **批准**新增 2 个配置键，**只影响第二档 LOCAL**，云档与 ASR 完全不变：
+     `LLM_LOCAL_MAX_TOKENS` 默认 **512**（1.5B/CPU 出 JSON 够用；实测 512 时 16.8s 返回，8192 时 >120s 触顶）；
+     `LLM_LOCAL_TIMEOUT_SEC` 默认 **180**（CPU 慢，给宽松读超时）。
+  2. 消费方：`config/OllamaChatModelConfig` 的本地 `ChatModel` 用这两个值（不再继承云档的 `spring.ai.openai.chat.options.max-tokens` 与 120s 读超时路由）。
+  3. **公共面纪律照旧**：`.env.example` / `application.yml` fallback / `配置清单.md` **三处一致**；本机 `.env` 由验收方同步（改前备份 D-070）；README 不新增键说明（T4.x 发布前统一）。
+  4. 目标：LOCAL 档**真实产出 `ai_tier=LOCAL`**；若仍失败（小模型不守 JSON 等），允许保留"降级 EXTRACTIVE + WARN"，但必须在报告里写清是哪一种，且级联语义不变。
+- **依据**：F-11（`review/2026-11-14-T3.3验收.md` §7、T3.4 验收 §8）；实测：8192 → 124.9s 触顶 + `RestClientException … application/octet-stream`（误导性症状）；512 → 16.8s 返回、散文包裹（T3.4 `JsonExtractor` 已能抽出）；直连 ollama HTTP 200 + 合法 JSON。
+- **已排除项**：把全局 `LLM_MAX_TOKENS` 调小（会截断云档摘要，A 让 B 的指标）；让本地档无限等（必须有读超时，否则 worker 被拖死）；加更多键（只加这两个，够用为止）。
 ---
 
 ## 面试速查（由本文件派生，勿单独维护）

@@ -27,8 +27,8 @@
 ## 待办（按顺序）
 
 1. **T3.5 改词回流 + 待办勾选**（卡在 `tasks-starter.md`）：改词 → 写 `glossary`（wrong_text/right_text/hits）+ 结果应用；待办勾选/删除持久化（jsonb 内加 `done`，无 DDL）；API 只增不改；判据"改一次即入库、刷新仍勾选"。
-2. T3.6 术语注入 → T3.7/T3.9/T3.10 → T3.8 周验收 → 第 4 周 **T4.x** → 第 5 周。
-3. **待用户拍板**：F-11 本地档独立 `LLM_LOCAL_MAX_TOKENS`/`LLM_LOCAL_TIMEOUT_SEC`（新增配置键）。
+2. **T3.11 本地档独立预算（F-11，D-081 已批）**：加 `LLM_LOCAL_MAX_TOKENS=512` / `LLM_LOCAL_TIMEOUT_SEC=180` 两键，只影响 LOCAL 档，让 `ai_tier=LOCAL` 真实可达（排 T3.5 之后）。
+3. T3.6 术语注入 → T3.7/T3.9/T3.10 → T3.8 周验收 → 第 4 周 **T4.x** → 第 5 周。
 
 ## 阻塞 / 风险
 
