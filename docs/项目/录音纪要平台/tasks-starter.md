@@ -489,7 +489,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\check-maintainability.
 
 ---
 
-## T2.12 错误语义收口（0.5h，T2.11 引入的回归 + T2.10 参数码语义）
+## T2.12 错误语义收口（0.5h，T2.11 引入的回归 + T2.10 参数码语义）✅ **已完成（`9bc93e4`；我复跑七连击全对、40/40）**
 
 > **这是 T2.11 的回归**：加了 `@ExceptionHandler(Exception.class)` 之后，Spring 自己的异常也被吞了。实测（我验收时打的）：
 > | 请求 | 应该 | 现在 |
@@ -540,7 +540,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\check-maintainability.
 
 ---
 
-## T2.3 崩溃恢复：启动回收 RUNNING 僵尸（US-2 场景②，约 1h）
+## T2.3 崩溃恢复：启动回收 RUNNING 僵尸（US-2 场景②，约 1h）✅ **已完成（`11744ee`；我复跑 RUNNING 中重启 → 回收 1 个 → 12s DONE，40/40）**
 
 > 为什么现在做：T2.1 的"幂等 + 复活"已经能救 DEAD，但**进程被杀在 RUNNING** 的任务没人管——`docker restart app` 后它会永远 RUNNING
 > （卡片 spec US-2 场景②要求"处理中杀进程重启 → 恢复或明确可重试"）。这是"不丢任务"的最后一环。
@@ -578,6 +578,52 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\check-maintainability.
 【可维护性】回收 SQL 带 `RETURNING id` 一次拿全，别 N+1；注释写清"单实例假设，多实例需改阈值"。
 
 【回报·测试三问】检查了哪些场景 ｜ 实际运行的命令 + 日志摘录 + exit code ｜ 还有哪些没验证（**不许留空**）。
+
+---
+
+## T2.2 ASR 超时：失败要"快发现"（约 1h，D-058）
+
+> 现状：停 ASR 时，任务要 **78s** 才走到 RETRYING/DEAD（实测，根因是 DNS/连接阶段长超时）。
+> 用户看到的是"任务卡在 RUNNING 一分多钟"；`app.asr.timeout-sec`（900s）至今**没有消费方**（D-054 登记的"计划中"键）。
+> **D-058 已定方案**，按它执行；若要改方案（比如压短 900s）→ 停下问我。
+
+【规划四问】
+- **改哪里**：①`application.yml` 的 `app.asr` 下新增 `connect-timeout-sec: ${ASR_CONNECT_TIMEOUT_SEC:5}`；
+  ②按 Spring AI 1.1.x 的扩展点给 ASR 的 HTTP 调用设**连接/首字节超时**（`connect-timeout-sec`）与**单次请求总超时**（`timeout-sec`）；
+  ③`.env.example` 增加 `ASR_CONNECT_TIMEOUT_SEC=5` 行；④`配置清单.md` §2 的 `$appKeys` 快照 34 → **35**（这是 D-054 的机械要求，我会在验收时核）；
+  ⑤顺手删 `TranscriptionWorker` 里拆分后残留的两个未使用 import（`DataAccessException`、`java.util.List`）；⑥补测试。
+- **复用什么**：Spring Boot 3.5 的 HTTP 客户端定制能力（`RestClientCustomizer` / `ClientHttpRequestFactory`）；
+  既有 `app.asr.timeout-sec` 配置项；`TranscriptionWorker` 的失败分类（`ASR_ERROR`）。
+- **影响哪些功能**：ASR 调用的超时行为（**不改 API/表结构/错误码**）；新增 1 个配置键（D-058 已批）。
+- **怎么验证**：停 ASR → 上传 → 记录**提交到首次 RETRYING/失败**与**到 DEAD** 的耗时；长音频仍能正常 DONE。
+
+【范围声明】
+- 做：上述 ①~⑥。
+- 不动：重试次数（仍 3）、状态机、队列语义、`/api/v1`、幂等、列表页。
+- 禁止：把 `app.asr.timeout-sec` 压到 10s 级别（长音频 60min 会被误杀）；只加健康预检而不设超时（DNS 卡住时预检一样卡）；
+  引入延时队列做退避（D-058 明确这轮不做）。
+
+【验收】（反例必须进；**要贴时间戳**）
+```powershell
+# ① 停 ASR → 上传 → 先后轮询，量两个数：首次失败（RETRYING）/ 最终 DEAD 各用时多久
+docker compose stop asr
+curl.exe -s --noproxy "*" -X POST -F "file=@D:\datasets\meeting-notes-samples\probe.wav" http://localhost:8080/api/v1/tasks
+# 期望：首次失败 ≤ 15s；到 DEAD ≤ 45s（当前基线 78s，要明显变快；贴日志时间戳）
+docker compose logs app --since 5m 2>&1 | Select-String -Pattern '任务 .* 开始转写|ASR_ERROR|置 DEAD|RETRYING'
+
+# ② 回归：ASR 恢复后，长音频仍能 DONE（probe.wav 90s）
+docker compose start asr; 上传同一文件 → 期望 reused 语义正确 + DONE
+# ③ 配置体检：新增键必须有消费方，且进 .env.example 与快照
+#    跑 配置清单.md §2 第 5 条 → 期望孤儿键仍是"计划中"那几个，不含 ASR_CONNECT_TIMEOUT_SEC 的 yml 键 app.asr.connect-timeout-sec
+cd app; powershell -NoProfile -ExecutionPolicy Bypass -File ..\scripts\test.ps1   # 期望 ≥41 用例 exit 0
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\check-maintainability.ps1   # 期望 exit 0
+```
+**通过标准**：两个耗时数字明显下降（首次 ≤15s / DEAD ≤45s，贴证据）；长音频仍 DONE；新键有消费方且在 `.env.example`；
+`$appKeys` 快照已更新为 35 并自检 no diff；单测 ≥41；脚本 exit 0。
+
+【可维护性】超时配置集中在一处；不许把 5s/900s 写成魔法数；`TranscriptionWorker` 删掉未使用 import。
+
+【回报·测试三问】检查了哪些场景 ｜ 实际命令 + **耗时数字 + 日志时间戳** + exit code ｜ 还有哪些没验证（**不许留空**）。
 
 ---
 

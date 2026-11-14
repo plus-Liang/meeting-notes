@@ -38,7 +38,7 @@
 | **T0.4** | Spring AI 最小转写跑通 | 独立复跑 exit 0 | ✅ `25528b9` + `review/2026-11-13-T0.4验收.md` |
 | **T0.5** | 云 LLM 通道 + **无 key 可启动** | 真实摘要 + 清空 key 仍能启动 | ✅ `483d6f2` + `review/2026-11-13-T0.5验收.md`（DeepSeek 实测 3 条摘要；无 key 时 ChatModel=0、health UP） |
 
-**下一步**：第 2 周：**T2.12 错误语义收口**（0.5h，T2.11 引入的回归 + 参数码语义）→ T2.2（含 ASR 超时）→ T2.3 → T2.4~T2.9 → T2.8 备份。**阶段 1 全 ✅；T2.1/T2.10/T2.11 ✅**。
+**下一步**：第 2 周：**T2.2 ASR 超时（失败要快发现）** → T2.4 健康检查 → T2.5 缓存 / T2.6 配额并发 / T2.7 JSON 日志 / T2.8 备份恢复。**阶段 1 全 ✅；T2.1/T2.3/T2.10/T2.11/T2.12 ✅**。
 **T1.5 开工前**（已完成）：先修 T1.4 审查的 P1/P2（snake_case 契约 + 幂等真实状态 + `user_id` 过滤，D-040/D-041），一个 commit（`7c90e9a`）。
 **已处理**：`glossary."right"` 改名 `right_text`（D-037，用户拍板）；列名已在真实 PG16 空卷验证。
 
@@ -69,8 +69,8 @@
 | ID | 任务 | DoD | 验证命令 / 期望 |
 |---|---|---|---|
 | **T2.1** | 幂等：`content_hash` 唯一 + 命中返回 `reused:true` + **命中 DEAD 时重新投递**（D-049） | 同文件两次 → 1 任务；DEAD 文件重传 → 重新入列 | ✅ `300db82` + `review/2026-11-14-T1.9-T2.1验收.md`。V2 迁移（查重删除 + 撤全局 `ux_task_hash` + `UNIQUE(user_id, content_hash)`）+ `ON CONFLICT DO NOTHING` 幂等（**D-055 批准偏离卡片的 catch 方案**）+ 复活重投（attempts=0/PENDING/error_code=NULL）。我复跑：`down -v` 后 Flyway V1+V2 全 success、真实 PG 唯一索引在；连传两次同 id（第二次 `reused:true`+真实 `DONE`）；**并发**两请求同 id、只 1 行；DEAD → 重传 → PENDING → **0.1s DONE**；复活不重复扣配额；**429 与 MinIO 故障都不留孤儿 PENDING 行**（事务回滚生效）；`scripts/test.ps1` **26/26**。**遗留**：复活后 `dead_letter` 残留（F-1）、存储故障 500 无 `code`（F-2）→ **T2.11** |
-| **T2.2** | 重试 + 退避 + 死信 | 人为失败 → RETRYING → DEAD | 停 ASR 提交任务 → 观察迁移。**补**（T2.1 验收观测 F-3）：给 ASR 调用设上限——`app.asr.timeout-sec` 目前**无消费方**（D-054），实测停 ASR 后首次失败因 DNS 解析可拖到 **78s**；目标 = 失败发现 ≤10s 且可配 |
-| **T2.3** | 崩溃恢复：启动回收 RUNNING 僵尸 | 重启不永久卡住 | 处理中 `docker restart app` → 终态 |
+| **T2.2** | 重试 + 超时 + 死信 | 人为失败 → RETRYING → DEAD；**失败发现要快** | 停 ASR 提交任务 → 观察迁移。**方案（D-058）**：新增 `ASR_CONNECT_TIMEOUT_SEC`（默认 5s）做连接/首字节超时，把既有 `app.asr.timeout-sec`（900s）接上做单次转写总超时；目标 **首次失败 ≤15s、到 DEAD ≤45s**（当前实测 78s）；**暂不做退避间隔**（快速失败 + 3 次即刻重试总开销小，T2.6 再评估）。新键必须进 `.env.example` + `配置清单.md` §2 的 `$appKeys` 快照（34→35） |
+| **T2.3** | 崩溃恢复：启动回收 RUNNING 僵尸 | 重启不永久卡住 | ✅ `11744ee` + `review/2026-11-14-T2.12-T2.3验收.md`。新增 `worker/StartupRecovery`（`ApplicationRunner`，与消费 worker 解耦）：`UPDATE task SET status='PENDING' WHERE status='RUNNING' RETURNING id` → 逐个 `leftPush`，0 也打日志；单实例假设写进注释；H2 空库 `DataAccessException` → WARN 跳过（保 D-035）。我复跑：`probe.wav` 处理中 `docker restart app` → 重启日志「回收 1 个 RUNNING 僵尸」→ 12s 内 `DONE`，**不停 RUNNING**；`TranscriptionWorker` 拆后 271 行 |
 | **T2.4** | 健康检查四项（DB/Redis/MinIO/ASR） | 任一不可用整体 DOWN | 打掉 minio → `status=DOWN` |
 | **T2.5** | 结果缓存：同 hash 复用 | 不重复转写 | ASR 日志只有一次请求 |
 | **T2.6** | 配额 + 并发控制（ASR 并发可配） | 超限 429 + `Retry-After` | 并发设 1 提交 3 个 → 顺序执行不死锁 |
@@ -79,7 +79,7 @@
 | **T2.9** | 本周单测（幂等/状态机/健康） | `mvn test` 全绿 | BUILD SUCCESS + 用例数 |
 | **T2.10** | **服务端任务列表 API**（D-053） | 换浏览器/清缓存仍能看到历史任务 | ✅ `08e862d` + `review/2026-11-14-T2.11-T2.10验收.md`。`GET /api/v1/tasks?status=&limit=&before_id=`：keyset（`id<before_id ORDER BY id DESC LIMIT n+1`，禁 OFFSET）、`LIMIT+1` 探测下一页、`status` 过滤、`original_name` 从 `source_uri` 解析、snake_case。我复跑：默认列表 `[23,22,21]`+`next_before_id:null`；`limit=2`→`[23,22]`、游标 22→`[21]` **不重不漏**；`status=DONE` 过滤正确；`limit=51/0/abc`、`before_id=xyz` 全 400；`tasks.html` 200/3503B、只调服务端 API、localStorage 仅兜底、3s 轮询仅在有未完成任务时；截图（无痕 4 条历史）已核对；`style.css`/`app.js` 未动。**缺陷**：参数错误码借用 `INVALID_MEDIA`（F-2）、`status=BOGUS` 静默 200（F-3）→ **T2.12** |
 | **T2.11** | **契约与死信收口**（D-056） | 死信列表里不出现 DONE 任务；500 响应体带 `code` | ✅ `08fbfd6` + 同上报告。复活时删 `dead_letter`；存储故障 → `500 STORAGE_ERROR`；加 `@ExceptionHandler(Exception)` 兜底 `500 INTERNAL_ERROR`（不泄细节）；`test.ps1` 去掉本机路径兜底（未设 `ASR_SMOKE_AUDIO` → exit 3）。我复跑：DEAD 复活后死信 **1→0 行**；停 MinIO 上传 → **500 + `code:"STORAGE_ERROR"`** 且无孤儿行；单测 **33/33** exit 0；脚本 exit 0。**回归缺陷**：兜底把框架 4xx 全吞成 500（F-1）→ **T2.12** |
-| **T2.12** | **错误语义收口**（D-057，T2.11/T2.10 验收发现）：①兜底 handler 尊重框架语义（`ErrorResponse` 按原状态码 + 通用码，只有真未知才 500）；②列表参数错误码 `INVALID_MEDIA`→`INVALID_PARAM`；③`status` 严格校验（非法值 400，不再静默空列表） | 404 仍 404、405 仍 405、415 仍 415、类型错 400 | `GET /api/v1/nope`→404 `NOT_FOUND`；`DELETE /api/v1/tasks`→405；JSON POST→415；`/api/v1/tasks/abc`→400；`?limit=abc`→400 `INVALID_PARAM`；`?status=BOGUS`→400；单测 33 → ≥36 |
+| **T2.12** | **错误语义收口**（D-057） | 404 仍 404、405 仍 405、415 仍 415、类型错 400 | ✅ `9bc93e4` + `review/2026-11-14-T2.12-T2.3验收.md`。兜底 handler 改为「`ErrorResponse` 按原状态码 + 通用码，真未知才 500」；参数码改 `INVALID_PARAM`；`status` 白名单严格校验。我复跑七连击全对：`/api/v1/nope` 404 `NOT_FOUND`、`/nope.html` 404、`/tasks/abc` 400 `INVALID_PARAM`、`DELETE` 405、JSON POST 415、`?limit=abc` 400、`?status=BOGUS` 400；回归：`/tasks/999999` 仍 404 `TASK_NOT_FOUND`、`?status=DONE` 仍 200、`GET /` 200；单测 **40/40** |
 
 **W2 过关**：US-2 三场景全过；N1–N5、N8、N9、N18–N20 有证据。
 
