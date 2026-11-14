@@ -21,7 +21,7 @@
 
 ## 3. 关键文件
 
-`00-先看这个.md` · `开工准备清单.md` · `架构一页纸.md` · `可维护性要求.md` · **`踩坑与复盘-面试用.md`（K-01~K-34；G 节=AI 写码方 7 坑 + 7 闸门）** · `spec.md`/`plan.md`（§5.1 三档 / §5.4 详情页）/`tasks.md`/`tasks-starter.md` · `decisions.md`（**82 条**，最新 D-078/079/080）· `接入指南.md` · `review/2026-11-14-T3.4验收.md`（最新，18 份）· `配置清单.md` · `scripts/backup.ps1`/`restore.ps1` · `rules/dev.md`（§4.1）。
+`00-先看这个.md` · `开工准备清单.md` · `架构一页纸.md` · `可维护性要求.md` · **`踩坑与复盘-面试用.md`（K-01~K-34；G 节=AI 写码方 7 坑 + 7 闸门）** · `spec.md`/`plan.md`（§5.1 三档 / §5.4 详情页）/`tasks.md`/`tasks-starter.md` · `decisions.md`（**83 条**，最新 D-078/079/080/081）· `接入指南.md` · `review/2026-11-14-T3.4验收.md`（最新，18 份）· `配置清单.md` · `scripts/backup.ps1`/`restore.ps1` · `rules/dev.md`（§4.1）。
 
 ## 4. 未决
 
