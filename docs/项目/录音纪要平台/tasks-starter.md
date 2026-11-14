@@ -991,6 +991,12 @@ curl.exe -s --noproxy "*" http://localhost:8080/api/v1/tasks/<id>   # todos 是�
 > ⑥ **诊断信息（做不动可跳过，跳过要在报告写一句）**：改用 `model.call(new Prompt(...))` 拿 `ChatResponse`，
 >    在"content 为空/解析失败"的 WARN 里带上 `finish_reason` 与 `usage`（尤其 `reasoning_tokens`）——
 >    T3.2 就是靠手工复现才知道是 reasoning 吃光 token（K-29），以后要能从日志直接看出来。可选尝试 `response_format: json_object`。
+> ⑦ **开工前必须先算清"单次 JSON 体积预算"（写码方提的唯一未压测点，采纳）**：合并后一次调用要在 `max_tokens=8192` 里同时装
+>    **思考链 + 结构化正文**。参考实测：reasoning 3000~3800（T3.2），8192−3800≈**4400** 留给正文；
+>    粗算正文：summary 200 字≈300~400 tok + keywords 8 个≈30 tok + 20 条 todos×~50 tok≈1000 tok → **约 1500**，余量 ≈2900。
+>    【规划四问】里要给出你的估算与**超限策略**（建议：todos 代码截断 20、summary 限 200 字、keywords ≤10；
+>    `finish_reason=length` → 该任务**降级 EXTRACTIVE** + WARN 带 reason，**不做无限重试**）。
+>    不允许"跑样本时才发现被截断"——预算先算，样本只用来验证预算。
 
 【规划四问】
 - **改哪里**：`ai/AiTier.java`（新）、`ai/AiStructuringRouter`（新，或并入现有 config）、`ai/StructuringService`（新：**一次** LLM 调用出 summary/keywords/todos；`SummaryService`/`TodoService` 保留还是收编由实现方定，但对外行为按 DTO 统一）、`ai/ExtractiveStructurer`（新）、`worker/TranscriptionWorker`（调用点改一处）、`web/`（**不改**，`ai_tier` 已在 T3.1 返回）、`application.yml`（F-8 一行默认值）、单测 3~4 个文件。
@@ -1018,7 +1024,7 @@ docker compose logs app --since 5m | Select-String 'ollama' ; curl.exe -s --nopr
 # ⑦ 回归：错误四连（404/405/415/400）、列表、详情字段只增不减；全量 `scripts\test.ps1` ≥76 用例 exit 0；
 #    check-maintainability exit 0；worker ≤300 行；干净 shell（不预置环境变量）
 ```
-**通过标准**：三档都能选对且 `ai_tier` 诚实落库；**删 key 后仍产出非空 summary（EXTRACTIVE）且无 500**；ollama 不可达时应用照常启动；空 transcript 的 null 语义不被破坏；**F-7 合并成一次调用**（三字段同生同灭、DONE 前最坏 120s）；单测 ≥76 exit 0；F-5/F-6/F-8 三处收口各有一条可判据。
+**通过标准**：三档都能选对且 `ai_tier` 诚实落库；**删 key 后仍产出非空 summary（EXTRACTIVE）且无 500**；ollama 不可达时应用照常启动；空 transcript 的 null 语义不被破坏；**F-7 合并成一次调用**（三字段同生同灭、DONE 前最坏 120s）；**JSON 体积预算在开工确认时给出、样本实测未出现 `finish_reason=length` 截断（若出现，必须有降级证据）**；单测 ≥76 exit 0；F-5/F-6/F-8 三处收口各有一条可判据。
 
 【可维护性】tier 判定集中在一个类（不要散在 service 里 if/else）；三档同构 DTO；`ai/` 单向依赖（`worker → ai`，不许反向）；
 新增分支必须有测试（每个档位至少一条）；EXTRACTIVE 不用第三方分词库（T3.4 再定）；commit 前 `check-maintainability.ps1` exit 0。
