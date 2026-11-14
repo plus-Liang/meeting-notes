@@ -971,7 +971,10 @@ curl.exe -s --noproxy "*" http://localhost:8080/api/v1/tasks/<id>   # todos 是�
 >   **不可证伪**（真重试同一 prompt 也照样绿）→ 改 `verify(chatModel, times(1)).call(anyString())`。
 >
 > 主任务（约 2h）：
-> ① 新增 `ai/AiTier`（enum：`CLOUD`/`LOCAL`/`EXTRACTIVE`）+ `ai/AiStructuringRouter`（或 `AiConfig`）：
+> ① 新增 `ai/AiTier`（enum：`CLOUD`/`LOCAL`/`EXTRACTIVE`）+ `ai/AiStructuringRouter`（或 `AiConfig`）。
+>    **语义是"级联降级"，不是"静态选一档"（本卡定死）**：先按可用性定首选档；该档调用异常/空 content/解析失败 →
+>    **依次降一档再试**（CLOUD→LOCAL→EXTRACTIVE）；`ai_tier` 落**实际产出该结果的档位**；
+>    EXTRACTIVE 是零依赖兜底，所以只要 transcript 非空就**必定有产出**。
 >    **判定顺序按 plan §5.1**：① 有 `LLM_API_KEY`+`LLM_BASE_URL`+`LLM_MODEL` 且 `OFFLINE_MODE=false` → CLOUD；
 >    ② `OLLAMA_ENABLED=true` 且 `OLLAMA_BASE_URL` **探活成功（≤2s，别复用 120s）** 且 `OLLAMA_MODEL` 非空 → LOCAL；
 >    ③ 其它 → EXTRACTIVE。**启动期绝不因探活失败而起不来**（K-04 铁律：尽力而为 + WARN）。
@@ -997,6 +1000,13 @@ curl.exe -s --noproxy "*" http://localhost:8080/api/v1/tasks/<id>   # todos 是�
 >    【规划四问】里要给出你的估算与**超限策略**（建议：todos 代码截断 20、summary 限 200 字、keywords ≤10；
 >    `finish_reason=length` → 该任务**降级 EXTRACTIVE** + WARN 带 reason，**不做无限重试**）。
 >    不允许"跑样本时才发现被截断"——预算先算，样本只用来验证预算。
+> ⑧ **LOCAL 档真实生成也要验（用户 2026-11-14 已批准拉取，别只验降级路径）**：
+>    环境已由验收方备好：`docker compose --profile local-llm up -d ollama`（该服务在 `profiles: ["local-llm"]`，默认不启动）；
+>    模型用 **`qwen2.5:1.5b`**（中文可用、体积 ~1GB；拉取命令 `docker compose exec -T ollama ollama pull qwen2.5:1.5b`）。
+>    验证：`.env` 设 `OLLAMA_ENABLED=true` / `OLLAMA_MODEL=qwen2.5:1.5b` / `OLLAMA_BASE_URL=http://ollama:11434/v1` → 重建 app →
+>    传样本 → 期望 `ai_tier=LOCAL` 且 summary/todos 可解析非空。**小模型 JSON 不达标是允许的结论**：
+>    此时必须能观察到"LOCAL 失败 → 降级 EXTRACTIVE，`ai_tier=EXTRACTIVE`，WARN 带 reason"——这条比"LAN 成功"更重要（级联降级就是这个兜底）。
+>    验完把 `.env` 恢复 `OLLAMA_ENABLED=false`（默认关闭、用户可选开），并在回报里写清"LOCAL 成功/降级"到底发生了哪个。
 
 【规划四问】
 - **改哪里**：`ai/AiTier.java`（新）、`ai/AiStructuringRouter`（新，或并入现有 config）、`ai/StructuringService`（新：**一次** LLM 调用出 summary/keywords/todos；`SummaryService`/`TodoService` 保留还是收编由实现方定，但对外行为按 DTO 统一）、`ai/ExtractiveStructurer`（新）、`worker/TranscriptionWorker`（调用点改一处）、`web/`（**不改**，`ai_tier` 已在 T3.1 返回）、`application.yml`（F-8 一行默认值）、单测 3~4 个文件。
@@ -1016,7 +1026,9 @@ curl.exe -s --noproxy "*" http://localhost:8080/api/v1/tasks/<id>   # todos 是�
 #    期望：status=DONE，summary 非空、todos 非空（或至少 summary 非空），ai_tier=EXTRACTIVE，无 500
 docker compose exec -T postgres psql -U mn -d meetingnotes -t -A -c "select task_id, ai_tier, length(summary), jsonb_array_length(todos) from task_result order by task_id desc limit 5"
 # ② 云档：恢复 key（.env 哈希与备份一致）→ 重建 → 传样本 → ai_tier=CLOUD，摘要 150~250 字、todos 可追溯
-# ③ LOCAL 档：OLLAMA_ENABLED=true 但 ollama 没起（或模型没拉）→ **应用仍 healthy** + 启动 WARN + 该任务 ai_tier=EXTRACTIVE
+# ③a LOCAL 降级路径：OLLAMA_ENABLED=true 但 ollama 没起（或模型没拉）→ **应用仍 healthy** + 启动 WARN + 该任务 ai_tier=EXTRACTIVE
+# ③b LOCAL 真实生成（已备好环境）：--profile local-llm 起 ollama + 拉 qwen2.5:1.5b → 传样本 → 贴 ai_tier（LOCAL 或"LOCAL失败→EXTRACTIVE"）+ WARN 里的 reason
+docker compose --profile local-llm up -d ollama ; docker compose exec -T ollama ollama pull qwen2.5:1.5b
 docker compose logs app --since 5m | Select-String 'ollama' ; curl.exe -s --noproxy "*" http://localhost:8080/actuator/health
 # ④ 空音频（纯静音/纯音乐样本）→ transcript="" + summary/todos=null + ai_tier=null（不是 EXTRACTIVE）
 # ⑤ 变异验证：把 tier 判定顺序/返回值写反（例如 CLOUD 判成 EXTRACTIVE）→ 新单测必须红，验完还原

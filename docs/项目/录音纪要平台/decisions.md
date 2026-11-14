@@ -795,6 +795,21 @@
   写码方拒绝盲目照改并要求给口径的处理是正确的。
 - **已排除项**：只信"看起来对"的单一工具输出（本次两种 PowerShell 口径都与真相不符）；把分歧当成"对方造假"（本次是我错）。
 
+### D-075 三档是"级联降级"而非"静态选档"；LOCAL 用 qwen2.5:1.5b，ollama 默认不启动
+- **日期**：2026-11-14（T3.3 开工前定；用户批准拉取 ollama 验证 LOCAL 真实生成）｜**决策人**：本人
+- **结论**：
+  1. **级联语义**：先按可用性定首选档（plan §5.1），该档**调用异常 / 空 content / 解析失败 → 依次降一档再试**
+     （CLOUD → LOCAL → EXTRACTIVE）；`ai_tier` 落**实际产出该结果的档位**；EXTRACTIVE 是零依赖兜底，
+     所以只要 transcript 非空就**必定有产出**（不会出现"选了某档但失败 → 三字段全空"）。
+  2. **LOCAL 模型**：`qwen2.5:1.5b`（中文可用、约 1GB、CPU 可跑）；模型名走 `OLLAMA_MODEL`，不硬编码。
+  3. **ollama 默认不启动**：服务在 `docker-compose.yml` 的 `profiles: ["local-llm"]`，默认 `up -d` 不起（省内存/磁盘，符合"零成本可跑"默认体验）；
+     启用 = `docker compose --profile local-llm up -d ollama` + `docker compose exec -T ollama ollama pull qwen2.5:1.5b` + `.env` 三个 `OLLAMA_*`。
+     `OLLAMA_ENABLED` 默认 **false**（可选功能），README 必须写清启用步骤。
+  4. 小模型 JSON 不达标是**允许的结论**：此时应观察到"LOCAL 失败 → 降 EXTRACTIVE + WARN 带 reason"，这比"LOCAL 成功"更能验证级联。
+- **依据**：`plan.md` §5.1（三档）；T3.3 卡（⑦ 预算 / ⑧ LOCAL 真实生成）；用户 2026-11-14 批准拉取镜像与模型。
+- **已排除项**：静态选一档（无兜底，出现"选中档失败 → 全空"，与 D-020/N15 冲突）；默认启动 ollama（1.5GB 镜像 + 内存占用，
+  破坏"不填 key 也能跑"的开箱体验）；在代码里硬编码模型名（换模型要改代码）。
+
 ---
 
 ## 面试速查（由本文件派生，勿单独维护）
@@ -828,3 +843,4 @@
 | **AI 结果字段怎么定语义？** | D-072（`null`=未生成 / `[]`=确实没有；元素 snake_case；未知 owner/deadline 必须 null 不猜） |
 | **验收时怎么证明"写码方说的可信"？** | D-073（证据任务行不删、报告带 taskId；配合 K-22"不信自述只信复算"） |
 | **你怎么保证验收数字不是你算错的？** | D-074 + K-20（每个数字附编码无关命令并换工具交叉验证；288 vs 298 是我错、写码方对，我撤回并保留更正） |
+| **没有 key / 模型服务挂了，功能还能用吗？** | D-075（三档**级联降级** CLOUD→LOCAL→EXTRACTIVE，`ai_tier` 诚实标实际档位；EXTRACTIVE 零依赖兜底，transcript 非空必有产出）+ D-020 |
