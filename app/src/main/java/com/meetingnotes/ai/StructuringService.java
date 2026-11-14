@@ -142,11 +142,16 @@ public class StructuringService {
         return withGroundedTodos(parsed, transcript);
     }
 
-    /** 合并 JSON 解析（同一个 DTO，三档同构）：summary 必填，keywords/todos 容错但形状必须合法。 */
+    /**
+     * 合并 JSON 解析（同一个 DTO，三档同构）：summary 必填，keywords/todos 容错但形状必须合法。
+     * T3.4 ④：先经 {@link JsonExtractor} 抽取（散文包裹 / ```json 围栏），抽不到才按解析失败处理——
+     * 不放宽提示词硬约束，失败语义（三字段一起留空 + 降级）不变。
+     */
     StructuringResult parse(String raw, AiTier tier) {
         JsonNode root;
         try {
-            root = mapper.readTree(raw);
+            String candidate = JsonExtractor.extract(raw);
+            root = candidate == null ? null : mapper.readTree(candidate);
         } catch (Exception e) {
             throw new IllegalArgumentException("JSON 解析失败");
         }

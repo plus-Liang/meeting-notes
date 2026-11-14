@@ -274,4 +274,44 @@ class StructuringServiceTest {
 
         verify(jdbc).update(contains("UPDATE task_result"), eq("会议"), eq("[]"), eq("[]"), eq("CLOUD"), eq(19L));
     }
+
+    // ---- T3.4 ④ JSON 抽取容错（云/本地共用） ----
+
+    @Test
+    void fencedJsonInsideProseIsExtractedBeforeParsing() {
+        // ```json 围栏 + 前后散文：抽取成功 → 正常落库 CLOUD，而不是无谓降级（T3.3 证据行 98/101 的病）
+        String raw = "好的，以下是结构化结果：\n```json\n" + VALID_JSON + "\n```\n希望有帮助。";
+        when(cloudProvider.getIfAvailable()).thenReturn(cloudModel);
+        when(cloudModel.call(any(Prompt.class))).thenReturn(response(raw, "stop"));
+
+        assertTrue(newService(true).structure(20L, TRANSCRIPT));
+
+        verify(jdbc).update(contains("UPDATE task_result"), eq("会议讨论了材料整理"),
+                anyString(), anyString(), eq("CLOUD"), eq(20L));
+    }
+
+    @Test
+    void proseWrappedJsonIsExtractedBeforeParsing() {
+        // 无围栏、前后散文：从第一个 { 括号配对抽取
+        String raw = "结构化结果如下：" + VALID_JSON + "，以上就是全部内容。";
+        when(cloudProvider.getIfAvailable()).thenReturn(cloudModel);
+        when(cloudModel.call(any(Prompt.class))).thenReturn(response(raw, "stop"));
+
+        assertTrue(newService(true).structure(21L, TRANSCRIPT));
+
+        verify(jdbc).update(contains("UPDATE task_result"), eq("会议讨论了材料整理"),
+                anyString(), anyString(), eq("CLOUD"), eq(21L));
+    }
+
+    @Test
+    void unextractableOutputStillDegrades() {
+        // 反例（验收③）：{ 不闭合 → 抽取不到 → 按解析失败走降级，容错不许吞掉失败
+        when(cloudProvider.getIfAvailable()).thenReturn(cloudModel);
+        when(cloudModel.call(any(Prompt.class))).thenReturn(response("{\"summary\":\"没闭合", "stop"));
+
+        assertTrue(newService(true).structure(22L, TRANSCRIPT));
+
+        verify(jdbc).update(contains("UPDATE task_result"), anyString(), anyString(), anyString(),
+                eq("EXTRACTIVE"), eq(22L));
+    }
 }
