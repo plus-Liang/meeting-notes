@@ -978,6 +978,9 @@ curl.exe -s --noproxy "*" http://localhost:8080/api/v1/tasks/<id>   # todos 是�
 >    **判定顺序按 plan §5.1**：① 有 `LLM_API_KEY`+`LLM_BASE_URL`+`LLM_MODEL` 且 `OFFLINE_MODE=false` → CLOUD；
 >    ② `OLLAMA_ENABLED=true` 且 `OLLAMA_BASE_URL` **探活成功（≤2s，别复用 120s）** 且 `OLLAMA_MODEL` 非空 → LOCAL；
 >    ③ 其它 → EXTRACTIVE。**启动期绝不因探活失败而起不来**（K-04 铁律：尽力而为 + WARN）。
+>    ④ **`OFFLINE_MODE` 是云档硬门禁（D-077，验收方 2026-11-14 裁决）**：`OFFLINE_MODE=true` 时**即使三件套齐也不判 CLOUD**
+>    （spec §134 场景②：离线模式配了云 LLM → 不发起外连）；同时**必须 WARN 一次**（reason=`offline_mode`，写清"云配置被离线模式屏蔽"），
+>    否则用户只看到"有 key 却是 EXTRACTIVE"无法自查。`.env.example` 默认值保持 true 不动；验收 ② 的完整前提 = 恢复 key **且** `OFFLINE_MODE=false`。
 > ② LOCAL 档：用独立 `ChatModel` 实例（`base-url=${OLLAMA_BASE_URL}`、`model=${OLLAMA_MODEL}`、超时沿用 120s 路由），
 >    **不要覆盖/污染 CLOUD 的 bean**；两档可同时配置时 CLOUD 优先。
 > ③ EXTRACTIVE 档**最小实现**（T3.4 再提质，本卡只要"能产出且不是乱码"）：按 `。！？；\n` 分句 →
@@ -1034,7 +1037,8 @@ curl.exe -s --noproxy "*" http://localhost:8080/api/v1/tasks/<id>   # todos 是�
 # ① 零依赖档（核心反例）：.env 里 LLM_API_KEY= + OLLAMA_ENABLED=false（改前先备份 .env，D-070）→ 重建 app → 传有语音样本
 #    期望：status=DONE，summary 非空、todos 非空（或至少 summary 非空），ai_tier=EXTRACTIVE，无 500
 docker compose exec -T postgres psql -U mn -d meetingnotes -t -A -c "select task_id, ai_tier, length(summary), jsonb_array_length(todos) from task_result order by task_id desc limit 5"
-# ② 云档：恢复 key（.env 哈希与备份一致）→ 重建 → 传样本 → ai_tier=CLOUD，摘要 150~250 字、todos 可追溯
+# ①b 离线门禁反例（D-077）：.env 恢复 key 但 OFFLINE_MODE=true → 必须 ai_tier∈{LOCAL,EXTRACTIVE}（无外连）+ WARN reason=offline_mode
+# ② 云档：恢复 key（.env 哈希与备份一致）**且 OFFLINE_MODE=false** → 重建 → 传样本 → ai_tier=CLOUD，摘要 150~250 字、todos 可追溯
 # ③a LOCAL 降级路径：OLLAMA_ENABLED=true 但 ollama 没起（或模型没拉）→ **应用仍 healthy** + 启动 WARN + 该任务 ai_tier=EXTRACTIVE
 # ③b LOCAL 真实生成（环境已备好、模型已导入，**不要 ollama pull**）→ 传样本 → 贴 ai_tier（LOCAL 或"LOCAL失败→EXTRACTIVE"）+ WARN 里的 reason
 docker compose --profile local-llm up -d ollama ; docker compose exec -T ollama ollama list    # 应见 qwen2.5:1.5b

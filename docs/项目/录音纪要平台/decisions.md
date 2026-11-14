@@ -821,6 +821,21 @@
 - **依据**：2026-11-14 实测 `POST http://ollama:11434/v1/chat/completions`（qwen2.5:1.5b，temperature 0）：
   4.8s、`finish_reason=stop`、合法 JSON、68 tok，但把原文"下周三"编成 `2023-04-15`、"下个月初"编成 `2023-06-01`（`review/` 后续 T3.3 报告记录）。
 - **已排除项**：只靠提示词（1.5B 明确违反）；只对 LOCAL 档校验（CLOUD 也会编，统一校验才对；K-21 的 T3.1 样本是运气好没编）；把"下周三"自动换算成日期（时区/当年歧义，会造出更难查的错）。
+### D-077 `OFFLINE_MODE` 是云档的硬门禁：true 时即使配了 key 也不许出站（本地 .env 置 false）
+- **日期**：2026-11-14（T3.3 开工确认时发现"卡要求 CLOUD 需 `OFFLINE_MODE=false`，但仓库 `.env`/`.env.example` 都是 true 且配了 DeepSeek key"）｜**决策人**：本人
+- **结论**：
+  1. **按 plan §5.1 / spec §134 场景② 严格执行**：`OFFLINE_MODE=true` = 禁一切出站网络，此时云三件套（`LLM_API_KEY/LLM_BASE_URL/LLM_MODEL`）即使齐也**不判 CLOUD**；
+     先看 LOCAL 可用性（`OLLAMA_ENABLED=true` + 探活 ≤2s + `OLLAMA_MODEL` 非空），否则 EXTRACTIVE。
+  2. **必须有可诊断的 WARN**：`OFFLINE_MODE=true` 且云三件套齐时，判档处 WARN 一次（含 reason=`offline_mode`），说明"云配置被离线模式屏蔽"——
+     否则用户只会看到"有 key 却是 EXTRACTIVE"，无法自查（spec §134 ② 的"启动时不发起外连并告警"落在这里，T3.3 实现，归入卡⑥诊断同域，不新增配置键）。
+  3. **公共默认值不动**：`.env.example` 保持 `OFFLINE_MODE=true`（隐私优先的 B 类用户默认安全）；有 key 且要云质量的用户，自己把 `.env` 改 `false`。
+     **本机 `.env` 由验收方置 false**（用户已配 DeepSeek key，意图是云档；改前已备份，D-070）。
+  4. 验收 ②（云档）的完整前提 = 恢复 key **且** `OFFLINE_MODE=false`；验收 ①（零依赖）在默认 `OFFLINE_MODE=true`+无 key 下跑；
+     新增反例 ①b：`OFFLINE_MODE=true`+key 齐 → `ai_tier∈{LOCAL,EXTRACTIVE}` 且 WARN 可见、无外连。
+- **依据**：`plan.md` L119（云档前提含 `OFFLINE_MODE=false`）；`spec.md` L134（场景②：离线模式配了云 LLM → 不发起外连并告警）；
+  `配置清单.md` §1.6（`OFFLINE_MODE` 定义=禁一切出站网络，默认 true）；实测 `application.yml:79 offline-mode: ${OFFLINE_MODE:true}` 且全仓 Java 无消费方（死配置，与 D-0xx 的 18 个无消费方一致）。
+- **已排除项**：只看三件套忽略 `OFFLINE_MODE`（等于把"离线/禁出站"开关变成空话，隐私承诺失效）；
+  顺手把 `.env.example` 默认改 false（越权改公共面，且破坏隐私默认）；验收时只改 key 不改 `OFFLINE_MODE`（必然选不中 CLOUD，验收 ② 自相矛盾）。
 ---
 
 ## 面试速查（由本文件派生，勿单独维护）
