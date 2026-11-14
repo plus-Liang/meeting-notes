@@ -76,6 +76,7 @@
 | **T2.7** | 结构化 JSON 日志，taskId 贯穿 | 一条命令捞全链路 | `docker compose logs app \| grep <taskId>` → ≥5 条 |
 | **T2.8** | **备份与恢复**（US-11）：`backup.ps1` + `restore.ps1` + 每日自动 | 备份可核对；删卷能恢复 | 备份 → `down -v` → 恢复 → 数据一致 |
 | **T2.9** | 本周单测（幂等/状态机/健康） | `mvn test` 全绿 | BUILD SUCCESS + 用例数 |
+| **T2.10** | **服务端任务列表 API**（D-053）：`GET /api/v1/tasks?status=&limit=&before_id=`（user_id 过滤 / snake_case / 默认 20 上限 50）+ 列表页切换 | 换浏览器/清缓存仍能看到历史任务 | 新开无痕窗口打开 `/tasks` → 列表有历史；`curl` 带 status/limit 过滤正确；`limit>50` → 400 |
 
 **W2 过关**：US-2 三场景全过；N1–N5、N8、N9、N18–N20 有证据。
 
