@@ -1060,7 +1060,7 @@ docker compose logs app --since 5m | Select-String 'ollama' ; curl.exe -s --nopr
 
 【回报·测试三问】检查了哪些场景（三档 × 可用性矩阵逐格）｜ 实际命令 + 输出（三档各一份 taskId + `ai_tier` + 长度；ollama 不可达的启动日志；变异反例；exit code）｜ 还有哪些没验证（**不许留空**；F-7 的 120s 真超时留到 T3.8 就写"留到 T3.8"）。
 
-## T3.4 抽取式提质（EXTRACTIVE 质量）+ 结构化输出容错（约 2.5h）
+## T3.4 抽取式提质（EXTRACTIVE 质量）+ 结构化输出容错（约 2.5h）✅ **已完成（`27d7ed8`；我复跑 120/120 exit 0、双变异各造红、我独立实机 108/109 非前缀 kw 10 todos 4/3、110 CLOUD、112 空音频全 null；**并抓出修复 T3.3 遗留 `summaryOf` 少选句 bug**；F-11 本地档预算仍待用户批准）**
 
 > **现状**：T3.3（`991f429`）已交付**最小可用**抽取式 + 三档**级联**降级（CLOUD→LOCAL→EXTRACTIVE），`ai_tier` 诚实落库；
 > 但实机证据行 96/97 显示 EXTRACTIVE 质量弱：`summary` 112~117 字但**基本等于"前 N 字截断"**（ASR 输出没有标点/空格，分句退化）、`keywords` 只有 **3 个**、`todos` 只有 **1 条**。
@@ -1119,6 +1119,60 @@ CLOUD 回归不变；空音频 null 语义不变；单测 ≥90 exit 0；可维�
 不引入新依赖；`ai/` 单向依赖不变；commit 前 `check-maintainability.ps1` exit 0。
 
 **【回报·测试三问】** 检查了哪些场景（EXTRACTIVE × 3 新样本 / CLOUD × 1 / 空音频 / 错误四连 / 容错两反例）｜ 实际命令 + 输出（3 条 taskId + `ai_tier` + summary/kw/todos；T3.3 基线同列对比表；变异红/绿；exit code）｜ 还有哪些没验证（**不许留空**；F-11 本地档预算就写"待用户批准新键"；`finish_reason=length` 实机未触发可写"留 T3.8"）。
+
+## T3.5 改词回流（`glossary`）+ 待办勾选/删除（约 3h）
+
+> **现状**：`task`/`task_result`/`glossary` 三张表列都已存在（`glossary`: `user_id`/`wrong_text`/`right_text`/`hits`/`priority`，`UNIQUE(user_id, wrong_text)`，D-037）；
+> 但 web 层只有「提交 / 列表 / 详情」三个只读端点，**没有任何写回接口**；`todos` 是 jsonb 数组，元素只有 `action/owner/deadline`（无 `done`）。
+> **本卡目标**（spec §5.4 / US-3 的"回访"段）：①用户改错词/人名 → 替换该任务文本**并沉淀到 glossary**（`hits` 递增，供 T3.6 注入）；
+> ②待办可**勾选完成 / 删除**，且**写库持久**（刷新后仍在）；③对外契约**只增不改**。
+
+> ⚠️ **公共面预警**：本卡要**新增写端点**（路径/方法/请求体/响应/错误码都是对外契约）。按规矩：**开工确认必须先给 API 契约草案 + 错误码映射 + 示例请求/响应，经批准后才写码**；
+> 批准前只许读代码/写方案，不许写实现。若你判断"改字段语义/加表结构"更省事 → 先报，不许擅自动。
+
+**主任务**：
+1. **改词 → 写 glossary + 替换文本**（核心 US-3 的入口）：请求体形如 `{"corrections":[{"wrong_text":"章总","right_text":"张总"}]}`（最终以你方案为准，先报）；
+   事务内完成：①把该任务 `task_result.transcript` 里出现的 `wrong_text` **全部替换**，有 `summary` 时同一错词也替换（keywords/todos 里出现的也替换，避免"改了词摘要还是错的"）；
+   ②`INSERT ... ON CONFLICT (user_id, wrong_text) DO UPDATE SET hits = glossary.hits + 1, right_text = EXCLUDED.right_text, priority = ...`；
+   ③返回受影响条数 + 修改后的关键字段（供前端刷新）。**注意**：`wrong_text` 空/超长/等于 `right_text` → 400；任务不存在 → 404；非 multipart 的 JSON 请求要放行（不是 415）。
+2. **待办勾选 / 删除**：`todos` jsonb 元素**增加 `done` 字段**（默认 `false`；老数据无此字段按 `false` 读，**不加迁移、不改表结构**）。
+   切换完成：PATCH 语义（幂等：重复设为 true 仍 200）；删除：整条从数组移除；两者都要**写库**，重新 GET 详情必须看到最新状态。
+   下标越界 → 400 或 404（口径自定但要在契约里写明）；`todos` 为 `null` 时不许 500。
+3. **详情契约只增**：`todos` 元素从 `{action,owner,deadline}` 变为 `{action,owner,deadline,done}`；详情顶层 11 键不变；列表契约不变。
+4. **错误码**：复用现有分层（404 `TASK_NOT_FOUND` / 400 `INVALID_PARAM` / 415 `UNSUPPORTED_MEDIA_TYPE` / 405）；**不许新增业务码**除非报批。
+5. **回访闭环自测**：改词后，重新 `GET /api/v1/tasks/{id}` 能看到替换后的 transcript/summary；`glossary` 表有记录且 `hits` 正确；勾选/删除后重新 GET 状态一致。
+
+**【规划四问】**（开工确认回述，含 API 契约草案）
+- 改哪里：`web/`（新增 handler + DTO，注意 **F-10 技术债：不要每行 `new ObjectMapper()`**，可顺手注入单例但不要扩大到别的卡）、`repository/JdbcTemplate` 层（glossary upsert、jsonb 更新）、`ai/TodoService`（`TodoItem` 加 `done` 的读写兼容——**只加字段，不改依据校验**）；表结构/迁移**不动**；`worker/` 不动。
+- 复用：现有 `ApiException`/错误码分层（D-057）、`TaskController` 详情查询、`ObjectMapper` 注入方式、`user_id` 固定口径。
+- 影响：详情 `todos` 元素多一个 `done`；新增 2~3 个写端点；无 key/无 AI 不影响（纯 DB 操作）。
+- 怎么验证：见【验收】。
+
+**【范围声明】**
+- 做：改词替换 + glossary upsert（hits 递增）+ 待办勾选/删除持久化 + 详情 `done` 字段 + 单测（含 DB 层）。
+- 不做：T3.6 术语注入（下一张卡）、前端页面（T4.13）、批量操作（T3.7）、认证（T4.6）、改表结构/迁移、改已有字段语义、加新配置键。
+- 禁：前端假状态（必须写库）；改测试断言；删证据行（D-073）；把 `done` 塞进 `action` 字符串；未报批就改路径/响应结构。
+
+**【验收】（反例必须进；证据任务行不删，报告写 taskId，D-073）**
+```powershell
+# ① 契约草案先批后写：开工确认里贴 API 契约（方法/路径/请求/响应/错误码/示例）+ 范围声明
+# ② 改词：对一条 DONE 任务执行改词（用真实错词，如把转写里某词改成正确写法）
+#    期望：curl 返回 200 + 受影响条数；重新 GET 详情 → transcript/summary 已替换
+docker compose exec -T postgres psql -U mn -d meetingnotes -t -A -c "select user_id, wrong_text, right_text, hits from glossary order by user_id, wrong_text"
+#    再改同一个错词一次 → hits 从 1 变 2（幂等累积，不是插新行）
+# ③ 勾选：PATCH 某条 todo done=true → 重新 GET 详情 todos[i].done=true；再 PATCH false → false（幂等）
+# ④ 删除：DELETE 某条 todo → 数组少 1 条，重新 GET 仍少 1 条（写库不是内存）
+# ⑤ 反例：改不存在的 taskId → 404；空 wrong_text → 400；下标越界 → 400/404；todos=null 的任务勾选 → 4xx 不 500
+# ⑥ 回归：详情顶层 11 键不变（todos 元素只增 done）；列表契约不变；错误四连（404/405/415/400）仍对；空音频任务的 null 语义不变
+# ⑦ 单测 ≥120 保持（新增覆盖 glossary upsert 累加 / done 兼容老数据 / 替换只在本任务内）exit 0；check-maintainability exit 0；worker 不动
+# ⑧ 变异（必须造红→还原→touch→绿）：把 glossary upsert 删掉 → 改词用例红；把勾选改成只改内存不写库 → 刷新用例红
+# ⑨ 只允许一个写者；.env 不做改动（本卡不需要改配置）；commit 前 git diff --name-only 贴出
+```
+**通过标准**：改一次词 → glossary 有记录且 hits 递增、任务文本已替换；勾选/删除**刷新后仍生效**（写库）；详情 `todos` 仅增 `done`；反例 404/400 不 500；单测 ≥120 exit 0；可维护性 exit 0；**零迁移/零新配置键**；未报批的公共面改动一律不算通过。
+
+**【可维护性】** glossary 读写与 todos 更新放独立 repository（别塞进 controller）；`done` 兼容旧数据要有单测；jsonb 更新用参数化 SQL（不许拼字符串，防注入）；`F-10` 顺手收（详情 `ObjectMapper` 单例注入）但**不扩大**。
+
+**【回报·测试三问】** 检查了哪些场景（改词/重复改词/勾选/取消/删除/越界/非法输入/回归）｜ 实际命令 + 输出（curl 原样 + psql 查询结果 + taskId；变异红/绿；exit code）｜ 还有哪些没验证（**不许留空**；T3.6 注入、前端 UI、并发改同一任务可写"留 T3.6/T4.x"）。
 
 ---
 
