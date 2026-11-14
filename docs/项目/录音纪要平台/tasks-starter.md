@@ -272,6 +272,66 @@ powershell -File tools\check-maintainability.ps1               # 期望 exit 0
 
 ---
 
+## T1.7 配置外置基线自检（只读验证卡，不改代码）
+
+【规划四问】
+- **改哪里**：**不改代码**。只读跑 `配置清单.md` §2 的三条命令 + 扫一遍 `application.yml` / `.env.example`；发现硬编码 → **先报告再改**（最小修复）。
+- **复用什么**：`配置清单.md` §2 命令、`.env.example`、`check-maintainability.ps1` 的 M-1/M-2 检查。
+- **影响哪些功能**：无运行时行为变化（纯验证）；若修硬编码，仅改动配置读取处。
+- **怎么验证**：三条命令逐条跑并贴输出 + `docker compose config` 无告警 + 白名单外差集 0。
+
+【范围声明】
+- 做：跑三条命令、核对 yml ↔ `.env.example` 变量差集、Java 侧硬编码扫描（端口/路径/阈值/key）、把结果写进回报。
+- 不动：`docker-compose.yml`、Flyway 迁移、`/api/v1` 字段、`Dockerfile`；发现不一致只**报告**，不擅自扩大修复。
+
+【验收】（反例必须进）
+```powershell
+$env:JAVA_HOME='E:\tools\jdk-21.0.2'; $env:PATH="E:\tools\apache-maven-3.9.9\bin;$env:PATH"
+# ① 配置清单 §2 三条命令（原样跑，贴输出 + exit code）
+# ② 变量差集：yml 里 ${XXX} 引用 vs .env.example 键 → 差集必须 0
+docker compose config 2>&1 | Select-String -Pattern 'warn|variable is not set'   # 期望 0 命中
+# ③ Java 硬编码扫描：端口/绝对路径/阈值字面量（期望 0 命中，或逐条说明为何必须硬编码）
+# ④ 反例：临时把 yml 里一个变量改成不存在的名字 → 启动报错 → 改回来（只贴证据，不留改动）
+powershell -File tools\check-maintainability.ps1    # 期望 exit 0
+```
+**通过标准**：①②③ 全部 0 异常或逐条给出理由；④证明"配置错会立刻炸"而不是静默用默认值；脚本 exit 0。
+
+【可维护性】不改代码则跑脚本确认现状 exit 0；若修硬编码，改完必须再跑 exit 0（M-1 阻塞项）。
+
+【回报·测试三问】检查了哪些场景 ｜ 实际运行了哪些命令（含 exit code + 关键输出）｜ 还有哪些没验证（**不许留空**）。
+
+---
+
+## T1.8 单测补强（上传校验 + worker 状态机 S-1）
+
+【规划四问】
+- **改哪里**：`app/src/test/java/com/meetingnotes/upload/`（新增上传校验单测）+ `worker/TranscriptionWorkerTest.java`（补 RETRYING→DEAD 状态机分支）。
+- **复用什么**：已有 `MediaMagicTest` 的测试写法、Mockito（已在用）、H2（`NoKeyStartupTest` 已配）。
+- **影响哪些功能**：只加测试，不改业务代码；用例数 17 → **≥20**。
+- **怎么验证**：`mvn -q test` exit 0 + surefire 用例数 + 每条断言都有实际断言（不是"没报错"）。
+
+【范围声明】
+- 做：①上传校验单测（magic number / 大小 / 时长 / 格式 各 1 条）；②状态机：失败一次 → `RETRYING` 且重新入队；重试耗尽 → `DEAD` + `dead_letter` 有原因（S-1）。
+- 不动：业务实现代码（若发现只有改实现才能测 → **停下来问**，不要为了测试改逻辑）；不动配置/接口/compose。
+- 禁：`@Disabled`、`-DskipTests`、把断言削成"只要不抛异常"。
+
+【验收】（反例必须进）
+```powershell
+# ① 坏 exe 改名 .mp3 → 断言 400 INVALID_MEDIA（不是"抛异常就算过"）
+# ② 超大小 → 413 SIZE_EXCEEDED；超时长 → 400 DURATION_EXCEEDED
+# ③ 状态机：第一次抛 ASR_ERROR → 断言 status=RETRYING 且队列里重新出现该 task_id
+# ④ 状态机：attempts 达到上限 → 断言 status=DEAD 且 dead_letter 有 reason、error_code 是稳定码
+cd app; mvn -q -B test      # 期望 exit 0，surefire 用例数 ≥20
+powershell -File tools\check-maintainability.ps1   # 期望 exit 0
+```
+**通过标准**：4 类断言各自真的断言了**值**；用例数 ≥20；`git log -p -- app/src/test` 无被删断言（自查后贴图/输出）。
+
+【可维护性】M-8：新公共逻辑必须有测试；禁 `@Disabled`；`*SmokeTest` 之外不得 `assumeTrue`。脚本 exit 0。
+
+【回报·测试三问】检查了哪些场景 ｜ 实际运行了哪些测试（命令 + 用例数 + exit code）｜ 还有哪些没验证（**不许留空**）。
+
+---
+
 ## 每张卡做完都要给你的回报
 
 ```text
