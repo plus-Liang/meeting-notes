@@ -153,6 +153,10 @@ management:
       show-details: always
       probes:
         enabled: true
+      group:
+        readiness:
+          # T2.4 / D-059：四项依赖进 readiness（DB/Redis 由 starter 提供，minio/asr 是自定义指标）
+          include: readinessState,db,redis,minio,asr
 
 logging:
   level:

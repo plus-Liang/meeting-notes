@@ -35,7 +35,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
                 "spring.datasource.password=",
                 "spring.flyway.enabled=false",
                 "spring.jpa.hibernate.ddl-auto=none",
-                "management.health.redis.enabled=false"
+                "management.health.redis.enabled=false",
+                // T2.4：H2/无外部依赖环境关闭 minio/asr 探活（否则整体 DOWN），并放宽 readiness 组成员校验
+                "management.health.minio.enabled=false",
+                "management.health.asr.enabled=false",
+                "management.endpoint.health.validate-group-membership=false"
         })
 class NoKeyStartupTest {
 
