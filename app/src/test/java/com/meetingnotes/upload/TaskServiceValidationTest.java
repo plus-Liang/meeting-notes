@@ -5,24 +5,32 @@ import com.meetingnotes.task.TaskService;
 import com.meetingnotes.web.ApiException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentMatchers;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.redis.core.ListOperations;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.ResultSetExtractor;
 import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.transaction.support.TransactionCallback;
+import org.springframework.transaction.support.TransactionTemplate;
 import software.amazon.awssdk.services.s3.S3Client;
 
 import java.io.IOException;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -47,10 +55,18 @@ class TaskServiceValidationTest {
     private StringRedisTemplate redis;
     @Mock
     private ListOperations<String, String> listOps;
+    @Mock
+    private TransactionTemplate transactionTemplate;
 
     private TaskService newService(long maxSizeBytes, long maxDurationSec) {
-        return new TaskService(jdbc, s3, probe, quotaService, redis,
+        return new TaskService(jdbc, s3, probe, quotaService, redis, transactionTemplate,
                 maxSizeBytes, maxDurationSec, "meetingnotes", "meetingnotes:task-queue");
+    }
+
+    /** 让 transactionTemplate.execute(...) 直接执行回调（事务管理器行为不在本单测范围）。 */
+    private void runCallbackForReal() {
+        when(transactionTemplate.execute(any())).thenAnswer(inv ->
+                ((TransactionCallback<?>) inv.getArgument(0)).doInTransaction(null));
     }
 
     private static MockMultipartFile wav(long extraBytes) {
@@ -105,8 +121,10 @@ class TaskServiceValidationTest {
     void validWavPassesAllChecksPersistsTaskAndEnqueues() throws IOException {
         // 正向：格式/大小/时长/配额全过 → task(PENDING) + source_uri 回填 + Redis 入队 + 响应字段
         when(probe.durationSeconds(any())).thenReturn(90.0);
-        when(jdbc.queryForObject(contains("INSERT INTO task"), eq(Long.class), any(Object[].class)))
-                .thenReturn(7L);
+        runCallbackForReal();
+        // T2.1：INSERT ... ON CONFLICT (user_id, content_hash) DO NOTHING RETURNING id → 新任务返回 7
+        doReturn(7L).when(jdbc).query(contains("ON CONFLICT (user_id, content_hash)"),
+                ArgumentMatchers.<ResultSetExtractor<Long>>any(), eq(1L), any(), any(), any());
         when(redis.opsForList()).thenReturn(listOps);
 
         TaskService service = newService(209715200L, 3600L);
@@ -118,6 +136,69 @@ class TaskServiceValidationTest {
         assertEquals(90L, resp.durationSec());
         verify(jdbc).update(contains("source_uri"), eq("s3://meetingnotes/tasks/7/audio.wav"), eq(7L));
         verify(listOps).leftPush("meetingnotes:task-queue", "7");
-        verify(quotaService).consume(eq(1L), org.mockito.ArgumentMatchers.anyInt());
+        verify(quotaService).consume(eq(1L), anyInt());
+    }
+
+    /* ---- T2.1 幂等：唯一约束冲突 → 回查已有任务（reused）→ DEAD 复活重投（D-049） ---- */
+
+    @Test
+    void duplicateUploadReturnsExistingTaskWithoutQuotaOrEnqueue() throws IOException {
+        // 冲突：INSERT 返回空 → 回查已有任务（真实 status=DONE）→ reused，不消耗配额、不入队
+        when(probe.durationSeconds(any())).thenReturn(90.0);
+        runCallbackForReal();
+        doReturn(null).when(jdbc).query(contains("ON CONFLICT (user_id, content_hash)"),
+                ArgumentMatchers.<ResultSetExtractor<Long>>any(), eq(1L), any(), any(), any());
+        doReturn(new TaskService.ExistingTask(7L, "DONE")).when(jdbc)
+                .query(contains("SELECT id, status FROM task"),
+                        ArgumentMatchers.<ResultSetExtractor<TaskService.ExistingTask>>any(), any(), eq(1L));
+
+        com.meetingnotes.web.TaskCreatedResponse resp = newService(209715200L, 3600L).createUpload(wav(64));
+
+        assertEquals(7L, resp.taskId());
+        assertEquals("DONE", resp.status(), "幂等命中必须返回库里真实状态");
+        assertTrue(resp.reused());
+        verify(quotaService, never()).consume(anyLong(), anyInt());
+        verify(listOps, never()).leftPush(any(), any());
+    }
+
+    @Test
+    void duplicateDeadTaskIsRevivedRequeuedAndReportedAsPending() throws IOException {
+        // D-049：命中 DEAD → attempts=0 / status=PENDING / error_code=NULL → 重新 leftPush
+        when(probe.durationSeconds(any())).thenReturn(90.0);
+        runCallbackForReal();
+        doReturn(null).when(jdbc).query(contains("ON CONFLICT (user_id, content_hash)"),
+                ArgumentMatchers.<ResultSetExtractor<Long>>any(), eq(1L), any(), any(), any());
+        doReturn(new TaskService.ExistingTask(8L, "DEAD")).when(jdbc)
+                .query(contains("SELECT id, status FROM task"),
+                        ArgumentMatchers.<ResultSetExtractor<TaskService.ExistingTask>>any(), any(), eq(1L));
+        when(redis.opsForList()).thenReturn(listOps);
+
+        com.meetingnotes.web.TaskCreatedResponse resp = newService(209715200L, 3600L).createUpload(wav(64));
+
+        assertEquals(8L, resp.taskId());
+        assertEquals("PENDING", resp.status(), "DEAD 复活后返回 PENDING");
+        assertTrue(resp.reused());
+        verify(jdbc).update(contains("attempts = 0, status = 'PENDING', error_code = NULL"), eq(8L));
+        verify(listOps).leftPush("meetingnotes:task-queue", "8");
+    }
+
+    @Test
+    void duplicateRetryingTaskReturnsRealStatusWithoutRevival() throws IOException {
+        // RETRYING：markFailure 已重新入队过，命中时只返回真实状态，不重复入队/不复活
+        when(probe.durationSeconds(any())).thenReturn(90.0);
+        runCallbackForReal();
+        doReturn(null).when(jdbc).query(contains("ON CONFLICT (user_id, content_hash)"),
+                ArgumentMatchers.<ResultSetExtractor<Long>>any(), eq(1L), any(), any(), any());
+        doReturn(new TaskService.ExistingTask(9L, "RETRYING")).when(jdbc)
+                .query(contains("SELECT id, status FROM task"),
+                        ArgumentMatchers.<ResultSetExtractor<TaskService.ExistingTask>>any(), any(), eq(1L));
+
+        com.meetingnotes.web.TaskCreatedResponse resp = newService(209715200L, 3600L).createUpload(wav(64));
+
+        assertEquals(9L, resp.taskId());
+        assertEquals("RETRYING", resp.status());
+        assertTrue(resp.reused());
+        verify(jdbc, never()).update(contains("'PENDING'"), eq(9L));
+        verify(listOps, never()).leftPush(any(), any());
     }
 }

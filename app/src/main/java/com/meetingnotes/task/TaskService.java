@@ -11,6 +11,7 @@ import org.springframework.dao.DataAccessException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 import software.amazon.awssdk.core.sync.RequestBody;
@@ -50,6 +51,7 @@ public class TaskService {
     private final AudioDurationProbe probe;
     private final QuotaService quotaService;
     private final StringRedisTemplate redis;
+    private final TransactionTemplate transactionTemplate;
     private final long maxSizeBytes;
     private final long maxDurationSec;
     private final String bucket;
@@ -60,6 +62,7 @@ public class TaskService {
                        AudioDurationProbe probe,
                        QuotaService quotaService,
                        StringRedisTemplate redis,
+                       TransactionTemplate transactionTemplate,
                        @Value("${app.task.max-size-bytes}") long maxSizeBytes,
                        @Value("${app.task.max-duration-sec}") long maxDurationSec,
                        @Value("${app.storage.bucket}") String bucket,
@@ -69,6 +72,7 @@ public class TaskService {
         this.probe = probe;
         this.quotaService = quotaService;
         this.redis = redis;
+        this.transactionTemplate = transactionTemplate;
         this.maxSizeBytes = maxSizeBytes;
         this.maxDurationSec = maxDurationSec;
         this.bucket = bucket;
@@ -108,41 +112,69 @@ public class TaskService {
                         "时长 " + durationSec + " 秒，超过上限 " + maxDurationSec + " 秒（D-028：可配至 120 分钟）");
             }
 
-            // 4) 幂等（N1/N10）：同内容重复提交直接返回已有任务（库里的真实 status，D-041），
-            //    不重复入列、不消耗配额；查询必须带 user_id（D-040，认证上线前先守住数据约束）
-            ExistingTask existing = findIdAndStatusByHash(DEFAULT_USER_ID, sha256);
-            if (existing != null) {
+            // 4) 幂等（N1/N10 / T2.1 / D-049）：直接 INSERT，靠 (user_id, content_hash) 唯一约束裁决，
+            //    不做"先 SELECT 再 INSERT"（TOCTOU：并发同内容请求只允许建 1 个任务）。
+            //    ON CONFLICT DO NOTHING 返回空 → 冲突 → 回查已有任务；
+            //    整段包在事务里：配额 429 / MinIO 失败时 task 行随事务回滚，不留孤儿 PENDING。
+            Long taskId = transactionTemplate.execute(tx -> {
+                Long newId = jdbc.query(
+                        """
+                        INSERT INTO task (user_id, source_type, content_hash, duration_sec, size_bytes, status)
+                        VALUES (?, 'UPLOAD', ?, ?, ?, 'PENDING')
+                        ON CONFLICT (user_id, content_hash) DO NOTHING
+                        RETURNING id
+                        """,
+                        rs -> rs.next() ? rs.getLong(1) : null,
+                        DEFAULT_USER_ID, sha256, durationSec, size);
+                if (newId == null) {
+                    return null; // 冲突：同用户已有同内容任务，回查交给事务外（事务内不能留未决状态）
+                }
+                // 5) 配额（N8）：只在"本请求确实新建了任务"时消费；429 抛出 → 事务回滚
+                int minutes = (int) Math.max(1, Math.ceil(durationSec / 60.0));
+                quotaService.consume(DEFAULT_USER_ID, minutes);
+                // 6) MinIO（tasks/{taskId}/）→ 回填 source_uri；失败 → 事务回滚，不留无对象的任务
+                String key = "tasks/" + newId + "/" + sanitizeFilename(file.getOriginalFilename(), format);
+                putObjectEnsuringBucket(key, tmp);
+                jdbc.update("UPDATE task SET source_uri = ?, updated_at = now() WHERE id = ?",
+                        "s3://" + bucket + "/" + key, newId);
+                return newId;
+            });
+
+            if (taskId == null) {
+                // 幂等命中（T2.1）：返回库里真实状态；命中 DEAD → 复活重投（D-049）
+                ExistingTask existing = findIdAndStatusByHash(DEFAULT_USER_ID, sha256);
+                if (existing == null) {
+                    // 理论不可达：约束冲突却查不到行。宁可暴露也不给假 201。
+                    throw new ApiException(500, "INTERNAL_ERROR", "幂等冲突回查未找到已有任务，请联系管理员");
+                }
+                if ("DEAD".equals(existing.status())) {
+                    jdbc.update("""
+                            UPDATE task SET attempts = 0, status = 'PENDING', error_code = NULL, updated_at = now()
+                            WHERE id = ?
+                            """, existing.id());
+                    enqueue(existing.id());
+                    log.info("任务 {} 已 DEAD，重传触发复活重投（D-049）", existing.id());
+                    return new TaskCreatedResponse(existing.id(), "PENDING", sha256, durationSec, size, true);
+                }
                 return new TaskCreatedResponse(existing.id(), existing.status(), sha256, durationSec, size, true);
             }
 
-            // 5) 配额（N8）：按向上取整分钟数消费
-            int minutes = (int) Math.max(1, Math.ceil(durationSec / 60.0));
-            quotaService.consume(DEFAULT_USER_ID, minutes);
-
-            // 6) 写 task(PENDING) → MinIO（tasks/{taskId}/）→ 回填 source_uri
-            Long taskId = jdbc.queryForObject(
-                    """
-                    INSERT INTO task (user_id, source_type, content_hash, duration_sec, size_bytes, status)
-                    VALUES (?, 'UPLOAD', ?, ?, ?, 'PENDING')
-                    RETURNING id
-                    """,
-                    Long.class, DEFAULT_USER_ID, sha256, durationSec, size);
-            String key = "tasks/" + taskId + "/" + sanitizeFilename(file.getOriginalFilename(), format);
-            putObjectEnsuringBucket(key, tmp);
-            jdbc.update("UPDATE task SET source_uri = ?, updated_at = now() WHERE id = ?",
-                    "s3://" + bucket + "/" + key, taskId);
-
-            // 7) 投递 worker 队列（T1.5）。入队失败不回滚任务：任务停在 PENDING，
-            //    由 T2.3 的恢复机制兜底，避免"客户端拿到 500 后重试 → 幂等命中 → 永不入队"。
-            try {
-                redis.opsForList().leftPush(queueKey, Long.toString(taskId));
-            } catch (DataAccessException e) {
-                log.error("任务 {} 入队失败（Redis 不可用），停在 PENDING，待 T2.3 恢复机制兜底", taskId, e);
-            }
+            // 7) 投递 worker 队列（T1.5；事务已提交，不会产生幽灵任务）。入队失败不回滚任务：
+            //    任务停在 PENDING，由 T2.3 的恢复机制兜底，避免"客户端拿到 500 后重试 → 幂等命中 → 永不入队"。
+            enqueue(taskId);
 
             return new TaskCreatedResponse(taskId, "PENDING", sha256, durationSec, size, false);
         } finally {
             Files.deleteIfExists(tmp);
+        }
+    }
+
+    /** 投递 worker 队列；入队失败只记日志（任务停在 PENDING，T2.3 恢复机制兜底），不向上抛。 */
+    private void enqueue(long taskId) {
+        try {
+            redis.opsForList().leftPush(queueKey, Long.toString(taskId));
+        } catch (DataAccessException e) {
+            log.error("任务 {} 入队失败（Redis 不可用），停在 PENDING，待 T2.3 恢复机制兜底", taskId, e);
         }
     }
 
@@ -186,7 +218,7 @@ public class TaskService {
     }
 
     /** 幂等命中时返回的已有任务摘要：id + 库里真实状态。 */
-    record ExistingTask(long id, String status) {
+    public record ExistingTask(long id, String status) {
     }
 
     /** 按内容 hash 查已有任务；必须带 user_id（D-040），防止未来跨用户读到他人任务。 */
