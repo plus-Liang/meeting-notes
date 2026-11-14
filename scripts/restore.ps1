@@ -19,6 +19,21 @@ if (-not $Force) {
     exit 10
 }
 
+# ---- 0b) preflight：依赖容器必须 running（T2.9 F-4），否则给出可操作提示，不进 pg_restore 误报 ----
+foreach ($svc in @('postgres', 'minio')) {
+    # -aq 含已停止容器；只查运行状态而不是"容器不存在"，才能区分"没起"和"起了但停了"
+    $cid = docker compose ps -aq $svc | Where-Object { $_ } | Select-Object -First 1
+    $running = $false
+    if ($cid) {
+        $running = (docker inspect -f '{{.State.Running}}' $cid.Trim()).Trim() -eq 'true'
+    }
+    if (-not $running) {
+        Write-Host "[restore] 依赖容器未运行: $svc —— 恢复前请先执行: docker compose up -d"
+        Write-Host '[restore] （不自动启动依赖，避免掩盖环境问题；D-064）'
+        exit 20
+    }
+}
+
 # ---- 1) 校验备份 ----
 $backupPath = $BackupDir
 if (-not [System.IO.Path]::IsPathRooted($backupPath)) {

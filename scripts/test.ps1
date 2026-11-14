@@ -59,9 +59,10 @@ if (-not $UnitOnly) {
     }
 }
 
-# ---- 4) 跑测试（先清掉上次的 surefire 报告，避免汇总读到旧用例数）----
+# ---- 4) 跑测试（先清掉上次的 surefire 报告，避免汇总读到旧用例数；控制台切 UTF-8 治中文乱码）----
 Push-Location (Join-Path $repo 'app')
 try {
+    [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
     Remove-Item (Join-Path $repo 'app\target\surefire-reports') -Recurse -Force -ErrorAction SilentlyContinue
     if ($UnitOnly) {
         Write-Host '[test.ps1] -UnitOnly：跳过 AsrSmokeTest / LlmSmokeTest'
