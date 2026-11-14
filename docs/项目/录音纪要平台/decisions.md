@@ -515,6 +515,32 @@
 - **已排除项**：现在就删 18 个键（会误删 T2/T3/T4 马上要用的；且 `APP_BASE_URL` 在只读分享链接/Webhook 里要用）；
   只靠人工巡检不写机器判据（一年后没人记得哪个键是"计划中"）。
 
+### D-055 T2.1 实现裁决：撤销全局唯一索引 + 用 ON CONFLICT 做幂等
+- **日期**：2026-11-14（T2.1 验收时裁决作者的两项偏差）｜**决策人**：本人
+- **结论**：
+  1. **批准 `DROP INDEX ux_task_hash`**：V1 的是**跨用户**全局唯一，与 D-040（查询必带 `user_id`）冲突；V2 改为
+     `UNIQUE (user_id, content_hash)`（先查重删重复行、再 `DROP INDEX IF EXISTS`、再建索引）。幂等粒度收到"用户 + 内容"。
+  2. **批准用 `INSERT … ON CONFLICT (user_id, content_hash) DO NOTHING RETURNING id` + 判空回查**，**否掉**我任务卡里写的
+     "捕获 `DuplicateKeyException` 后回查"：PG 中同事务内约束冲突后事务已 aborted，catch 后再回查会报 `current transaction is aborted`。
+     幂等权威仍是数据库唯一约束（无 SELECT-then-INSERT 竞态），冲突回查放在事务外（快照干净）。
+  3. 卡片写法纠正：**以后任务卡不写具体 SQL/异常模式**，只写约束（"幂等权威 = 唯一约束；禁止先查后插；事务边界由实现者定"）。
+- **依据**：多用户语义（D-040/D-053）；并发验收我复跑过：两请求同 id、只 1 行（`review/2026-11-14-T1.9-T2.1验收.md` §1.2）。
+- **已排除项**：保留全局唯一索引（挡住"A、B 上传同一内容"这一合法场景）；应用层内存锁/Redis 锁（单机重启即失效，且非权威）。
+
+### D-056 死信与错误契约收口（T2.11）
+- **日期**：2026-11-14（T2.1 验收时发现）｜**决策人**：本人
+- **结论**：
+  1. **复活与死信一致性**：DEAD 任务被重传复活时，同一次操作内 `DELETE FROM dead_letter WHERE task_id = ?`；
+     否则死信列表里会出现"已 DONE 的任务"，同一任务再失败还会写第二条死信（实质重复）。
+  2. **对外错误契约收口**：上传路径的存储故障统一映射为 `500 STORAGE_ERROR`（复用既有码，不新增）；
+     `ApiExceptionHandler` 增加兜底 `@ExceptionHandler(Exception.class)` → `500 INTERNAL_ERROR`（统一 `{code,message}` envelope）；
+     `接入指南.md` §3.3 补一行"500 兜底（非业务码，不计入 7 个）"。
+  3. 判据：停 MinIO → 上传 → HTTP 500 且**响应体含 `code`**；复活一个 DEAD 任务 → `dead_letter` 该任务行数 = 0。
+- **依据**：实测停 MinIO 后返回的是 Spring 默认体 `{timestamp,status,error,path}`（**无 `code`**），接入方无法按码分支；
+  实测复活成功后 task 11 为 `DONE` 而 `dead_letter` 仍有 1 行（见验收报告 F-1/F-2）。
+- **已排除项**：新增错误码（违反 D-047"只增不改、固定 7 个"——这里用既有 `STORAGE_ERROR` + 非业务兜底码）；
+  只改文档不改实现（接入方按文档写代码会踩空）。
+
 ---
 
 ## 面试速查（由本文件派生，勿单独维护）

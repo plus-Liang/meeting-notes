@@ -38,7 +38,7 @@
 | **T0.4** | Spring AI 最小转写跑通 | 独立复跑 exit 0 | ✅ `25528b9` + `review/2026-11-13-T0.4验收.md` |
 | **T0.5** | 云 LLM 通道 + **无 key 可启动** | 真实摘要 + 清空 key 仍能启动 | ✅ `483d6f2` + `review/2026-11-13-T0.5验收.md`（DeepSeek 实测 3 条摘要；无 key 时 ChatModel=0、health UP） |
 
-**下一步**：**T1.9**（`scripts/test.ps1` 测试入口，0.5h）→ 第 2 周 T2.1 幂等 → T2.10 服务端列表 API。**T1.1–T1.8 已 ✅**。
+**下一步**：阶段 1 全 ✅（T1.1–T1.9）。第 2 周：**T2.11 契约收口**（0.5h，T2.1 遗留）→ **T2.10 服务端列表 API** → T2.2/T2.3。**T1.1–T1.9 已 ✅**。
 **T1.5 开工前**（已完成）：先修 T1.4 审查的 P1/P2（snake_case 契约 + 幂等真实状态 + `user_id` 过滤，D-040/D-041），一个 commit（`7c90e9a`）。
 **已处理**：`glossary."right"` 改名 `right_text`（D-037，用户拍板）；列名已在真实 PG16 空卷验证。
 
@@ -58,7 +58,7 @@
 | **T1.6** | 三页面（提交/列表/详情）静态 HTML，结构按 spec §5 | 可用、无 JS 报错 | ✅ `264def4` + `review/2026-11-14-T1.6验收.md`。真机：`GET /` **200/3399B**；三页共用 `style.css`、**0 处硬编码地址**；6s 正弦波 → `DONE` + `transcript:""`（D-048）；停 ASR → `DEAD` + `error_code=ASR_ERROR`（S-3）；`mvn test` **17/17 绿**（新增 `TranscriptionWorkerTest` 3 例）。越界已修：手改生成副本（接入指南）已移植权威版；allowlist 误登记 TranscriptionWorker 已删除 |
 | **T1.7** | 配置外置基线 | `配置清单.md` §2 三条命令无异常 | ✅ 只读卡，证据在 `review/2026-11-14-T1.7-T1.8验收.md`（无 commit）。我逐条复跑：命令1 **0 命中**；命令2 **10 行**均可辩护（`/inbox` 属 §3 例外）；命令3/4 yml **53** ↔ `.env.example` **68**，白名单外差集 **0**；`docker compose config` **0 告警**；魔法阈值扫描 **0**；**反例** `DB_URL`→`${DB_URL_TYPO}` → 启动即 `'url' must start with "jdbc"` exit 1（已还原）；脚本 exit 0 |
 | **T1.8** | 上传校验单测 | `mvn test` 全绿 | ✅ `a352e5f` + 同上报告。2 个测试文件 **+164/−0**、**主代码零改动**、**0 行断言被删**；`mvn test` **23/23** exit 0（MediaMagic 11 / 新增 `TaskServiceValidationTest` 4 / `TranscriptionWorkerTest` 5 / NoKeyStartup 1 / 冒烟 2）；新增用例：MZ 改名→400 `INVALID_MEDIA`、超大小→413 `SIZE_EXCEEDED`（消息带上限）、90s>60s→400 `DURATION_EXCEEDED`（消息带实际时长）、正向入队+配额、失败 1/3→`RETRYING`+重入队、3/3→`DEAD`+`dead_letter` 带原因；脚本 exit 0。**缺口**：状态机用例白盒调私有 `markFailure`，`process()→loop()` 接线靠 T1.5/T1.6 真机证据兜（F-2） |
-| **T1.9** | **`scripts/test.ps1` 测试入口**（新增：解决"每次手工注入 `.env` + `ASR_BASE_URL`"） | 裸 shell 一条命令跑绿 | 不预设任何环境变量，直接 `powershell -File scripts\test.ps1` → 注入 `.env` + `ASR_BASE_URL` 默认 `http://localhost:8001`、支持 `-UnitOnly`（跳过冒烟）、exit code 透传；打印用例数 |
+| **T1.9** | **`scripts/test.ps1` 测试入口** | 裸 shell 一条命令跑绿 | ✅ `24abd45` + `review/2026-11-14-T1.9-T2.1验收.md`。我复跑：裸 shell **26/26 exit 0**；`-UnitOnly` **24/24 exit 0**（他报 21 是 T2.1 之前的 23 例口径）；反例 `ASR_BASE_URL=:59999` → **exit 1**（冒烟真红）；BOM `239,187,191`；只打印 key 名不打印 value；脚本 exit 0 |
 
 **W1 过关**：US-1 场景 1 通过；N11 有机器判据；测试全绿。
 
@@ -68,8 +68,8 @@
 
 | ID | 任务 | DoD | 验证命令 / 期望 |
 |---|---|---|---|
-| **T2.1** | 幂等：`content_hash` 唯一 + 命中返回 `reused:true` + **命中 DEAD 时重新投递**（D-049） | 同文件两次 → 1 任务；DEAD 文件重传 → 重新入列 | 连传两次 → 同 task_id；DEAD 后重传 → 状态回 PENDING/RETRYING 且队列有该 id |
-| **T2.2** | 重试 + 退避 + 死信 | 人为失败 → RETRYING → DEAD | 停 ASR 提交任务 → 观察迁移 |
+| **T2.1** | 幂等：`content_hash` 唯一 + 命中返回 `reused:true` + **命中 DEAD 时重新投递**（D-049） | 同文件两次 → 1 任务；DEAD 文件重传 → 重新入列 | ✅ `300db82` + `review/2026-11-14-T1.9-T2.1验收.md`。V2 迁移（查重删除 + 撤全局 `ux_task_hash` + `UNIQUE(user_id, content_hash)`）+ `ON CONFLICT DO NOTHING` 幂等（**D-055 批准偏离卡片的 catch 方案**）+ 复活重投（attempts=0/PENDING/error_code=NULL）。我复跑：`down -v` 后 Flyway V1+V2 全 success、真实 PG 唯一索引在；连传两次同 id（第二次 `reused:true`+真实 `DONE`）；**并发**两请求同 id、只 1 行；DEAD → 重传 → PENDING → **0.1s DONE**；复活不重复扣配额；**429 与 MinIO 故障都不留孤儿 PENDING 行**（事务回滚生效）；`scripts/test.ps1` **26/26**。**遗留**：复活后 `dead_letter` 残留（F-1）、存储故障 500 无 `code`（F-2）→ **T2.11** |
+| **T2.2** | 重试 + 退避 + 死信 | 人为失败 → RETRYING → DEAD | 停 ASR 提交任务 → 观察迁移。**补**（T2.1 验收观测 F-3）：给 ASR 调用设上限——`app.asr.timeout-sec` 目前**无消费方**（D-054），实测停 ASR 后首次失败因 DNS 解析可拖到 **78s**；目标 = 失败发现 ≤10s 且可配 |
 | **T2.3** | 崩溃恢复：启动回收 RUNNING 僵尸 | 重启不永久卡住 | 处理中 `docker restart app` → 终态 |
 | **T2.4** | 健康检查四项（DB/Redis/MinIO/ASR） | 任一不可用整体 DOWN | 打掉 minio → `status=DOWN` |
 | **T2.5** | 结果缓存：同 hash 复用 | 不重复转写 | ASR 日志只有一次请求 |
@@ -78,6 +78,7 @@
 | **T2.8** | **备份与恢复**（US-11）：`backup.ps1` + `restore.ps1` + 每日自动 | 备份可核对；删卷能恢复 | 备份 → `down -v` → 恢复 → 数据一致 |
 | **T2.9** | 本周单测（幂等/状态机/健康） | `mvn test` 全绿 | BUILD SUCCESS + 用例数 |
 | **T2.10** | **服务端任务列表 API**（D-053）：`GET /api/v1/tasks?status=&limit=&before_id=`（user_id 过滤 / snake_case / 默认 20 上限 50）+ 列表页切换 | 换浏览器/清缓存仍能看到历史任务 | 新开无痕窗口打开 `/tasks` → 列表有历史；`curl` 带 status/limit 过滤正确；`limit>50` → 400 |
+| **T2.11** | **契约与死信收口**（D-056，T2.1 验收发现）：①复活 DEAD 时删除该任务 `dead_letter` 残留；②存储故障统一 `500 STORAGE_ERROR`、未捕获异常兜底 `500 INTERNAL_ERROR`（统一 `{code,message}`）；③`scripts/test.ps1` 去掉 `D:\datasets` 本机路径兜底（未设置就退出 3） | 死信列表里不出现 DONE 任务；500 响应体带 `code` | 复活一个 DEAD 任务 → `dead_letter` 该任务行数 = 0；停 MinIO 上传 → 500 且 body 含 `code:"STORAGE_ERROR"`；单测 26 → ≥28 |
 
 **W2 过关**：US-2 三场景全过；N1–N5、N8、N9、N18–N20 有证据。
 
@@ -148,7 +149,7 @@
 ## 依赖顺序（不可打乱）
 
 ```text
-T0.1 → T0.2 → T0.4 → T1.1 → T1.2 → T1.3 → T1.4 → T1.5 → T1.6/T1.7/T1.8 → T1.9
+T0.1 → T0.2 → T0.4 → T1.1 → T1.2 → T1.3 → T1.4 → T1.5 → T1.6/T1.7/T1.8/T1.9
                                                     ↓
                                           T2.1..T2.9
                                                     ↓
@@ -164,13 +165,13 @@ T0.1 → T0.2 → T0.4 → T1.1 → T1.2 → T1.3 → T1.4 → T1.5 → T1.6/T1.
 | 阶段 | 任务数 | 预估 |
 |---|---|---|
 | 阶段 0 | 5 | 8h |
-| 第 1 周 | 8 | 13h |
-| 第 2 周 | 9 | 14h |
+| 第 1 周 | 9 | 13.5h |
+| 第 2 周 | 10 | 14.5h |
 | 第 3 周 | 10 | 17h |
-| 第 4 周 | 11 | 14h |
-| **合计（不含第 5 周）** | **43** | 约 66h |
+| 第 4 周 | 13 | 16h |
+| **合计（不含第 5 周）** | **47** | 约 69h |
 
-> 含第 5 周（+17h / 7 个任务）→ **总计 50 个任务 / 83h**，见文末「计数（5 周版）」（D-030）。
+> 含第 5 周（+17h / 7 个任务）→ **总计 54 个任务 / 约 85.5h**，见文末「计数（5 周版）」（D-030/D-054/D-056）。
 
 ---
 
@@ -240,12 +241,12 @@ T0.1 → T0.2 → T0.4 → T1.1 → T1.2 → T1.3 → T1.4 → T1.5 → T1.6/T1.
 |---|---|---|
 | 阶段 0（底座验证） | 5 | 8h |
 | 第 1 周 | 9 | 13.5h |
-| 第 2 周 | 9 | 14h |
+| 第 2 周 | 10 | 14.5h |
 | 第 3 周 | 10 | 17h |
 | 第 4 周 | 13 | 16h |
 | **第 5 周** | **7** | **17h** |
-| **合计** | **53** | **约 85h** |
+| **合计** | **54** | **约 85.5h** |
 
 > 原 T6.1–T6.4（链接导入）合并进第 5 周的 T5.1–T5.4，编号以第 5 周为准。
-> **+2h 说明**（83h → 85h）：T1.9 测试入口 0.5h + T4.12 死配置体检 0.5h + T4.13 真机 UI 验收 1h，**全是验证/工具，不是功能**（D-054）；
+> **+2.5h 说明**（83h → 85.5h）：T1.9 测试入口 0.5h + T4.12 死配置体检 0.5h + T4.13 真机 UI 验收 1h + T2.11 契约收口 0.5h，**全是验证/工具/收口，不是功能**（D-054/D-056）；
 > 功能清单与砍序（D-032）不变，但余量已经为 0：**再想加功能必须走"砍一个才加一个"**。
