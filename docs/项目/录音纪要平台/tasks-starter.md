@@ -867,16 +867,22 @@ docker compose exec -T app date; docker compose exec -T postgres date
      **只许 +2~5 行**（文件已 290 行，超 300 就先把摘要调用抽成独立协作类）；
   ③ `TaskStatusResponse` + `GET /api/v1/tasks/{id}` **只增** `summary`、`keywords`、`ai_tier` 三个 snake_case 字段（无则 `null`）；
   ④ 单测 **≥3**：提示词构造（含"禁止编造"约束）/ JSON 解析成功 / 解析失败与异常时降级不抛。
+  ⑤ **LLM 必须有自己的短超时（本卡硬要求，不满足就别同步做）**：现在 `config/AsrHttpClientConfig` 的
+     `RestClientCustomizer` 给**所有** RestClient 设了 connect 5s / read **900s**（D-058，为长音频转写设的），
+     LLM 同步调用会吃到 900s → **单线程 worker 被拖住 15 分钟，整个队列排队**。做法：在同一个配置里改成**按 URI 路由超时**
+     （`/v1/audio/transcriptions` → 900s；其它 chat → 新配置 `app.llm.timeout-sec`，`LLM_TIMEOUT_SEC` 默认 **120s**），connect 都 5s；
+     `application.yml` + `.env.example` 加键（公共面 Lead 已批准）；单测断言"两条路径各用各的超时"（package-private 暴露以便断言）。
+     LLM 超时/异常 → **WARN + summary 留空 + 任务照常 DONE**；WARN 里带**模型原始输出截断 200 字**（不进响应体，便于排查格式漂移）。
 - **复用什么**：Spring AI 的 `ChatModel`（无 key 时 bean 不存在 → **跳过摘要**，不要 new 一个）；`ObjectMapper`；现有 `task_result` 列；
-  `ai_tier` 列与 D-020 三档定义（本卡只落 `CLOUD`）。
+  `ai_tier` 列与 D-020 三档定义（本卡只落 `CLOUD`）；现有 `config/AsrHttpClientConfig` 与 `AsrHttpClientConfigTest`（加断言即可）。
 - **影响哪些功能**：任务 DONE 后多一次 AI 调用（秒级）；详情 API 增字段；**不影响转写/状态机/幂等**。
 - **怎么验证**：3 个**有语音**且内容不同（不同 content_hash）的样本 → DONE → 摘要非空、可逐句在 transcript 找到依据。
 
 【范围声明】
-- 做：①~④；`.env.example` 无需加键（用现有 `LLM_*`）；API 增字段（只增不改，Lead 已报备）。
+- 做：①~⑤；`application.yml` + `.env.example` 加 `LLM_TIMEOUT_SEC`（默认 120；公共面 Lead 已批准）；API 增字段（只增不改，已报备）。
 - 不做：三档降级（T3.3）、todos（T3.2）、模板（T3.9）、术语回流（T3.5/T3.6）、批量/导出（T3.7）；**不改表结构**（列已存在）。
-- 禁：把 AI 输出直接当 transcript；LLM 失败把任务置 DEAD（转写成果不能因摘要丢失）；把提示词里的"输出 JSON"省略（必须可判）；
-  在日志里打印 transcript 全文（隐私）。
+- 禁：把 AI 输出直接当 transcript；LLM 失败把任务置 DEAD（转写成果不能因摘要丢失）；**给 LLM 复用 900s 读超时**（会拖死单线程 worker）；
+  把提示词里的"输出 JSON"省略（必须可判）；在日志里打印 transcript 全文（隐私）；日志里打印完整模型输出（只截 200 字）。
 
 【验收】（反例必须进）
 ```powershell
@@ -887,10 +893,12 @@ curl.exe -s --noproxy "*" http://localhost:8080/api/v1/tasks/<id>
 docker compose exec -T postgres psql -U mn -d meetingnotes -t -A -c "select task_id, ai_tier, length(summary) from task_result order by task_id desc limit 3"
 # ③ 人工比对（必做）：摘要里每个专名/数字/结论都能在 transcript 原文找到；贴 3 份对照（脱敏）
 # ④ 反例：临时清空 LLM_API_KEY + 重启 app（无 ChatModel）→ 上传仍 DONE、summary 为 null、无 500；恢复 key 重启
-# ⑤ `scripts\test.ps1` ≥53 用例 exit 0；check-maintainability exit 0；`TranscriptionWorker` ≤300 行
-# ⑥ 回归：上传/列表/详情/错误四连（404/405/415/400）不变
+# ⑤ 超时路由单测（硬要求）：断言 /v1/audio/transcriptions 用 900s、chat 用 120s（默认与显式覆盖各一条）
+# ⑥ `scripts\test.ps1` ≥55 用例 exit 0；check-maintainability exit 0；`TranscriptionWorker` ≤300 行
+# ⑦ 回归：上传/列表/详情/错误四连（404/405/415/400）不变
 ```
-**通过标准**：3 个样本摘要非空且**无编造**；`ai_tier=CLOUD`；无 key 时优雅跳过（DONE + null）；单测 ≥53；脚本 exit 0。
+**通过标准**：3 个样本摘要非空且**无编造**；`ai_tier=CLOUD`；无 key 时优雅跳过（DONE + null）；
+**LLM 超时路由单测通过**（chat 120s / ASR 900s，互不串）；单测 ≥55；脚本 exit 0。
 
 【可维护性】`ai/` 包与 `worker`/`task` 单向依赖（`worker → ai`，不许反向）；提示词集中在一处（常量或资源文件），**不散落在业务代码**；
 新公共逻辑必须有测试；对外字段 snake_case。
