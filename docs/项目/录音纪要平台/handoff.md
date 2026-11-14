@@ -18,7 +18,7 @@
 
 ## 3. 关键文件
 
-`00-先看这个.md` · `开工准备清单.md` · `架构一页纸.md` · `可维护性要求.md` · `spec.md`/`plan.md`/`tasks.md`/`tasks-starter.md` · `decisions.md`（**74 条**，最新 D-070）· `接入指南.md` · `review/2026-11-14-T3.0-T3.1验收.md`（最新）· `配置清单.md`（55 yml / 71 env / 死配置 16）· `scripts/backup.ps1`/`restore.ps1` · `rules/dev.md`（§4.1 配置文件铁律）。
+`00-先看这个.md` · `开工准备清单.md` · `架构一页纸.md` · `可维护性要求.md` · **`踩坑与复盘-面试用.md`（面试题库，K-01~K-21）** · `spec.md`/`plan.md`/`tasks.md`/`tasks-starter.md` · `decisions.md`（**74 条**，最新 D-070）· `接入指南.md` · `review/2026-11-14-T3.0-T3.1验收.md`（最新）· `配置清单.md`（55 yml / 71 env / 死配置 16）· `scripts/backup.ps1`/`restore.ps1` · `rules/dev.md`（§4.1 配置文件铁律）。
 
 ## 4. 未决
 
