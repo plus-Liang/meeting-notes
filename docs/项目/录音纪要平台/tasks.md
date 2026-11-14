@@ -38,7 +38,7 @@
 | **T0.4** | Spring AI 最小转写跑通 | 独立复跑 exit 0 | ✅ `25528b9` + `review/2026-11-13-T0.4验收.md` |
 | **T0.5** | 云 LLM 通道 + **无 key 可启动** | 真实摘要 + 清空 key 仍能启动 | ✅ `483d6f2` + `review/2026-11-13-T0.5验收.md`（DeepSeek 实测 3 条摘要；无 key 时 ChatModel=0、health UP） |
 
-**下一步**：第 3 周 **T3.9 摘要模板机制（5 模板：meeting/course/interview/podcast/shortvideo，US-12）**——契约已在 D-085 预批准，按卡写码；配额今日 50/50 已满，实机等次日重置（2 条任务：同语音 hash 变体 meeting/course，另 1 条文件名自动推荐）。→ T3.10 格式扩展 → T3.8 周验收（含 F-14/F-15/F-16/F-17 评估）。**阶段 1 全 ✅；W2 全 ✅；W3 T3.0~T3.7 + T3.11 ✅**。
+**下一步**：**T3.9 收尾**（代码 `f880b6a` 已验：单测 185/185、可维护性 exit 0、我独立变异红→绿、零配额实机全过；**只剩 2 条实机任务待 00:00 配额重置**，样本已备）→ **T3.10 格式扩展（amr/opus，卡已进 `tasks-starter.md`，样本已备）** → T3.8 周验收（含 F-14/F-15/F-16/F-17/F-18/F-19 评估）。**阶段 1 全 ✅；W2 全 ✅；W3 T3.0~T3.7 + T3.11 ✅；T3.9 待实机定案；T3.10 待开工；T3.8 待做**。
 **T1.5 开工前**（已完成）：先修 T1.4 审查的 P1/P2（snake_case 契约 + 幂等真实状态 + `user_id` 过滤，D-040/D-041），一个 commit（`7c90e9a`）。
 **已处理**：`glossary."right"` 改名 `right_text`（D-037，用户拍板）；列名已在真实 PG16 空卷验证。
 
@@ -98,7 +98,7 @@
 | **T3.6** | 术语注入下次转写（US-3 闭环） | 第二次输出正确 | ✅ `a8845b4` + `review/2026-11-14-T3.6验收.md`（D-083）。`GlossaryTermSource`（hits desc/priority desc 取 ≤20 条、总长 ≤400 字、空表返回空串 → prompt 逐字节不变）→ `StructuringPrompt` 注入段 → 日志 `术语注入：N 条/长度 M 字`（不泄露词条）；CLOUD/LOCAL 生效、EXTRACTIVE 不调 LLM（F-15）。我独立复跑：139/139 exit 0、变异造红后绿；**独立实机 task 123**（同段语音去 3 采样点 → 新 hash）：transcript 仍含 ASR 错词"工作副盘"，summary/keywords 全部输出"工作复盘/AI Coding"；写码方 task 122 结论一致 |
 | **T3.7** | 导出 Markdown + `PASTE` 入口（含 ass） | 文件含三节；srt 秒出纪要 | ✅ `2027406` + `review/2026-11-14-T3.7验收.md`（D-084/D-085）。`web/TaskMarkdownExporter`（三节/done/（无））+ 导出端点；`task/TextTaskService`（PASTE/字幕共用：解析后文本 hash、`source_type=PASTE`、`duration_sec=null`、幂等同序 + DEAD 复活）+ `upload/SubtitleParser`（srt/ass、UTF-8→GBK→400、5MB→413、>10 万字符→400）+ worker PASTE 无音频分支（抽 `PasteTextReader`/`MonoWavExtractor` 保行数闸 286）；`durationSec`→`Long`。我独立复跑：160/160 exit 0、可维护性 exit 0、**我另做变异红（4 run/3 failures）→还原绿**；实机 task 124（PASTE，2.57s DONE、跳过 ASR、不变量 hash==sha256(对象字节) 成立、复用不扣配额）、导出 123/124 三节、负例 404/400/413/415/429 全对；配额 50/50、102/120（回报 103 已更正）。**F-16** 字幕编码边界、**F-17** 幂等不含 template → T3.9/T3.8 |
 | **T3.8** | 本周单测（Schema 畸形、三档选择、模板选择） | `mvn test` 全绿 | BUILD SUCCESS + 用例数 |
-| **T3.9** | **摘要模板机制**（US-12）：会议/课程/访谈/播客 4 模板 + 提交时可选 + 按文件名自动推荐 + 落库 | 同音频换模板 → 结构不同且都可用 | 用"腾讯会议"命名的文件 → 自动选会议模板；手工选课程 → 输出含知识点/考点 |
+| **T3.9** | **摘要模板机制**（US-12）：5 模板（会议/课程/访谈/播客/短视频）+ 提交时可选 + 按文件名自动推荐 + 落库 | 同音频换模板 → 结构不同且都可用 | ⏳ 代码已交 `f880b6a`（185/185、可维护性 exit 0、**我独立两处变异红→绿**；零配额实机：详情恰好 12 键且 template 末尾/旧任务 null、导出与 T3.7 逐字节一致、非法 template 400 逐字、幂等命中不覆盖旧任务、`模板：course（来源：显式）`/`meeting（来源：文件名）` 日志、满配额下新内容 429 且无脏行）；**2 条实机任务待配额 00:00 重置**（样本 `腾讯会议_t39a.wav`/`t39b_course.wav` 已备）→ 见 `review/2026-11-14-T3.9验收.md` |
 | **T3.10** | **格式扩展校验**：amr / opus / ass 可解可转 | 三种格式各传一个真实样本 → DONE | 各格式转写成功，失败时给出"请转 mp3"提示 |
 | **T3.11** | **本地档独立预算（F-11，D-081 已批）** | LOCAL 档真实产出 `ai_tier=LOCAL`（或明确记录失败降级） | ✅ `64434bb` + `review/2026-11-14-T3.5-T3.11验收.md`。新增 `LLM_LOCAL_MAX_TOKENS=512` / `LLM_LOCAL_TIMEOUT_SEC=180`（三处一致），`OllamaChatModelConfig` 建**独立超时通道**（不碰云的 120s/ASR 900s 路由）。我独立实测：启动日志 `max_tokens=512 / timeout=180s`；task 120 → LOCAL 调用 `finish_reason=length, completion=512`（预算精确生效，不再是 120s 超时误诊）→ 降级 EXTRACTIVE、33s 完成、无 500；task 121 云档回归 `ai_tier=CLOUD`；变异 512→8192 单测造红后还原绿。**遗留 F-14**：`ai_tier=LOCAL` 未达成（1.5B 输出冗长），需约束提示词输出长度或调大本地预算 → T3.8 前评估 |
 

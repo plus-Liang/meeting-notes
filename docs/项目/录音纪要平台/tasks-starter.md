@@ -1421,6 +1421,55 @@ GET /api/v1/tasks/124
 
 **【开工方式（新会话）】** 仓库 `D:\new\projects\meeting-notes` → 读根 `AGENT.md` → `git pull`（确认 HEAD 含 `2027406` 之后的 docs 提交）→ 读本卡 + `docs/项目/录音纪要平台/state.md`/`handoff.md` → 直接开工；**契约不用再报**，先做单测，配额重置后做实机。
 
+## T3.10 格式扩展校验：amr / opus（ass 已由 T3.7 覆盖）（约 1.5h）
+
+> **现状**：`MediaMagic` 已识别 `amr`（`#!AMR`）与 opus（`OggS` → `ogg`）；容器 ffmpeg 我已预跑实测能解码
+> （amr → 60.02s、opus → 59.999s 的 16k 单声道 wav）。但 **W3 验收要求"每种格式各传一个真实样本 → DONE"，目前 amr/opus 没有实机证据**；
+> 失败提示也没有 spec §4 验证命令要求的"请转 mp3"兜底指引。
+>
+> ✅ 样本已备（同一段真实语音 60s 转码，hash 与既有任务不同）：
+> `D:\new\artifacts\t310-amr.amr`、`D:\new\artifacts\t310-opus.opus`。
+>
+> ⚠️ **配额**：本卡只许 **2 条实机任务**（amr + opus，各约 1 分钟），必须等次日 00:00 配额重置后再跑。
+> 今日 50/50 已满；不得为验证另建任务，也不得把失败样本偷偷转码绕过（失败就停并报卡点）。
+
+**主任务**：
+
+1. **实机 amr + opus 各 1 条**：`POST /api/v1/tasks` 上传 → 轮询到 `DONE`；记录 taskId、耗时、`duration_sec`≈60、
+   `ai_tier`（期望 CLOUD）、`transcript` 非空且前 60 字可读。两条都必须走**现有音频路径**（不得改 worker/上传管线）。
+2. **失败提示兜底（spec §4 验证命令）**：`TaskService` 的 `INVALID_MEDIA` message 增加一句"若仍失败，请先把音频转成 mp3 再上传"
+   （**只改文案、错误码不变**；`INVALID_MEDIA` 不是码表变更）。grep 既有测试对旧文案的断言并同步更新，**不许删断言**。
+3. **单测**：补/确认 `MediaMagicTest` 覆盖 amr 与 opus（`OggS`）；新增 1 条"未知容器 → `MediaMagic.detect` 返回 null"（若无）；
+   新增 1 条文案断言（未知容器 → 400 且 message 含 `转成 mp3`）。
+4. **ass 不重做**：T3.7 已覆盖（解析单测 8 条 + 实机"解析成功→429"等价证据）；本卡不扩新格式（vtt/txt 不排）。
+
+**【范围声明】**
+- 做：amr/opus 两条实机 + 失败文案兜底 + 相关单测。
+- 不做：新格式（vtt/txt/amr-wb 等）、容器 ffmpeg 解码器变更（已实测可解）、上传/worker 管线改动、表结构/配置键/端点契约。
+- 禁：为凑 DONE 转码绕过、改断言/编数字、动 `docs/`、超 2 条实机任务、push、删证据行。
+
+**【验收】**
+```powershell
+# ① 实机（配额重置后，2 条）
+curl.exe -s --noproxy "*" -X POST http://localhost:8080/api/v1/tasks -F "file=@D:\new\artifacts\t310-amr.amr"
+curl.exe -s --noproxy "*" -X POST http://localhost:8080/api/v1/tasks -F "file=@D:\new\artifacts\t310-opus.opus"
+# 轮询到 DONE，贴 taskId + 耗时 + ai_tier + transcript 前 60 字 + duration_sec
+# ② 不支持格式：造一个未识别容器（如随机字节 .xyz）→ 400 INVALID_MEDIA，message 含 "转成 mp3"
+# ③ 回归：正常 wav/mp3 路径用既有证据行说明；全量 ≥185 exit 0；check-maintainability exit 0
+# ④ 变异：把 message 里 "转成 mp3" 提示删掉 → 文案用例红；还原 → touch → 绿（K-30）
+# ⑤ 收尾：.env 哈希 2BCC440F1C9E；git diff --name-only 只含 app/src；单 commit；证据行不删；不 push
+```
+**通过标准**：amr/opus 各 1 条 `DONE` 且 transcript 非空；未知容器提示含"转成 mp3"；全量 ≥185 exit 0；可维护性 exit 0；
+零表结构/配置键/端点契约改动；实机新增 ≤2 任务；证据行不删。
+
+**【可维护性】** 文案只改一处（`TaskService`）；不新增类/依赖；commit 前 `check-maintainability.ps1` exit 0。
+
+**【回报·测试三问】** 检查了哪些场景（amr/opus 实机、未知容器文案、回归、变异）｜ 实际命令 + 输出（两条 taskId + DONE + ai_tier + transcript 摘录、400 响应原文、变异红/绿、exit code）｜
+还有哪些没验证（**不许留空**；amr-wb / 手机真机导出的私有变体、长 amr 未测等要写清）。
+
+**【开工方式（新会话）】** 仓库 `D:\new\projects\meeting-notes` → 读根 `AGENT.md` → `git status` 干净（HEAD 应含 `f880b6a` T3.9 代码，**别回退/重写 T3.9**）→
+读本卡 + `docs/项目/录音纪要平台/state.md`/`handoff.md` → 先做文案 + 单测（不等配额），配额重置后再跑 2 条实机。
+
 ---
 
 ## 每张卡做完都要给你的回报
