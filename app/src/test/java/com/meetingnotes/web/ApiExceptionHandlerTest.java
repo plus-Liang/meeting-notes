@@ -1,5 +1,6 @@
 package com.meetingnotes.web;
 
+import com.meetingnotes.common.ApiException;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.ResponseEntity;
 

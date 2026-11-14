@@ -1,4 +1,4 @@
-package com.meetingnotes.web;
+package com.meetingnotes.common;
 
 /**
  * 201 响应体：任务受理成功（含幂等命中场景）。

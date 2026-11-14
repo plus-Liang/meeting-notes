@@ -1,11 +1,8 @@
 package com.meetingnotes.web;
 
-import com.fasterxml.jackson.annotation.JsonProperty;
-
 /**
  * PATCH /api/v1/tasks/{id}/todos/{index} 响应体（T3.5）：返回更新后的单条待办视图（done 恒出现）。
- * 对外键名与 PATCH 路径末段一致（T3.5 契约）；组件名 todoView 只为避开词扫描器的单字误报（M9）。
+ * 组件名即对外键名（全局 SNAKE_CASE 策略，D-041）；M9 词扫描已改为只扫注释文本（2026-11-14）。
  */
-public record TodoUpdateResponse(long taskId, int index,
-                                 @JsonProperty("todo") TodoItemView todoView) {
+public record TodoUpdateResponse(long taskId, int index, TodoItemView todo) {
 }

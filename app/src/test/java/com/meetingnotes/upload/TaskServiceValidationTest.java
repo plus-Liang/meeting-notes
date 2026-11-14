@@ -2,7 +2,7 @@ package com.meetingnotes.upload;
 
 import com.meetingnotes.task.QuotaService;
 import com.meetingnotes.task.TaskService;
-import com.meetingnotes.web.ApiException;
+import com.meetingnotes.common.ApiException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentMatchers;
@@ -128,7 +128,7 @@ class TaskServiceValidationTest {
         when(redis.opsForList()).thenReturn(listOps);
 
         TaskService service = newService(209715200L, 3600L);
-        com.meetingnotes.web.TaskCreatedResponse resp = service.createUpload(wav(64));
+        com.meetingnotes.common.TaskCreatedResponse resp = service.createUpload(wav(64));
 
         assertEquals(7L, resp.taskId());
         assertEquals("PENDING", resp.status());
@@ -152,7 +152,7 @@ class TaskServiceValidationTest {
                 .query(contains("SELECT id, status FROM task"),
                         ArgumentMatchers.<ResultSetExtractor<TaskService.ExistingTask>>any(), any(), eq(1L));
 
-        com.meetingnotes.web.TaskCreatedResponse resp = newService(209715200L, 3600L).createUpload(wav(64));
+        com.meetingnotes.common.TaskCreatedResponse resp = newService(209715200L, 3600L).createUpload(wav(64));
 
         assertEquals(7L, resp.taskId());
         assertEquals("DONE", resp.status(), "幂等命中必须返回库里真实状态");
@@ -173,7 +173,7 @@ class TaskServiceValidationTest {
                         ArgumentMatchers.<ResultSetExtractor<TaskService.ExistingTask>>any(), any(), eq(1L));
         when(redis.opsForList()).thenReturn(listOps);
 
-        com.meetingnotes.web.TaskCreatedResponse resp = newService(209715200L, 3600L).createUpload(wav(64));
+        com.meetingnotes.common.TaskCreatedResponse resp = newService(209715200L, 3600L).createUpload(wav(64));
 
         assertEquals(8L, resp.taskId());
         assertEquals("PENDING", resp.status(), "DEAD 复活后返回 PENDING");
@@ -213,7 +213,7 @@ class TaskServiceValidationTest {
                 .query(contains("SELECT id, status FROM task"),
                         ArgumentMatchers.<ResultSetExtractor<TaskService.ExistingTask>>any(), any(), eq(1L));
 
-        com.meetingnotes.web.TaskCreatedResponse resp = newService(209715200L, 3600L).createUpload(wav(64));
+        com.meetingnotes.common.TaskCreatedResponse resp = newService(209715200L, 3600L).createUpload(wav(64));
 
         assertEquals(9L, resp.taskId());
         assertEquals("RETRYING", resp.status());

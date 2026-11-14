@@ -1,6 +1,6 @@
 package com.meetingnotes.task;
 
-import com.meetingnotes.web.ApiException;
+import com.meetingnotes.common.ApiException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;

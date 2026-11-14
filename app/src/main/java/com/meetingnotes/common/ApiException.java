@@ -1,7 +1,7 @@
-package com.meetingnotes.web;
+package com.meetingnotes.common;
 
 /**
- * 业务性拒绝：由 {@link ApiExceptionHandler} 统一转成
+ * 业务性拒绝：由 web 层 ApiExceptionHandler 统一转成
  * {"code": "...", "message": "..."} 结构（spec N6 / N8 / T1.4 卡片）。
  */
 public class ApiException extends RuntimeException {

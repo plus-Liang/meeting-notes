@@ -2,8 +2,8 @@ package com.meetingnotes.task;
 
 import com.meetingnotes.upload.AudioDurationProbe;
 import com.meetingnotes.upload.MediaMagic;
-import com.meetingnotes.web.ApiException;
-import com.meetingnotes.web.TaskCreatedResponse;
+import com.meetingnotes.common.ApiException;
+import com.meetingnotes.common.TaskCreatedResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;

@@ -1,6 +1,6 @@
 package com.meetingnotes.upload;
 
-import com.meetingnotes.web.ApiException;
+import com.meetingnotes.common.ApiException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
