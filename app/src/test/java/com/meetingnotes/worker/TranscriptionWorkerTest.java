@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.ArgumentMatchers;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.ai.audio.transcription.TranscriptionModel;
@@ -17,15 +18,19 @@ import software.amazon.awssdk.services.s3.S3Client;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * D-048：ASR 返回空文本（纯音乐/静音/无人声）是业务结果，不是故障。
- * 必须正常落 task_result（transcript=""）并把任务置 DONE，不得抛异常进 RETRYING/DEAD。
+ * D-048：ASR 返回空文本（纯音乐/静音/无人声）是业务结果，不是故障，必须正常落 task_result。
+ * F-1/T3.2（D-069）：DONE 必须最后置 —— transcript 落库 → 摘要 → 待办 → DONE，
+ * 外部读到 DONE 时 summary/todos 必已落库；AI 失败不阻塞 DONE。
  */
 @ExtendWith(MockitoExtension.class)
 class TranscriptionWorkerTest {
@@ -39,18 +44,22 @@ class TranscriptionWorkerTest {
     @Mock
     private TranscriptionModel transcriptionModel;
     @Mock
+    private com.meetingnotes.ai.SummaryService summaryService;
+    @Mock
+    private com.meetingnotes.ai.TodoService todoService;
+    @Mock
     private ListOperations<String, String> listOps;
 
     private TranscriptionWorker newWorker() {
         return new TranscriptionWorker(redis, jdbc, s3, transcriptionModel,
-                org.mockito.Mockito.mock(com.meetingnotes.ai.SummaryService.class),
+                summaryService, todoService,
                 "meetingnotes:task-queue", 10, "ffmpeg", "meetingnotes", 3);
     }
 
     @Test
     void emptyTextPersistsAsEmptyTranscriptAndMarksDone() {
         TranscriptionWorker worker = newWorker();
-        worker.persistResult(5L, "");
+        worker.finalizeResult(5L, "");
 
         verify(jdbc).update(contains("task_result"), eq(5L), eq(""));
         verify(jdbc).update(contains("'DONE'"), eq(5L));
@@ -59,7 +68,7 @@ class TranscriptionWorkerTest {
     @Test
     void nullTextIsNormalizedToEmptyTranscriptAndMarksDone() {
         TranscriptionWorker worker = newWorker();
-        worker.persistResult(6L, null);
+        worker.finalizeResult(6L, null);
 
         ArgumentCaptor<String> transcript = ArgumentCaptor.forClass(String.class);
         verify(jdbc).update(contains("task_result"), eq(6L), transcript.capture());
@@ -70,10 +79,35 @@ class TranscriptionWorkerTest {
     @Test
     void nonEmptyTextPersistsVerbatimAndMarksDone() {
         TranscriptionWorker worker = newWorker();
-        worker.persistResult(7L, "你好，会议开始。");
+        worker.finalizeResult(7L, "你好，会议开始。");
 
         verify(jdbc).update(contains("task_result"), eq(7L), eq("你好，会议开始。"));
         verify(jdbc).update(contains("'DONE'"), eq(7L));
+    }
+
+    /* ---- F-1/T3.2（D-069）：DONE 顺序 —— transcript → 摘要 → 待办 → 最后 DONE ---- */
+
+    @Test
+    void doneIsSetOnlyAfterTranscriptSummaryAndTodos() {
+        TranscriptionWorker worker = newWorker();
+        worker.finalizeResult(11L, "会议明确了下一步安排");
+
+        InOrder order = inOrder(jdbc, summaryService, todoService);
+        order.verify(jdbc).update(contains("task_result"), eq(11L), eq("会议明确了下一步安排"));
+        order.verify(summaryService).summarize(11L, "会议明确了下一步安排");
+        order.verify(todoService).extract(11L, "会议明确了下一步安排");
+        order.verify(jdbc).update(contains("'DONE'"), eq(11L));
+    }
+
+    @Test
+    void aiFailureDoesNotBlockDone() {
+        TranscriptionWorker worker = newWorker();
+        when(summaryService.summarize(anyLong(), anyString())).thenThrow(new RuntimeException("LLM 超时"));
+        when(todoService.extract(anyLong(), anyString())).thenThrow(new RuntimeException("LLM 不可用"));
+
+        worker.finalizeResult(12L, "会议内容");
+
+        verify(jdbc).update(contains("'DONE'"), eq(12L));
     }
 
     /* ---- S-1 状态机（T1.8）：失败走 RETRYING 重新入队 / 重试耗尽走 DEAD + dead_letter ---- */

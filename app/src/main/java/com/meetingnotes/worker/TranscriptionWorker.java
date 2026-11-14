@@ -21,16 +21,11 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 /**
- * 转写 worker（T1.5 / plan §7 步骤 6–8）。
- *
- * <p>队列消费用 Redis BLPOP（阻塞取，不轮询空转）；单线程顺序处理（并发度
- * ASR_MAX_CONCURRENCY 的多 worker 属 T2.x）。状态机：PENDING/RETRYING → RUNNING → DONE，
- * 失败：重试未耗尽 → RETRYING 并重新入队（队尾，FIFO 不插队）；耗尽 → DEAD + dead_letter。
- * 兜底 catch 保证任务不会永久卡在 RUNNING（进程级崩溃恢复属 T2.3）。
- *
- * <p>处理管线：MinIO 拉原始文件 → 容器内 ffmpeg 抽 16k 单声道 wav（D-010）→
- * 复用已配好的 {@link TranscriptionModel}（容器内 http://asr:8000，D-034）→
- * 写 task_result → task.status=DONE。
+ * 转写 worker（T1.5 / plan §7 步骤 6–8）。队列消费用 Redis BLPOP（阻塞取，不轮询空转）；单线程顺序处理。
+ * 状态机：PENDING/RETRYING → RUNNING → DONE；失败：重试未耗尽 → RETRYING 重新入队（队尾，FIFO 不插队），
+ * 耗尽 → DEAD + dead_letter；兜底 catch 保证任务不永久卡 RUNNING（崩溃恢复属 T2.3）。
+ * <p>管线：MinIO 拉文件 → ffmpeg 抽 16k 单声道 wav（D-010）→ {@link TranscriptionModel} 转写
+ * （容器内 http://asr:8000，D-034）→ 写 transcript → 摘要/待办 → 最后置 DONE（D-069：DONE 时结果必已落库）。
  */
 @Component
 public class TranscriptionWorker implements SmartLifecycle {
@@ -42,6 +37,7 @@ public class TranscriptionWorker implements SmartLifecycle {
     private final S3Client s3;
     private final TranscriptionModel transcriptionModel;
     private final com.meetingnotes.ai.SummaryService summaryService;
+    private final com.meetingnotes.ai.TodoService todoService;
     private final String queueKey;
     private final Duration pollTimeout;
     private final String ffmpegBin;
@@ -56,6 +52,7 @@ public class TranscriptionWorker implements SmartLifecycle {
                                S3Client s3,
                                TranscriptionModel transcriptionModel,
                                com.meetingnotes.ai.SummaryService summaryService,
+                               com.meetingnotes.ai.TodoService todoService,
                                @Value("${app.worker.queue-key}") String queueKey,
                                @Value("${app.worker.poll-timeout-sec}") long pollTimeoutSec,
                                @Value("${app.media.ffmpeg-bin:ffmpeg}") String ffmpegBin,
@@ -66,6 +63,7 @@ public class TranscriptionWorker implements SmartLifecycle {
         this.s3 = s3;
         this.transcriptionModel = transcriptionModel;
         this.summaryService = summaryService;
+        this.todoService = todoService;
         this.queueKey = queueKey;
         this.pollTimeout = Duration.ofSeconds(pollTimeoutSec);
         this.ffmpegBin = ffmpegBin;
@@ -138,7 +136,6 @@ public class TranscriptionWorker implements SmartLifecycle {
         jdbc.update("UPDATE task SET status = 'RUNNING', updated_at = now() WHERE id = ?", taskId);
         log.info("开始转写（第 {} 次尝试）", ((Number) row.get("attempts")).intValue() + 1);
 
-        int attempts = ((Number) row.get("attempts")).intValue();
         Path dir = null;
         Path wav = null;
         try {
@@ -173,15 +170,8 @@ public class TranscriptionWorker implements SmartLifecycle {
             }
             log.info("ASR 转写完成（{} 字）", text == null ? 0 : text.length());
 
-            // 4) 写结果 + DONE。D-048：空文本（null/空白）是业务结果（纯音乐/静音/无人声），
-            //    不是故障 → 正常 DONE + transcript 落空串，不算失败、不重试。
-            persistResult(taskId, text);
-            // 5) 摘要（T3.1/D-068）：AI 失败只 WARN，任务仍 DONE、summary 留空（T3.3 三档降级接管）
-            try {
-                summaryService.summarize(taskId, text);
-            } catch (RuntimeException e) {
-                log.warn("摘要生成异常（不影响任务完成）", e);
-            }
+            // 4) 收口（finalizeResult）：写 transcript → 摘要/待办（AI 失败只 WARN 留空，T3.3 接管）→ 最后置 DONE；空文本照常（D-048）
+            finalizeResult(taskId, text);
         } finally {
             if (dir != null) {
                 deleteRecursively(dir);
@@ -192,24 +182,38 @@ public class TranscriptionWorker implements SmartLifecycle {
         }
     }
 
-    /** D-048：null/空白归一化为空串，正常落 task_result 并置 DONE（不算失败、不重试）。 */
-    void persistResult(long taskId, String text) {
+    /** 结果收口（F-1/T3.2，D-069）：先写 transcript → 摘要 → 待办 → **最后**置 DONE（AI 失败也 DONE）；
+     * 外部读到 DONE 时 summary/todos 必已落库，不存在 DONE+null 窗口。 */
+    void finalizeResult(long taskId, String text) {
+        saveTranscript(taskId, text);
+        runAiStep("摘要", () -> summaryService.summarize(taskId, text));
+        runAiStep("待办", () -> todoService.extract(taskId, text));
+        jdbc.update("UPDATE task SET status = 'DONE', updated_at = now() WHERE id = ?", taskId);
+        log.info("任务已置 DONE（transcript/摘要/待办均已收口）");
+    }
+
+    /** D-048：null/空白归一化为空串落 task_result（不算失败不重试，DONE 由 finalizeResult 统一置）。 */
+    void saveTranscript(long taskId, String text) {
         String normalized = text == null ? "" : text;
         jdbc.update("""
                 INSERT INTO task_result (task_id, transcript) VALUES (?, ?)
                 ON CONFLICT (task_id) DO UPDATE SET transcript = EXCLUDED.transcript, created_at = now()
                 """, taskId, normalized);
-        jdbc.update("UPDATE task SET status = 'DONE', updated_at = now() WHERE id = ?", taskId);
-        if (normalized.isEmpty()) {
-            log.info("转写结果已落库（未识别到语音内容，空 transcript，D-048）");
-        } else {
-            log.info("转写结果已落库（transcript {} 字）", normalized.length());
+        log.info("转写结果已落库（transcript {} 字）", normalized.length());
+    }
+
+    /** AI 单步兜底：异常只 WARN 不上抛（D-068，失败不阻塞任务完成）。 */
+    private void runAiStep(String name, Runnable step) {
+        try {
+            step.run();
+        } catch (RuntimeException e) {
+            log.warn("{}生成异常（不影响任务完成）", name, e);
         }
     }
 
     /**
      * 失败兜底：不永久卡 RUNNING。重试未耗尽 → RETRYING + 重新入队；耗尽 → DEAD + dead_letter。
-     * error_code 只存稳定错误码（列宽 64）；完整原因写 dead_letter.reason（TEXT）。
+     * error_code 只存稳定错误码（列宽 64），完整原因写 dead_letter.reason（TEXT）。
      */
     private void markFailure(long taskId, Exception cause) {
         String code = cause instanceof ProcessingException pe ? pe.code : "UNKNOWN_ERROR";
@@ -249,12 +253,10 @@ public class TranscriptionWorker implements SmartLifecycle {
             walk.sorted(java.util.Comparator.reverseOrder()).forEach(p -> {
                 try {
                     Files.deleteIfExists(p);
-                } catch (java.io.IOException ignored) {
-                    // 临时目录清理失败无害，留给 OS tmp 清理
+                } catch (java.io.IOException ignored) { // 临时目录清理失败无害，留给 OS tmp 清理
                 }
             });
-        } catch (java.io.IOException ignored) {
-            // 同上
+        } catch (java.io.IOException ignored) { // 同上
         }
     }
 
@@ -287,10 +289,7 @@ public class TranscriptionWorker implements SmartLifecycle {
     }
 
     private static String abbreviate(String s) {
-        if (s == null || s.isBlank()) {
-            return "UNKNOWN";
-        }
-        return s.length() <= 200 ? s : s.substring(0, 200) + "…";
+        return s == null || s.isBlank() ? "UNKNOWN" : s.length() <= 200 ? s : s.substring(0, 200) + "…";
     }
 
     private static String tail(String s, int n) {

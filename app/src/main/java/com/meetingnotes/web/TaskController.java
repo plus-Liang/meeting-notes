@@ -108,7 +108,7 @@ public class TaskController {
         TaskStatusResponse resp = jdbc.query("""
                 SELECT t.id, t.status, t.duration_sec, t.size_bytes, t.created_at, t.error_code,
                        CASE WHEN t.status = 'DONE' THEN r.transcript END AS transcript,
-                       r.summary, r.keywords, r.ai_tier
+                       r.summary, r.keywords, r.ai_tier, r.todos
                 FROM task t
                 LEFT JOIN task_result r ON r.task_id = t.id
                 WHERE t.id = ? AND t.user_id = ?
@@ -133,11 +133,22 @@ public class TaskController {
                             keywords = null;
                         }
                     }
+                    // todos 列是 JSONB（T3.2）：解析成待办数组，元素 snake_case；坏数据降级为 null 不炸接口
+                    java.util.List<com.meetingnotes.ai.TodoService.TodoItem> todos = null;
+                    String todosRaw = rs.getString("todos");
+                    if (todosRaw != null && !todosRaw.isBlank()) {
+                        try {
+                            todos = new com.fasterxml.jackson.databind.ObjectMapper()
+                                    .readValue(todosRaw, new com.fasterxml.jackson.core.type.TypeReference<java.util.List<com.meetingnotes.ai.TodoService.TodoItem>>() { });
+                        } catch (Exception e) {
+                            todos = null;
+                        }
+                    }
                     return new TaskStatusResponse(rs.getLong("id"), rs.getString("status"),
                             duration, size,
                             rs.getObject("created_at", OffsetDateTime.class), rs.getString("transcript"),
                             rs.getString("error_code"), rs.getString("summary"), keywords,
-                            rs.getString("ai_tier"));
+                            rs.getString("ai_tier"), todos);
                 },
                 id, DEFAULT_USER_ID);
         if (resp == null) {
