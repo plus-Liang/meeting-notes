@@ -1228,6 +1228,56 @@ Select-String -Path .env.example,app\src\main\resources\application.yml -Pattern
 
 **【回报·测试三问】** 检查了哪些场景（LOCAL 成功/LOCAL 失败降级/云端回归/空音频/错误四连）｜ 实际命令 + 输出（taskId + `ai_tier` + 耗时 + 日志；三处一致 grep；变异红/绿；exit code）｜ 还有哪些没验证（**不许留空**；`ollama pull` 不通、模型换新版本未验可写"已知环境限制"）。
 
+## T3.6 术语注入（`glossary` → 结构化提示词，US-3 闭环）（约 1.5h）
+
+> **现状**：T3.5 已把"用户改词"沉淀进 `glossary`（`wrong_text`/`right_text`/`hits`/`priority`），但**没有任何地方读它**——
+> 用户改过"章总→张总"后，下一次转写照样输出"章总"，US-3 闭环没合上。
+> **本卡目标**：让结构化提示词读取 glossary（按 hits/priority 取前 N 条），使**下一次转写**的 summary/keywords/todos 主动使用正确写法。
+>
+> ⚠️ **配额红线**：今日已 100/120 分钟、**47/50 任务**——本卡实机**最多新增 2 个任务**。技巧：需要"同一段语音的第二个任务"时，
+> 用 python `wave` 把已有样本**去掉第一个采样点**重写（语音内容不变、字节/hash 变 → `reused=false`），别反复传新长音频。
+
+**主任务**：
+1. **新增 `GlossaryTermSource`（或等价 repository 方法）**：读 `glossary` where `user_id=1`，按 `hits desc, priority desc, wrong_text asc` 取前 **20** 条，拼成一段**短注入文本**
+   （格式自定但要可读，例如 `【术语表（原文说法 → 正确写法）】章总→张总；…`），**总长 ≤400 字**（超了按序截断），空表时返回空串（不注入、不报错）。
+2. **注入 `StructuringPrompt.build(transcript)`**：把上面这段拼在"要求"之前，并加一句"输出中遇到下列说法，一律改用正确写法"；
+   **不改**已有 JSON 结构约束、不改 `summary/keywords/todos` 字段定义、不改 max_tokens 预算公式（400 字 ≈ 400~500 tok，仍在余量内）。
+3. **可观测**：结构化日志一条 INFO：`术语注入：N 条（≤20）/ 长度 M 字`（**不打印词条内容**）；空表时打"术语注入：0 条（跳过）"。
+4. **三档一致性**：提示词注入对 CLOUD/LOCAL 都生效（同一段文本）；EXTRACTIVE 档不调 LLM，**本卡不改抽取式逻辑**（若要"确定性替换"另开卡，先报）。
+5. **测试**：单测覆盖 `GlossaryTermSource`（排序/上限 20/长度 400 截断/空表）、`StructuringPrompt` 含注入段与不含注入段的两种输出、`StructuringService` 调 prompt 时把注入文本传进去（可断言 `Prompt.getContents()` 含"术语表"）。
+
+**【规划四问】**（开工确认回述）
+- 改哪里：`ai/GlossaryTermSource`（新）、`ai/StructuringPrompt`（拼段）、`ai/StructuringService`（取注入文本传给 prompt）；`web/`/worker/表结构/配置**零改动**；测试 2~3 个文件。
+- 复用什么：`JdbcTemplate` 注入方式、`StructuringPrompt` 现有结构、`MAX_*` 常量收敛、日志 JSON/MDC 口径。
+- 影响：CLOUD/LOCAL 提示词变长（≤400 字）；空 glossary 时行为与现在**逐字节一致**（回归判据）；`ai_tier`/契约/空音频语义不变。
+- 怎么验证：见【验收】。
+
+**【范围声明】**
+- 做：glossary 读取 + 排序上限 + 注入提示词 + 单测 + **1~2 条实机**（改词→下一次转写）。
+- 不做：抽取式的确定性替换（另开卡）、前端展示、注入条数/开关配置化（不加新键；要配置化先报）、改 `StructuringPrompt` 的 JSON 约束、改 T3.5 的写端点。
+- 禁：注入超过 400 字/20 条；打印词条内容到日志（隐私）；空表时改变任何输出；改已有断言；删证据行（D-073）；**超过 2 个实机任务**（配额）。
+
+**【验收】**
+```powershell
+# ⓪ 先清理 T3.5 验收遗留的测试词条（这 2 条是验收造的，不是真实词表；任务行不删，D-073）
+docker compose exec -T postgres psql -U mn -d meetingnotes -c "delete from glossary where wrong_text in ('第二次的开发','这就是我')"
+# ① 单测：排序/上限 20/400 字截断/空表跳过/prompt 含注入段；全量 ≥133 exit 0；check-maintainability exit 0
+# ② 造一条真实词条：用 T3.5 的 corrections 端点对已有任务改一个**真实 ASR 错词**（如把某专有名词改成正确写法），glossary 出现该条
+# ③ 实机闭环（**只跑 1 个新任务**）：把某个已有样本去掉 1 个采样点重写（新 hash → reused=false）上传 →
+#    docker compose logs app --since 5m | Select-String '术语注入'   # 应见 "术语注入：N 条（≤20）/ 长度 M 字"
+#    GET 详情 → summary/keywords/todos 里应出现 **right_text**、不再出现 wrong_text（贴原文对比）
+# ④ 空表回归（可选，不新增任务）：临时把 glossary 清空后重启 app → 日志"术语注入：0 条（跳过）"，同一 prompt 无注入段（单测已覆盖即可，不必再传）
+# ⑤ 云档回归：本卡不改预算/路由，无需重跑云档；但要确认 `application.yml`/`.env*` 零改动
+# ⑥ 变异：把注入文本从 prompt 里删掉（或强制返回空串）→ 注入单测必须红 → 还原 → touch → 绿（K-30）
+# ⑦ 收尾：`.env` 哈希仍 2BCC440F1C9E；`git diff --name-only` 只含 `app/src`；证据行不删；1 个 commit
+```
+**通过标准**：glossary 被读取（排序/≤20/≤400 字，日志可见）；注入段真的进了 prompt（单测可判）；**1 条实机证明"改过的词在第二次转写里被改成正确写法"**；
+空表时行为与现在一致；全量 ≥133 exit 0；可维护性 exit 0；零配置/表结构改动；实机任务新增 ≤2；证据行不删。
+
+**【可维护性】** glossary 读取/排序/截断集中在一个新类；注入文案集中在 `StructuringPrompt`（一处改文案）；上限用常量；不引第三方依赖；commit 前 `check-maintainability.ps1` exit 0。
+
+**【回报·测试三问】** 检查了哪些场景（排序/上限/空表/注入生效/实机闭环）｜ 实际命令 + 输出（taskId + 日志"术语注入"行 + 前后 summary 对比 + 单测红/绿；exit code）｜ 还有哪些没验证（**不许留空**；EXTRACTIVE 的确定性替换、跨任务词表增长可写"留 T3.8/T4.x"）。
+
 ---
 
 ## 每张卡做完都要给你的回报
