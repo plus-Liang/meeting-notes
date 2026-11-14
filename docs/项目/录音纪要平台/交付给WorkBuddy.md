@@ -64,21 +64,21 @@ T0.1 通过了。现在只做 T0.2（用 curl 转写真实 mp3），按 tasks-st
 T0.2 通过。现在只做 T0.3（实测 RTF），跑 3 个不同长度文件，给出 RTF 和 8.44h 的推算耗时。
 ```
 
-**核心节奏：一次一张卡。** 任务卡全在 `docs/项目/录音纪要平台/tasks-starter.md`（第一批 10 张），
-后面的在 `tasks.md`（总共 50 个任务，带 DoD 与验证命令）。
+**核心节奏：一次一张卡。** 任务卡全在 `docs/项目/录音纪要平台/tasks-starter.md`（已写 **16 张**：T0.1–T0.5、T1.1–T1.9、T2.1、T2.10），
+其余在 `tasks.md`（总共 **53 个任务**，带 DoD 与验证命令）。
 
-### 2.1 当前这一轮（T1.6）直接粘这个
+### 2.1 当前这一轮（T1.9）直接粘这个
 
 ```text
-T1.5 已验收通过（报告 docs/协作/review/2026-11-13-T1.5验收.md）。现在只做 T1.6（三页面 + D-048 空文本语义），
-按 docs/项目/录音纪要平台/tasks-starter.md 的【T1.6】段执行，先写规划四问+范围声明再动手。注意四条：
-1) 前置先改 D-048：ASR 返回空文本 → DONE + transcript 空串（不再抛异常），必须带 1 条单测；
-2) 三页只用静态 HTML + 原生 JS，不引前端框架/构建链；字段一律 snake_case（D-041）；
-3) 允许给 GET /api/v1/tasks/{id} 追加 error_code（nullable，只增不改），改完同步 接入指南.md 一行；
-   除此之外不动 /api/v1 已有字段、yml 键、compose、Flyway。
-4) 页面不许硬编码 localhost:8080（用相对路径）；DEAD/RETRYING/空 transcript/404 四种状态都要有可读文案。
-做完贴：改了什么（git diff --stat）/ 5 条验收的实际输出（含反例）/ mvn -q test 用例数 /
-check-maintainability.ps1 的 exit code / 测试三问（还有哪些没验证不许留空）。
+T1.7/T1.8 已验收通过（报告 docs/协作/review/2026-11-14-T1.7-T1.8验收.md，mvn 23/23）。现在只做 T1.9（scripts/test.ps1 测试入口），
+按 docs/项目/录音纪要平台/tasks-starter.md 的【T1.9】段执行，先写规划四问+范围声明再动手。注意六条：
+1) 只加脚本，不动任何 Java / 配置 / compose / Dockerfile；
+2) 脚本读 .env 注入进程环境（不打印 value，只打印 key 名）；ASR_BASE_URL 默认 http://localhost:8001，但外部已设置时以外部为准；
+3) maven 定位顺序：$env:MAVEN_HOME/$env:MAVEN_BIN → E:\tools\apache-maven-3.9.9\bin\mvn.cmd → 都没有就明确报错 exit 2；
+4) 支持 -UnitOnly 跳过 2 个 *SmokeTest；打印 surefire 用例数；exit code 透传；
+5) 中文注释的 .ps1 必须存 UTF-8 带 BOM（PS 5.1 否则乱码报错）；
+6) 反例必须进：把 ASR_BASE_URL 指到 http://localhost:59999 → 冒烟用例必须红（证明脚本真注入了地址），跑完清掉。
+做完贴：改了什么（git diff --stat）/ 两种模式的实际输出 + 用例数 + exit code / 反例输出 / check-maintainability.ps1 exit code / 测试三问（不许留空）。
 ```
 
 ---
@@ -97,7 +97,7 @@ check-maintainability.ps1 的 exit code / 测试三问（还有哪些没验证�
 
 ## 4. 三个坑（第一次用一定会踩）
 
-### 坑 1：别一次把 50 个任务都发给它
+### 坑 1：别一次把 53 个任务都发给它
 上下文会被灌爆，它会开始"合理想象"。**永远一次一张卡。**
 
 ### 坑 2：别让它改 `docs/`
@@ -133,7 +133,7 @@ check-maintainability.ps1 的 exit code / 测试三问（还有哪些没验证�
 |---|---|
 | `D:\new\projects\meeting-notes\AGENT.md` | **写代码 AI 的入口**：必读顺序 + 十条硬约束 + 环境 + 回报格式 + 禁止清单 |
 | `D:\new\projects\meeting-notes\docs\` | 项目文档 24 份 + 5 份验收报告副本（同步脚本生成，勿手改） |
-| `docs\项目\录音纪要平台\tasks-starter.md` | **任务卡 T0.1–T0.5 + T1.1–T1.6（11 张）**，每张含步骤/验证命令/通过标准/失败预案；最新一张是 **T1.6 三页面** |
+| `docs\项目\录音纪要平台\tasks-starter.md` | **任务卡 T0.1–T0.5 + T1.1–T1.9 + T2.1 + T2.10（16 张）**，每张含步骤/验证命令/通过标准/失败预案；最新一张是 **T1.9 测试入口** |
 | `docs\项目\录音纪要平台\tasks.md` | 全部 50 个任务 + DoD + 依赖顺序 |
 | `docs\项目\录音纪要平台\环境搭建说明.md` | 本机环境实测 + Docker/Python 源怎么配 |
 | `tools\sync-docs-to-code.ps1` | 文档改了之后重新同步（一条命令） |
