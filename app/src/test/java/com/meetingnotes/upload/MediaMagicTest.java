@@ -93,4 +93,14 @@ class MediaMagicTest {
         assertNull(MediaMagic.detect(new byte[0]));
         assertNull(MediaMagic.detect(new byte[]{0x00, 0x00, 0x00}));
     }
+
+    @Test
+    void amr_narrowband_opus_container_and_unknown_container() {
+        // T3.10：amr 窄带（#!AMR\n，与既有 #!AMR-WB 变体互补）与 opus（OggS 容器）必须识别；
+        // 未知容器（随机字节）返回 null，由调用方按 INVALID_MEDIA 拒绝
+        assertEquals("amr", MediaMagic.detect(withAscii(new byte[0], "#!AMR\n")));
+        assertEquals("ogg", MediaMagic.detect(withAscii(new byte[0], "OggS")));
+        assertNull(MediaMagic.detect(new byte[]{(byte) 0xA7, 0x11, (byte) 0xE3, 0x4B,
+                0x02, (byte) 0x9D, 0x58, 0x76}));
+    }
 }

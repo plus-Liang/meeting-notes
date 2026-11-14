@@ -101,8 +101,10 @@ public class TaskService {
         }
         String format = MediaMagic.detect(java.util.Arrays.copyOf(head, headLen));
         if (format == null) {
+            // T3.10：失败提示补 spec §4 验证命令要求的 mp3 转码兜底指引（只改文案，错误码不变）
             throw new ApiException(400, "INVALID_MEDIA",
-                    "文件头无法识别为受支持的音/视频格式（支持清单见 spec §4，扩展名与 MIME 不作为依据）");
+                    "文件头无法识别为受支持的音/视频格式（支持清单见 spec §4，扩展名与 MIME 不作为依据）；"
+                            + "若仍失败，请先把音频转成 mp3 再上传");
         }
 
         // 2) 大小：servlet 层已有 max-file-size 硬闸；这里流式复核并计算 hash

@@ -91,6 +91,22 @@ class TaskServiceValidationTest {
     }
 
     @Test
+    void unknownContainerRejected400WithMp3FallbackHint() {
+        // T3.10 / spec §4：未识别容器（随机字节 .xyz）→ 400 INVALID_MEDIA，message 含"转成 mp3"兜底指引
+        byte[] mystery = {0x13, (byte) 0xAB, 0x00, (byte) 0x9C, 0x42, 0x11, (byte) 0xF0, 0x07,
+                0x33, 0x5A, (byte) 0xCD, 0x21, 0x64, 0x09, (byte) 0x88, 0x15};
+        MockMultipartFile file = new MockMultipartFile("file", "mystery.xyz", null, mystery);
+
+        ApiException e = assertThrows(ApiException.class,
+                () -> newService(209715200L, 3600L).createUpload(file));
+
+        assertEquals(400, e.getStatus());
+        assertEquals("INVALID_MEDIA", e.getCode());
+        assertTrue(e.getMessage().contains("转成 mp3"),
+                "失败提示必须含 mp3 转码兜底指引，实际：" + e.getMessage());
+    }
+
+    @Test
     void oversizeWavIsRejected413SizeExceeded() {
         // 合法 wav 头但超过 max-size-bytes=1024：走 servlet 之后的第二道流式复核
         MockMultipartFile file = wav(4096);
