@@ -1228,7 +1228,7 @@ Select-String -Path .env.example,app\src\main\resources\application.yml -Pattern
 
 **【回报·测试三问】** 检查了哪些场景（LOCAL 成功/LOCAL 失败降级/云端回归/空音频/错误四连）｜ 实际命令 + 输出（taskId + `ai_tier` + 耗时 + 日志；三处一致 grep；变异红/绿；exit code）｜ 还有哪些没验证（**不许留空**；`ollama pull` 不通、模型换新版本未验可写"已知环境限制"）。
 
-## T3.6 术语注入（`glossary` → 结构化提示词，US-3 闭环）（约 1.5h）
+## T3.6 术语注入（`glossary` → 结构化提示词，US-3 闭环）（约 1.5h）✅ **已完成（`a8845b4`；我独立复跑 139/139、变异造红后绿、独立实机 task 123 闭环（transcript 留错词、summary/keywords 用正确写法）；139 用例；F-15 抽取式不读词表待评估）**
 
 > **现状**：T3.5 已把"用户改词"沉淀进 `glossary`（`wrong_text`/`right_text`/`hits`/`priority`），但**没有任何地方读它**——
 > 用户改过"章总→张总"后，下一次转写照样输出"章总"，US-3 闭环没合上。
@@ -1277,6 +1277,57 @@ docker compose exec -T postgres psql -U mn -d meetingnotes -c "delete from gloss
 **【可维护性】** glossary 读取/排序/截断集中在一个新类；注入文案集中在 `StructuringPrompt`（一处改文案）；上限用常量；不引第三方依赖；commit 前 `check-maintainability.ps1` exit 0。
 
 **【回报·测试三问】** 检查了哪些场景（排序/上限/空表/注入生效/实机闭环）｜ 实际命令 + 输出（taskId + 日志"术语注入"行 + 前后 summary 对比 + 单测红/绿；exit code）｜ 还有哪些没验证（**不许留空**；EXTRACTIVE 的确定性替换、跨任务词表增长可写"留 T3.8/T4.x"）。
+
+## T3.7 导出 Markdown + PASTE 入口（JSON 文本 / srt / ass，跳过转写）（约 2.5h）
+
+> **现状**：只能 `multipart` 上传音频 → ASR → 结构化；**没有导出端点**；**PASTE（贴文本）/字幕入口未实现**；
+> 用户拿不到"下载一份纪要"，粘贴一段会议记录也得先转成音频——spec US-2 的"PASTE 入口"和 T3.7 的"文件含三节"都没兑现。
+>
+> ⚠️ **两处公共面**：①新增导出端点；②`POST /api/v1/tasks` 增加 JSON/字幕入口（请求体或 `source_type` 可能新增取值）。
+> 按规矩：**开工确认先给契约草案（方法/路径/请求/响应/错误码/示例）+ 是否需要新 `source_type` 取值，我批了再写码**。
+> ⚠️ **配额红线**：今日 **49/50 任务**——实机**只能新增 1 个任务**（PASTE 那一条）；导出用已有任务 123；字幕解析靠单测，不许为验证再传音频。
+
+**主任务**：
+1. **导出 Markdown**：`GET /api/v1/tasks/{id}/export?format=md` → `200`、`Content-Type: text/markdown; charset=utf-8`、`Content-Disposition: attachment; filename="task-{id}.md"`；
+   正文三节固定顺序：`## 摘要`（summary）/`## 关键词`（逗号分隔或换行列表）/`## 待办`（`- [x]`/`- [ ]` + action + （owner / deadline），null 不显示）；
+   `task_result` 缺失或 transcript 空 → 4xx（契约里写清，不许 500）；`format` 非 `md` → 400；任务不存在 → 404。
+2. **PASTE 入口（JSON）**：`POST /api/v1/tasks`，`Content-Type: application/json`，body `{"text":"..."}`（trim 后 ≥1 字符、≤100_000 字符）→
+   建任务（`source_type` 用现有枚举里最贴切的值；**如需新取值先报**）→ **跳过 ASR/ffmpeg**、`transcript=text` → 结构化（走现有三档）→ DONE；
+   `text` 缺失/空/超长 → 400。响应沿用现有"提交任务"形状（task_id/status/...），**不许改已有键**。
+3. **字幕文件（srt/ass）**：`multipart` 上传 `.srt` / `.ass` → 解析去掉序号/时间轴/样式标签，按行合并成 transcript（**跳过 ASR**）→ 同样直接结构化 → DONE；
+   解析不出任何文本 → 400（提示"字幕文件没有可识别文本"）。扩展名判断按文件名后缀（大小写不敏感）。
+4. **契约只增**：详情 11 键不变、列表不变；导出/PASTE/字幕都是"新增端点/新增请求形态"，不许改已有响应字段语义。
+5. **测试**：导出三节顺序 + 待办 done 勾选 + 404/400；PASTE 建任务且 **`verify(transcriptionModel, never())` 不调 ASR**；srt/ass 解析单测各一（含时间轴/样式剥离）；空文本/解析为空 → 400。
+
+**【规划四问】**（开工确认回述 + 契约草案）
+- 改哪里：`web/TaskController`（导出 + JSON 入口）、`upload/` 或 `task/`（字幕解析器、跳过 ASR 的提交路径）、`task_result` 读取/导出格式化、单测 3~4 个文件；`worker/` 的 DONE 顺序与既有音频路径**不改**（只加"无音频"分支）。
+- 复用什么：现有 `TaskService` 提交/幂等口径、`ApiException`/错误码分层、`TodoItemView`（done）、`MAX_*` 常量、`ObjectMapper` 单例。
+- 影响：新增 1 个读端点 + 提交入口多两种输入形态；音频路径与三档级联不受影响；无 key 时 PASTE 仍走 EXTRACTIVE。
+- 怎么验证：见【验收】。
+
+**【范围声明】**
+- 做：Markdown 导出（三节 + done）+ JSON 文本 PASTE + srt/ass 字幕解析路径 + 单测 + 1 条 PASTE 实机。
+- 不做：前端页面/按钮（T4.13）、导出 PDF/DOCX、批量导出（T3.7 卡面只要求 Markdown；批量属 T3.7 后段或 T4.x，要加先报）、改表结构、加配置键。
+- 禁：PASTE 路径偷偷调 ASR；导出内容缺节；改已有响应字段/错误码语义；未报批就改公共面；超 1 个实机任务；删证据行。
+
+**【验收】**
+```powershell
+# ① 单测：导出三节/待办 done/404/400；PASTE 不调 ASR（verify never）；srt+ass 解析；空文本 400；全量 ≥139 exit 0；check-maintainability exit 0
+# ② 实机（唯一 1 个新任务，PASTE）：用一句话文本提交 → 期望秒出 DONE、transcript=原文、ai_tier=CLOUD、summary 非空
+curl.exe -s --noproxy "*" -X POST http://localhost:8080/api/v1/tasks -H "Content-Type: application/json" --data-binary "@D:\new\artifacts\paste.json"
+# ③ 导出（不新增任务）：对已有 DONE 任务 123 导出 → 贴 markdown 正文（三节 + 待办 done 状态）；再验 404/400
+curl.exe -s --noproxy "*" "http://localhost:8080/api/v1/tasks/123/export?format=md"
+# ④ 字幕解析（单测覆盖；如需实机则用已上传过的字幕文本走 JSON PASTE？——**不许再传音频**）
+# ⑤ 回归：音频路径仍正常（用已有证据行说明，不新增任务）；详情 11 键不变；错误四连仍对
+# ⑥ 变异：导出删掉"关键词"节 → 导出用例红；PASTE 改成走 ASR → PASTE 用例红；还原 → touch → 绿（K-30）
+# ⑦ 收尾：`.env` 哈希 2BCC440F1C9E；`git diff --name-only` 只含 `app/src`（除非报批过契约面）；证据行不删；1 个 commit
+```
+**通过标准**：导出 Markdown 三节齐全、待办带 done 状态、404/400 正确；PASTE 跳过 ASR 且秒出 DONE（`verify never` 可判）；字幕 srt/ass 能被解析成 transcript（单测 + 至少一种实机或等价证据）；
+音频路径与三档级联不受影响；详情 11 键不变；全量 ≥139 exit 0；可维护性 exit 0；零配置键/表结构改动；实机新增 ≤1 任务；证据行不删。
+
+**【可维护性】** 字幕解析独立小类（别塞进 controller）；导出格式化单独方法（便于以后加 PDF）；上限常量集中；不引第三方依赖；commit 前 `check-maintainability.ps1` exit 0。
+
+**【回报·测试三问】** 检查了哪些场景（导出/PASTE/字幕/空值/404/变调）｜ 实际命令 + 输出（导出 markdown 正文、PASTE taskId + 耗时 + ai_tier、变异红/绿、exit code）｜ 还有哪些没验证（**不许留空**；批量导出/前端按钮/PDF 可写"留 T4.x"）。
 
 ---
 
