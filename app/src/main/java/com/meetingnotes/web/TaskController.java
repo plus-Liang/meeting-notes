@@ -9,6 +9,7 @@ import com.meetingnotes.task.GlossaryRepository;
 import com.meetingnotes.task.TaskMutationService;
 import com.meetingnotes.task.TaskQueryService;
 import com.meetingnotes.task.TaskService;
+import com.meetingnotes.task.TextTaskService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -21,10 +22,12 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestPart;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -49,6 +52,7 @@ public class TaskController {
     private final TaskService taskService;
     private final TaskQueryService taskQueryService;
     private final TaskMutationService taskMutationService;
+    private final TextTaskService textTaskService;
     private final JdbcTemplate jdbc;
     /** F-10：详情解析用的单例 ObjectMapper（此前每行 new，属技术债）。 */
     private final ObjectMapper mapper;
@@ -56,11 +60,13 @@ public class TaskController {
     public TaskController(TaskService taskService,
                           TaskQueryService taskQueryService,
                           TaskMutationService taskMutationService,
+                          TextTaskService textTaskService,
                           JdbcTemplate jdbc,
                           ObjectMapper mapper) {
         this.taskService = taskService;
         this.taskQueryService = taskQueryService;
         this.taskMutationService = taskMutationService;
+        this.textTaskService = textTaskService;
         this.jdbc = jdbc;
         this.mapper = mapper;
     }
@@ -68,8 +74,72 @@ public class TaskController {
     @PostMapping(value = "/tasks", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<TaskCreatedResponse> upload(@RequestPart("file") MultipartFile file)
             throws IOException {
+        // T3.7：字幕（.srt/.ass，按文件名后缀大小写不敏感）先于魔数闸分派——纯文本过不了
+        // MediaMagic.detect，必须在这里转成文本任务；其余后缀仍走原音频路径（逐字节不动）。
+        String name = file.getOriginalFilename() == null ? "" : file.getOriginalFilename().toLowerCase();
+        if (name.endsWith(".srt") || name.endsWith(".ass")) {
+            return ResponseEntity.status(HttpStatus.CREATED).body(textTaskService.createSubtitle(file));
+        }
         TaskCreatedResponse resp = taskService.createUpload(file);
         return ResponseEntity.status(HttpStatus.CREATED).body(resp);
+    }
+
+    /** PASTE 入口（T3.7 / US-2）：贴文本直接建任务，跳过 ASR（worker 按 source_type=PASTE 走无音频分支）。 */
+    @PostMapping(value = "/tasks", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<TaskCreatedResponse> paste(@RequestBody PasteRequest body) {
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(textTaskService.createPaste(body == null ? null : body.text()));
+    }
+
+    /**
+     * 导出 Markdown（T3.7 / US-2）：三节固定顺序（摘要/关键词/待办），待办带 done 勾选状态。
+     * format 目前只支持 md；任务不存在 → 404；无内容（未 DONE/transcript 空）→ 400。
+     */
+    @GetMapping("/tasks/{id}/export")
+    public ResponseEntity<String> export(@PathVariable("id") long id,
+                                         @RequestParam(name = "format", required = false) String format) {
+        if (!"md".equals(format)) {
+            throw new ApiException(400, "INVALID_PARAM", "format 目前只支持 md");
+        }
+        record ExportRow(String status, String transcript, String summary, String keywords, String todos) {
+        }
+        List<ExportRow> rows = jdbc.query("""
+                SELECT t.status,
+                       CASE WHEN t.status = 'DONE' THEN r.transcript END AS transcript,
+                       r.summary, r.keywords::text AS keywords, r.todos::text AS todos
+                FROM task t
+                LEFT JOIN task_result r ON r.task_id = t.id
+                WHERE t.id = ? AND t.user_id = ?
+                """, (rs, i) -> new ExportRow(rs.getString("status"), rs.getString("transcript"),
+                rs.getString("summary"), rs.getString("keywords"), rs.getString("todos")),
+                id, DEFAULT_USER_ID);
+        if (rows.isEmpty()) {
+            throw new ApiException(404, "TASK_NOT_FOUND", "任务 " + id + " 不存在");
+        }
+        ExportRow row = rows.get(0);
+        if (row.transcript() == null || row.transcript().isBlank()) {
+            throw new ApiException(400, "INVALID_PARAM", "任务没有可导出的内容（未完成或无转写文本）");
+        }
+        List<String> keywords = null;
+        List<TodoItemView> todos = null;
+        try {
+            if (row.keywords() != null && !row.keywords().isBlank()) {
+                keywords = mapper.readValue(row.keywords(), new TypeReference<List<String>>() { });
+            }
+            JsonNode todosNode = row.todos() == null || row.todos().isBlank()
+                    ? null : mapper.readTree(row.todos());
+            if (todosNode != null && todosNode.isArray()) {
+                todos = TodoItemView.listFrom(todosNode);
+            }
+        } catch (Exception e) {
+            keywords = null;
+            todos = null;
+        }
+        String markdown = TaskMarkdownExporter.export(row.summary(), keywords, todos);
+        return ResponseEntity.ok()
+                .contentType(new MediaType("text", "markdown", StandardCharsets.UTF_8))
+                .header("Content-Disposition", "attachment; filename=\"task-" + id + ".md\"")
+                .body(markdown);
     }
 
     /** 首页 → 提交页（T1.6）。静态资源由 Spring Boot 提供，这里只做根路径转发。 */

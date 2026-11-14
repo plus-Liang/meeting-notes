@@ -13,7 +13,6 @@ import software.amazon.awssdk.core.sync.ResponseTransformer;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -38,9 +37,10 @@ public class TranscriptionWorker implements SmartLifecycle {
     private final S3Client s3;
     private final TranscriptionModel transcriptionModel;
     private final com.meetingnotes.ai.StructuringService structuringService;
+    private final PasteTextReader pasteTextReader;
+    private final MonoWavExtractor monoWavExtractor;
     private final String queueKey;
     private final Duration pollTimeout;
-    private final String ffmpegBin;
     private final String bucket;
     private final int maxRetries;
 
@@ -52,9 +52,10 @@ public class TranscriptionWorker implements SmartLifecycle {
                                S3Client s3,
                                TranscriptionModel transcriptionModel,
                                com.meetingnotes.ai.StructuringService structuringService,
+                               PasteTextReader pasteTextReader,
+                               MonoWavExtractor monoWavExtractor,
                                @Value("${app.worker.queue-key}") String queueKey,
                                @Value("${app.worker.poll-timeout-sec}") long pollTimeoutSec,
-                               @Value("${app.media.ffmpeg-bin:ffmpeg}") String ffmpegBin,
                                @Value("${app.storage.bucket}") String bucket,
                                @Value("${app.task.max-retries}") int maxRetries) {
         this.redis = redis;
@@ -62,9 +63,10 @@ public class TranscriptionWorker implements SmartLifecycle {
         this.s3 = s3;
         this.transcriptionModel = transcriptionModel;
         this.structuringService = structuringService;
+        this.pasteTextReader = pasteTextReader;
+        this.monoWavExtractor = monoWavExtractor;
         this.queueKey = queueKey;
         this.pollTimeout = Duration.ofSeconds(pollTimeoutSec);
-        this.ffmpegBin = ffmpegBin;
         this.bucket = bucket;
         this.maxRetries = maxRetries;
     }
@@ -125,7 +127,7 @@ public class TranscriptionWorker implements SmartLifecycle {
 
     private void process(long taskId) throws Exception {
         Map<String, Object> row = jdbc.queryForMap(
-                "SELECT status, attempts, COALESCE(source_uri, '') AS source_uri FROM task WHERE id = ?", taskId);
+                "SELECT status, attempts, source_type, COALESCE(source_uri, '') AS source_uri FROM task WHERE id = ?", taskId);
         String status = (String) row.get("status");
         if (!"PENDING".equals(status) && !"RETRYING".equals(status)) {
             log.warn("任务 {} 状态为 {}，跳过（不重复处理）", taskId, status);
@@ -134,15 +136,28 @@ public class TranscriptionWorker implements SmartLifecycle {
         jdbc.update("UPDATE task SET status = 'RUNNING', updated_at = now() WHERE id = ?", taskId);
         log.info("开始转写（第 {} 次尝试）", ((Number) row.get("attempts")).intValue() + 1);
 
+        String sourceUri = (String) row.get("source_uri");
+        if (!sourceUri.startsWith("s3://" + bucket + "/")) {
+            throw new ProcessingException("STORAGE_ERROR", "source_uri 非法：" + sourceUri, null);
+        }
+        String key = sourceUri.substring(("s3://" + bucket + "/").length());
+
+        // T3.7：PASTE/字幕任务——直接读文本对象，跳过 ffmpeg/ASR（管线仍守 F-1/D-069：transcript → 结构化 → DONE）
+        if ("PASTE".equals(row.get("source_type"))) {
+            String text;
+            try {
+                text = pasteTextReader.read(key);
+            } catch (RuntimeException e) {
+                throw new ProcessingException("STORAGE_ERROR", "读取文本对象失败：" + e.getMessage(), e);
+            }
+            log.info("PASTE 文本已读取（{} 字），跳过 ASR", text == null ? 0 : text.length());
+            finalizeResult(taskId, text);
+            return;
+        }
+
         Path dir = null;
         Path wav = null;
         try {
-            String sourceUri = (String) row.get("source_uri");
-            if (!sourceUri.startsWith("s3://" + bucket + "/")) {
-                throw new ProcessingException("STORAGE_ERROR", "source_uri 非法：" + sourceUri, null);
-            }
-            String key = sourceUri.substring(("s3://" + bucket + "/").length());
-
             // 1) MinIO 拉原始文件（临时目录内建文件，toFile 以 CREATE_NEW 打开，不能预创建）
             dir = Files.createTempDirectory("mn-job-");
             Path input = dir.resolve("input.bin");
@@ -156,7 +171,7 @@ public class TranscriptionWorker implements SmartLifecycle {
 
             // 2) ffmpeg 抽 16k 单声道 wav（卡片指定参数）
             wav = Files.createTempFile("mn-wav-", ".wav");
-            extractMono16k(input, wav);
+            monoWavExtractor.extract(input, wav);
             log.info("ffmpeg 抽音轨完成（16k 单声道 wav）");
 
             // 3) ASR 转写（复用 TranscriptionModel，容器内 http://asr:8000）
@@ -257,26 +272,6 @@ public class TranscriptionWorker implements SmartLifecycle {
         }
     }
 
-    private void extractMono16k(Path input, Path wav) throws Exception {
-        Process p = new ProcessBuilder(
-                ffmpegBin, "-y", "-i", input.toAbsolutePath().toString(),
-                "-vn", "-ac", "1", "-ar", "16000", "-f", "wav",
-                wav.toAbsolutePath().toString())
-                .redirectErrorStream(true)
-                .start();
-        String out;
-        try (var is = p.getInputStream()) {
-            out = new String(is.readAllBytes(), StandardCharsets.UTF_8);
-        }
-        if (!p.waitFor(10, TimeUnit.MINUTES)) {
-            p.destroyForcibly();
-            throw new IllegalStateException("ffmpeg 抽音轨超时");
-        }
-        if (p.exitValue() != 0) {
-            throw new IllegalStateException("ffmpeg 失败：" + tail(out, 300));
-        }
-    }
-
     private void sleepQuietly() {
         try {
             TimeUnit.SECONDS.sleep(pollTimeout.getSeconds());
@@ -287,9 +282,5 @@ public class TranscriptionWorker implements SmartLifecycle {
 
     private static String abbreviate(String s) {
         return s == null || s.isBlank() ? "UNKNOWN" : s.length() <= 200 ? s : s.substring(0, 200) + "…";
-    }
-
-    private static String tail(String s, int n) {
-        return s.length() <= n ? s : s.substring(s.length() - n);
     }
 }

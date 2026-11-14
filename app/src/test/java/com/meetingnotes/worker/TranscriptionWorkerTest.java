@@ -24,6 +24,7 @@ import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -48,12 +49,16 @@ class TranscriptionWorkerTest {
     @Mock
     private com.meetingnotes.ai.StructuringService structuringService;
     @Mock
+    private PasteTextReader pasteTextReader;
+    @Mock
+    private MonoWavExtractor monoWavExtractor;
+    @Mock
     private ListOperations<String, String> listOps;
 
     private TranscriptionWorker newWorker() {
         return new TranscriptionWorker(redis, jdbc, s3, transcriptionModel,
-                structuringService,
-                "meetingnotes:task-queue", 10, "ffmpeg", "meetingnotes", 3);
+                structuringService, pasteTextReader, monoWavExtractor,
+                "meetingnotes:task-queue", 10, "meetingnotes", 3);
     }
 
     @Test
@@ -107,6 +112,26 @@ class TranscriptionWorkerTest {
         worker.finalizeResult(12L, "会议内容");
 
         verify(jdbc).update(contains("'DONE'"), eq(12L));
+    }
+
+    /* ---- T3.7：PASTE/字幕任务走无音频分支（跳过 ffmpeg/ASR，管线仍守 F-1/D-069） ---- */
+
+    @Test
+    void pasteTaskSkipsAsrAndFfmpegAndFinalizesDirectly() throws Exception {
+        TranscriptionWorker worker = newWorker();
+        when(jdbc.queryForMap(contains("FROM task WHERE id = ?"), eq(20L))).thenReturn(java.util.Map.of(
+                "status", "PENDING", "attempts", 0, "source_type", "PASTE",
+                "source_uri", "s3://meetingnotes/tasks/20/paste.txt"));
+        when(pasteTextReader.read("tasks/20/paste.txt")).thenReturn("粘贴的一段会议文本");
+
+        ReflectionTestUtils.invokeMethod(worker, "process", 20L);
+
+        verify(transcriptionModel, never()).transcribe(ArgumentMatchers.any());
+        verify(monoWavExtractor, never()).extract(ArgumentMatchers.any(), ArgumentMatchers.any());
+        InOrder order = inOrder(jdbc, structuringService);
+        order.verify(jdbc).update(contains("task_result"), eq(20L), eq("粘贴的一段会议文本"));
+        order.verify(structuringService).structure(20L, "粘贴的一段会议文本");
+        order.verify(jdbc).update(contains("'DONE'"), eq(20L));
     }
 
     /* ---- S-1 状态机（T1.8）：失败走 RETRYING 重新入队 / 重试耗尽走 DEAD + dead_letter ---- */

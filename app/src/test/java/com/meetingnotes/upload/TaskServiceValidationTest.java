@@ -133,7 +133,7 @@ class TaskServiceValidationTest {
         assertEquals(7L, resp.taskId());
         assertEquals("PENDING", resp.status());
         assertFalse(resp.reused(), "新文件不是幂等命中");
-        assertEquals(90L, resp.durationSec());
+        assertEquals(90L, resp.durationSec().longValue(), "音频任务 duration_sec 仍是非空数字（T3.7 只放宽类型不改键）");
         verify(jdbc).update(contains("source_uri"), eq("s3://meetingnotes/tasks/7/audio.wav"), eq(7L));
         verify(listOps).leftPush("meetingnotes:task-queue", "7");
         verify(quotaService).consume(eq(1L), anyInt());

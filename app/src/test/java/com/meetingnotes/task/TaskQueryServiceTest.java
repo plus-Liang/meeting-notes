@@ -110,6 +110,7 @@ class TaskQueryServiceTest {
                 org.mockito.Mockito.mock(com.meetingnotes.task.TaskService.class),
                 newService(),
                 org.mockito.Mockito.mock(com.meetingnotes.task.TaskMutationService.class),
+                org.mockito.Mockito.mock(com.meetingnotes.task.TextTaskService.class),
                 jdbc,
                 new com.fasterxml.jackson.databind.ObjectMapper());
 
@@ -125,6 +126,7 @@ class TaskQueryServiceTest {
         com.meetingnotes.web.TaskController controller = new com.meetingnotes.web.TaskController(
                 taskService, newService(),
                 org.mockito.Mockito.mock(com.meetingnotes.task.TaskMutationService.class),
+                org.mockito.Mockito.mock(com.meetingnotes.task.TextTaskService.class),
                 jdbc, new com.fasterxml.jackson.databind.ObjectMapper());
 
         // 非法 status → 400 INVALID_PARAM，不再静默空列表（T2.12）
