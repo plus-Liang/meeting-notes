@@ -38,7 +38,7 @@
 | **T0.4** | Spring AI 最小转写跑通 | 独立复跑 exit 0 | ✅ `25528b9` + `review/2026-11-13-T0.4验收.md` |
 | **T0.5** | 云 LLM 通道 + **无 key 可启动** | 真实摘要 + 清空 key 仍能启动 | ✅ `483d6f2` + `review/2026-11-13-T0.5验收.md`（DeepSeek 实测 3 条摘要；无 key 时 ChatModel=0、health UP） |
 
-**下一步**：第 2 周：**T2.2 ASR 超时（失败要快发现）** → T2.4 健康检查 → T2.5 缓存 / T2.6 配额并发 / T2.7 JSON 日志 / T2.8 备份恢复。**阶段 1 全 ✅；T2.1/T2.3/T2.10/T2.11/T2.12 ✅**。
+**下一步**：第 2 周：**T2.4 健康检查四项**（D-059）→ T2.5 结果缓存 → T2.6 配额并发（含 HTTP 工厂换 JDK）→ T2.7 JSON 日志 → T2.8 备份恢复。**阶段 1 全 ✅；T2.1/T2.2/T2.3/T2.10/T2.11/T2.12 ✅**。
 **T1.5 开工前**（已完成）：先修 T1.4 审查的 P1/P2（snake_case 契约 + 幂等真实状态 + `user_id` 过滤，D-040/D-041），一个 commit（`7c90e9a`）。
 **已处理**：`glossary."right"` 改名 `right_text`（D-037，用户拍板）；列名已在真实 PG16 空卷验证。
 
@@ -69,7 +69,7 @@
 | ID | 任务 | DoD | 验证命令 / 期望 |
 |---|---|---|---|
 | **T2.1** | 幂等：`content_hash` 唯一 + 命中返回 `reused:true` + **命中 DEAD 时重新投递**（D-049） | 同文件两次 → 1 任务；DEAD 文件重传 → 重新入列 | ✅ `300db82` + `review/2026-11-14-T1.9-T2.1验收.md`。V2 迁移（查重删除 + 撤全局 `ux_task_hash` + `UNIQUE(user_id, content_hash)`）+ `ON CONFLICT DO NOTHING` 幂等（**D-055 批准偏离卡片的 catch 方案**）+ 复活重投（attempts=0/PENDING/error_code=NULL）。我复跑：`down -v` 后 Flyway V1+V2 全 success、真实 PG 唯一索引在；连传两次同 id（第二次 `reused:true`+真实 `DONE`）；**并发**两请求同 id、只 1 行；DEAD → 重传 → PENDING → **0.1s DONE**；复活不重复扣配额；**429 与 MinIO 故障都不留孤儿 PENDING 行**（事务回滚生效）；`scripts/test.ps1` **26/26**。**遗留**：复活后 `dead_letter` 残留（F-1）、存储故障 500 无 `code`（F-2）→ **T2.11** |
-| **T2.2** | 重试 + 超时 + 死信 | 人为失败 → RETRYING → DEAD；**失败发现要快** | 停 ASR 提交任务 → 观察迁移。**方案（D-058）**：新增 `ASR_CONNECT_TIMEOUT_SEC`（默认 5s）做连接/首字节超时，把既有 `app.asr.timeout-sec`（900s）接上做单次转写总超时；目标 **首次失败 ≤15s、到 DEAD ≤45s**（当前实测 78s）；**暂不做退避间隔**（快速失败 + 3 次即刻重试总开销小，T2.6 再评估）。新键必须进 `.env.example` + `配置清单.md` §2 的 `$appKeys` 快照（34→35） |
+| **T2.2** | 重试 + 超时 + 死信 | 人为失败 → RETRYING → DEAD；**失败发现要快** | ✅ `d9417e5` + `review/2026-11-14-T2.2验收.md`。新增 `config/AsrHttpClientConfig`（`RestClientCustomizer`：connect 5s / read 900s，值全走 `ASR_CONNECT_TIMEOUT_SEC`+`ASR_TIMEOUT_SEC`）、`.env.example` 加键、删 worker 残留 import。我复跑：停 ASR → **首次失败 3.5s、DEAD 7.7s**（基线 78s）；**黑洞 IP 10.255.255.1 实验 DEAD 15.9s（3 次 ×~5s）= connect 超时真的生效**；启 ASR 重传复活 → DONE 9.8s；**103.8MB / 56.7 分钟长音频 → DONE 334.6s、内存 735→740MiB 无 OOM**；新键有消费方 + 进 example；孤儿键 18→17；单测 **42/42**。**观察**：`SimpleClientHttpRequestFactory` 默认缓冲请求体、`setBufferRequestBody` 在 Spring 6.2 已弃用 → T2.6 换 `JdkClientHttpRequestFactory` 更稳（F-1） |
 | **T2.3** | 崩溃恢复：启动回收 RUNNING 僵尸 | 重启不永久卡住 | ✅ `11744ee` + `review/2026-11-14-T2.12-T2.3验收.md`。新增 `worker/StartupRecovery`（`ApplicationRunner`，与消费 worker 解耦）：`UPDATE task SET status='PENDING' WHERE status='RUNNING' RETURNING id` → 逐个 `leftPush`，0 也打日志；单实例假设写进注释；H2 空库 `DataAccessException` → WARN 跳过（保 D-035）。我复跑：`probe.wav` 处理中 `docker restart app` → 重启日志「回收 1 个 RUNNING 僵尸」→ 12s 内 `DONE`，**不停 RUNNING**；`TranscriptionWorker` 拆后 271 行 |
 | **T2.4** | 健康检查四项（DB/Redis/MinIO/ASR） | 任一不可用整体 DOWN | 打掉 minio → `status=DOWN` |
 | **T2.5** | 结果缓存：同 hash 复用 | 不重复转写 | ASR 日志只有一次请求 |

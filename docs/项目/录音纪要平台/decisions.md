@@ -572,6 +572,22 @@
 - **已排除项**：把 `app.asr.timeout-sec` 直接改成 10s（长音频转写会被误杀）；只加健康预检不加超时（DNS 阻塞时预检一样卡）；
   现在就引入 Redis ZSET 延时队列做退避（v1 单用户无收益，违反 YAGNI）。
 
+### D-059 健康检查口径：四项都进 readiness + 探活超时 ≤2s + HTTP 工厂后续换 JDK HttpClient
+- **日期**：2026-11-14（T2.2 验收后定 T2.4 口径）｜**决策人**：本人
+- **结论**：
+  1. **四项依赖（DB / Redis / MinIO / ASR）都进 `readiness` 组**：任一不可用 → `/actuator/health` 整体 `DOWN`，
+     `components.<name>.status=DOWN`。理由：MinIO 挂了上传就废、ASR 挂了任务必 DEAD——"进程活着"不等于"服务可用"。
+  2. **探活超时必须独立且 ≤2s**（`connect`/`read` 各自 2s），**禁止复用** 900s 的 `app.asr.timeout-sec`；探活异常只把指标标 DOWN，
+     **不许抛到 Spring context**（否则依赖一挂应用起不来，与 D-035"无 key 也能起"的精神冲突）。
+  3. **测试环境必须能起**：H2 空库/无 MinIO/无 ASR 的单测里，健康端点仍要能返回（指标要能降级或按 profile 关闭），
+     不许让 `NoKeyStartupTest` 变红。
+  4. **HTTP 工厂后续换 `JdkClientHttpRequestFactory`**（T2.6 或发布前）：`SimpleClientHttpRequestFactory` 默认缓冲整个请求体，
+     且 `setBufferRequestBody` 在 Spring 6.2 已标 `@Deprecated`；JDK HttpClient 工厂天然流式、connectTimeout 可设。
+- **依据**：`review/2026-11-14-T2.2验收.md` F-1（缓冲/弃用观察）；当前 `/actuator/health` 只有 db/redis/diskSpace（实测）；
+  T2.6 会真正引入 ASR 并发（最坏 2 并发 × 200MB 请求体）。
+- **已排除项**：把 ASR/MinIO 只放 liveness（挂了也不影响"整体 DOWN"，看不到问题）；探活用长超时（healthcheck 会拖成分钟级）；
+  现在就把 HTTP 工厂换掉（T2.2 刚验收通过，不顺手扩大改动；T2.6 一起做）。
+
 ---
 
 ## 面试速查（由本文件派生，勿单独维护）

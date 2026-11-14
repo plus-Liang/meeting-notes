@@ -581,7 +581,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\check-maintainability.
 
 ---
 
-## T2.2 ASR 超时：失败要"快发现"（约 1h，D-058）
+## T2.2 ASR 超时：失败要"快发现"（约 1h，D-058）✅ **已完成（`d9417e5`；我复跑 DEAD 7.7s、黑洞实验证明 5s connect 生效、56.7min 长音频 DONE 334.6s，42/42）**
 
 > 现状：停 ASR 时，任务要 **78s** 才走到 RETRYING/DEAD（实测，根因是 DNS/连接阶段长超时）。
 > 用户看到的是"任务卡在 RUNNING 一分多钟"；`app.asr.timeout-sec`（900s）至今**没有消费方**（D-054 登记的"计划中"键）。
@@ -624,6 +624,55 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\check-maintainability.
 【可维护性】超时配置集中在一处；不许把 5s/900s 写成魔法数；`TranscriptionWorker` 删掉未使用 import。
 
 【回报·测试三问】检查了哪些场景 ｜ 实际命令 + **耗时数字 + 日志时间戳** + exit code ｜ 还有哪些没验证（**不许留空**）。
+
+---
+
+## T2.4 健康检查四项（约 1h，D-059 已定口径）
+
+> 现状：`/actuator/health` 只有 `db` / `redis` / `diskSpace`——**MinIO 和 ASR 挂了没人知道**（进程还是"健康"的）。
+> 目标：四项（DB / Redis / MinIO / ASR）任一不可用 → 整体 `DOWN`，但**不能因为探活把应用拖死/拖慢**。
+
+【规划四问】
+- **改哪里**：①新增 `health/MinioHealthIndicator`（`S3Client.headBucket`，短超时 2s）；
+  ②新增 `health/AsrHealthIndicator`（`GET {ASR_BASE_URL}/health`，短超时 2s，**不许用 900s 的 ASR 总超时**）；
+  ③`application.yml` 配 `management.endpoint.health.group.readiness.include`（含 `readinessState,db,redis,minio,asr`），
+  ④补测试；⑤README/接入指南里的健康检查说明由我更新（你只报告）。
+- **复用什么**：既有 `S3Client` bean、`app.asr.connect-timeout-sec`（D-058）、`/actuator/health` 已有结构、Spring Boot `HealthIndicator` 接口。
+- **影响哪些功能**：运维可见性 + docker healthcheck（**公共面**：`management.*` 配置；D-059 已批）。不改业务接口。
+- **怎么验证**：分别停 MinIO / ASR / DB（可选）/ Redis（可选）→ `/actuator/health` 变 `DOWN` 且 `components.<name>.status=DOWN`；恢复 → `UP`。
+
+【范围声明】
+- 做：上述 ①~④。
+- 不动：业务逻辑、worker、上传、错误码、`/api/v1` 响应。
+- **禁**：探活里调慢接口（必须 ≤2s 超时）；让探活异常抛到 context（指标挂了应用也要能起）；
+  在测试环境因为缺 MinIO/ASR 而让 `NoKeyStartupTest`（H2 空库、无外部依赖）红——**这条最容易踩**：
+  测试里要么 mock 指标、要么给指标配 `@Profile("!test")` 之类开关，总之 **H2 环境 health 仍要能返回**。
+
+【验收】（反例必须进）
+```powershell
+$env:HTTP_PROXY='';$env:HTTPS_PROXY='';$env:ALL_PROXY=''
+# 基线：四项都 UP
+curl.exe -s --noproxy "*" http://localhost:8080/actuator/health
+
+# 反例 1：停 MinIO → 整体 DOWN 且 components.minio.status=DOWN（且响应在 3s 内返回，不能卡）
+docker compose stop minio
+curl.exe -s --noproxy "*" -w "`nHTTP=%{http_code} time=%{time_total}s`n" http://localhost:8080/actuator/health
+docker compose start minio
+
+# 反例 2：停 ASR → 整体 DOWN 且 components.asr.status=DOWN（同样要快）
+docker compose stop asr
+curl.exe -s --noproxy "*" -w "`nHTTP=%{http_code} time=%{time_total}s`n" http://localhost:8080/actuator/health
+docker compose start asr
+
+# 恢复后回到 UP；读写任务仍正常（上传一个小文件 → DONE）
+cd app; powershell -NoProfile -ExecutionPolicy Bypass -File ..\scripts\test.ps1   # 期望 ≥44 用例 exit 0（含 H2 环境健康回归）
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\check-maintainability.ps1   # exit 0
+```
+**通过标准**：两个反例都 DOWN 且 `time_total` ≤3s；恢复后 UP；H2 单测全绿；脚本 exit 0。
+
+【可维护性】两个指标各一个类（别塞进 worker/service）；超时值走配置/常量集中；日志用 DEBUG 不刷屏。
+
+【回报·测试三问】检查了哪些场景 ｜ 实际命令 + health JSON + `time_total` + exit code ｜ 还有哪些没验证（**不许留空**）。
 
 ---
 
