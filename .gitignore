@@ -40,3 +40,4 @@ uploads/
 *.mkv
 *.mov
 .playwright-cli/
+backups/
