@@ -107,6 +107,8 @@ app:
     # D-035：留空 = 由 LlmModelSwitchEnvironmentPostProcessor 按是否填了 key 自动判断；
     # 显式 true/false 可强制开关。关闭时 spring.ai.model.chat=none，chat 自动配置整体跳过。
     enabled: ${LLM_ENABLED:}
+    # T3.1/D-068：chat（摘要）读超时——LLM 挂死最多拖住 worker 120s，不许吃转写的 900s
+    timeout-sec: ${LLM_TIMEOUT_SEC:120}
     # 第三档兜底开关（D-020）
     fallback-extractive: ${EXTRACTIVE_FALLBACK_ENABLED:true}
     # 第二档：本地 Ollama（可选）

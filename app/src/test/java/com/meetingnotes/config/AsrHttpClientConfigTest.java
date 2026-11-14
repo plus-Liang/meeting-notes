@@ -34,9 +34,34 @@ class AsrHttpClientConfigTest {
         when(builder.requestFactory(any())).thenReturn(builder);
 
         RestClientCustomizer customizer = new AsrHttpClientConfig()
-                .asrTimeoutCustomizer(5, 900);
+                .asrTimeoutCustomizer(5, 900, 120);
         customizer.customize(builder);
 
         verify(builder).requestFactory(any(ClientHttpRequestFactory.class));
+    }
+
+    /* ---- T3.1/D-068：超时按 URI 路由，两条路径互不串 ---- */
+
+    @Test
+    void transcriptionPathUsesLongTimeoutFactoryAndChatUsesShort() throws Exception {
+        var routing = new AsrHttpClientConfig.UriRoutingClientHttpRequestFactory(
+                AsrHttpClientConfig.timeoutFactory(5, 900),
+                AsrHttpClientConfig.timeoutFactory(5, 120));
+
+        var asrUri = new java.net.URI("http://asr:8000/v1/audio/transcriptions");
+        var chatUri = new java.net.URI("http://api.example.com/v1/chat/completions");
+
+        assertEquals(routing.select(asrUri), routing.select(asrUri), "转写路径必须选长超时工厂");
+        assertEquals(routing.select(chatUri), routing.select(chatUri), "chat 路径必须选短超时工厂");
+        org.junit.jupiter.api.Assertions.assertNotSame(routing.select(asrUri), routing.select(chatUri),
+                "两条路径不得共用同一个工厂（900s 与 120s 互不串）");
+    }
+
+    @Test
+    void chatPathExplicitlyUsesConfiguredShortTimeout() {
+        // chat 工厂的超时值来自 LLM_TIMEOUT_SEC（默认 120），断言显式覆盖也生效
+        var chatFactory = AsrHttpClientConfig.timeoutFactory(5, 300);
+        assertEquals(300_000, (int) org.springframework.test.util.ReflectionTestUtils.getField(chatFactory, "readTimeout"),
+                "chat 读超时应等于 LLM_TIMEOUT_SEC 显式覆盖值 × 1000");
     }
 }

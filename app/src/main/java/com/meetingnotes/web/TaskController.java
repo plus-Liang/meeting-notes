@@ -107,7 +107,8 @@ public class TaskController {
     public TaskStatusResponse status(@PathVariable("id") long id) {
         TaskStatusResponse resp = jdbc.query("""
                 SELECT t.id, t.status, t.duration_sec, t.size_bytes, t.created_at, t.error_code,
-                       CASE WHEN t.status = 'DONE' THEN r.transcript END AS transcript
+                       CASE WHEN t.status = 'DONE' THEN r.transcript END AS transcript,
+                       r.summary, r.keywords, r.ai_tier
                 FROM task t
                 LEFT JOIN task_result r ON r.task_id = t.id
                 WHERE t.id = ? AND t.user_id = ?
@@ -121,10 +122,22 @@ public class TaskController {
                     Long duration = rs.wasNull() ? null : durationSec;
                     long sizeBytes = rs.getLong("size_bytes");
                     Long size = rs.wasNull() ? null : sizeBytes;
+                    // keywords 列是 JSONB：取文本再解析成数组（T3.1），坏数据降级为 null 不炸接口
+                    java.util.List<String> keywords = null;
+                    String keywordsRaw = rs.getString("keywords");
+                    if (keywordsRaw != null && !keywordsRaw.isBlank()) {
+                        try {
+                            keywords = new com.fasterxml.jackson.databind.ObjectMapper()
+                                    .readValue(keywordsRaw, new com.fasterxml.jackson.core.type.TypeReference<java.util.List<String>>() { });
+                        } catch (Exception e) {
+                            keywords = null;
+                        }
+                    }
                     return new TaskStatusResponse(rs.getLong("id"), rs.getString("status"),
                             duration, size,
                             rs.getObject("created_at", OffsetDateTime.class), rs.getString("transcript"),
-                            rs.getString("error_code"));
+                            rs.getString("error_code"), rs.getString("summary"), keywords,
+                            rs.getString("ai_tier"));
                 },
                 id, DEFAULT_USER_ID);
         if (resp == null) {

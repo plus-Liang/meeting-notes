@@ -43,6 +43,7 @@ class TranscriptionWorkerTest {
 
     private TranscriptionWorker newWorker() {
         return new TranscriptionWorker(redis, jdbc, s3, transcriptionModel,
+                org.mockito.Mockito.mock(com.meetingnotes.ai.SummaryService.class),
                 "meetingnotes:task-queue", 10, "ffmpeg", "meetingnotes", 3);
     }
 

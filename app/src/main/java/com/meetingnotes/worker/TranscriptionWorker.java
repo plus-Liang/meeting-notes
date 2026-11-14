@@ -41,6 +41,7 @@ public class TranscriptionWorker implements SmartLifecycle {
     private final JdbcTemplate jdbc;
     private final S3Client s3;
     private final TranscriptionModel transcriptionModel;
+    private final com.meetingnotes.ai.SummaryService summaryService;
     private final String queueKey;
     private final Duration pollTimeout;
     private final String ffmpegBin;
@@ -54,6 +55,7 @@ public class TranscriptionWorker implements SmartLifecycle {
                                JdbcTemplate jdbc,
                                S3Client s3,
                                TranscriptionModel transcriptionModel,
+                               com.meetingnotes.ai.SummaryService summaryService,
                                @Value("${app.worker.queue-key}") String queueKey,
                                @Value("${app.worker.poll-timeout-sec}") long pollTimeoutSec,
                                @Value("${app.media.ffmpeg-bin:ffmpeg}") String ffmpegBin,
@@ -63,6 +65,7 @@ public class TranscriptionWorker implements SmartLifecycle {
         this.jdbc = jdbc;
         this.s3 = s3;
         this.transcriptionModel = transcriptionModel;
+        this.summaryService = summaryService;
         this.queueKey = queueKey;
         this.pollTimeout = Duration.ofSeconds(pollTimeoutSec);
         this.ffmpegBin = ffmpegBin;
@@ -173,6 +176,12 @@ public class TranscriptionWorker implements SmartLifecycle {
             // 4) 写结果 + DONE。D-048：空文本（null/空白）是业务结果（纯音乐/静音/无人声），
             //    不是故障 → 正常 DONE + transcript 落空串，不算失败、不重试。
             persistResult(taskId, text);
+            // 5) 摘要（T3.1/D-068）：AI 失败只 WARN，任务仍 DONE、summary 留空（T3.3 三档降级接管）
+            try {
+                summaryService.summarize(taskId, text);
+            } catch (RuntimeException e) {
+                log.warn("摘要生成异常（不影响任务完成）", e);
+            }
         } finally {
             if (dir != null) {
                 deleteRecursively(dir);
