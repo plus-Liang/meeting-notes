@@ -1,25 +1,25 @@
-# 交接：录音纪要平台（更新 2026-11-14 15:00，给下一个会话 / WorkBuddy）
+# 交接：录音纪要平台（更新 2026-11-14 15:45，给下一个会话 / WorkBuddy）
 
 ## 1. 下一步
 
-1. **T3.2 待办抽取 + 两处前置收口**（卡在 `tasks-starter.md`）：前置 ① **F-1**：现在"转写落库并置 DONE"早于摘要（实测 3.3s 窗口，违反 D-069）→ 改成摘要后再置 DONE；前置 ② **F-2**：`AsrHttpClientConfigTest` 路由方向没真断言（映射写反仍绿）→ 改方向断言；主任务：提示词输出 `{"todos":[{action,owner,deadline}]}`，未知就 null、不编造，落 `task_result.todos`，详情 API 只增 `todos`，单测 ≥61。
-2. 之后：T3.3 三档 → T3.4 抽取式 → T3.5/T3.6 回流 → T3.7/T3.9/T3.10 → T3.8 周验收 → 第 4 周 T4.x 交付 → 第 5 周。
+1. **T3.3 三档降级 + `ai_tier` 落库**（卡在 `tasks-starter.md` 末尾）：前置 F-8 `application.yml` 的 `max-tokens` 默认 1024→**8192**（用户已批）、F-5 待办提示词"最多 5 条"改 20 + 代码层截断、F-6 "不重试"断言改 `times(1)`；主任务：CLOUD/LOCAL(ollama)/EXTRACTIVE 判定 + 同构 DTO + `ai_tier` 诚实落库 + 零依赖也能产出。
+2. 之后：T3.4 抽取式提质 → T3.5/T3.6 回流 → T3.7/T3.9/T3.10 → T3.8 周验收 → 第 4 周 T4.x → 第 5 周。
 
 ## 2. 别踩的坑
 
-1. 对外 JSON 一律 **snake_case**；业务码 **7 个**（D-047）+ 通用码 **5 个**（D-057）；`transcript: ""` = 未识别到语音但仍 DONE（D-048）。
-2. **DONE 必须在结果全部就绪之后写**（D-069）：摘要/待办先写，最后置 DONE；失败也 DONE，但**不许先 DONE 后补**（Webhook/轮询会读到半成品）。
-3. **ASR 900s / LLM 120s 按 URI 路由**（D-058/D-068）：**不许给 LLM 复用它 900s**（会拖死单线程 worker）；路由测试要断言**方向**。
-4. 幂等权威 = 数据库唯一约束（D-055）；DEAD 重传 = 复活（重置 attempts/status/error_code + 重入队 + 删 `dead_letter`）；兜底 handler 敬畏框架语义（D-057）。
-5. 启动期副作用尽力而为（rules/dev.md）；健康四项进 readiness，依赖挂 → 503 DOWN（D-059/D-060）。
-6. **改 `.env` / 关键文件**（D-070）：先备份 → 用**绝对路径**（.NET 用进程 CWD，`Set-Location` 不管用）→ **禁 BOM**；中文 Windows 控制台是 GBK，管道捕获按 GBK 解码。
-7. 测试入口 `scripts/test.ps1`：跳过 `.env` 容器地址、shell 已设键不覆盖；全量需 `ASR_SMOKE_AUDIO`（未设 → exit 3），`-UnitOnly` 跳过冒烟；**不准改断言/编数字**。
-8. `TranscriptionWorker` **285 行**（上限 300）别再塞；commit 前 `check-maintainability.ps1` → exit 0；**禁止手改代码仓 `docs/` 与 allowlist**；死配置 16 / yml 55 键（D-054）。
-
+1. 对外 JSON 一律 **snake_case**；业务码 **7**（D-047）+ 通用码 **5**（D-057）；`transcript:""`=无语音但仍 DONE（D-048）；`todos` 的 `null`=没生成 / `[]`=确实没待办（D-072）。
+2. **DONE 必须最后写**（D-069）：transcript → 摘要 → 待办 → 最后 DONE；已实测"首次 DONE 即就绪"（task 85），别再改回先 DONE。
+3. **LLM 是推理模型**（D-071）：`max_tokens` 含思考，1024 必空 content、4096 不稳、8192 才稳；换模型/换路由都要重验。
+4. **ASR 900s / LLM 120s 按 URI 路由**（D-058/D-068）；路由测试要断言方向，且"写反必须变红"（F-2 教训）。
+5. 幂等权威 = DB 唯一约束（D-055）；DEAD 重传 = 复活；兜底 handler 敬畏框架语义（D-057）。
+6. 启动期副作用尽力而为（rules/dev.md）；健康四项进 readiness（D-059）；ollama 探活同样不许拖垮启动（T3.3）。
+7. **改 `.env`/配置**（D-070）：先备份 → **绝对路径**（.NET 用进程 CWD）→ 禁 BOM；中文控制台 GBK，管道按 GBK 解码。
+8. 测试入口 `scripts/test.ps1`：跳过容器地址、shell 已设不覆盖；**不准改断言/编数字**；**验收样本任务行不删**（D-073）。
+9. `TranscriptionWorker` **288 行**（上限 300）；commit 前 `check-maintainability` → exit 0；**禁止手改代码仓 `docs/` 与 allowlist**；死配置 16 / yml 55 键（D-054）。
 ## 3. 关键文件
 
-`00-先看这个.md` · `开工准备清单.md` · `架构一页纸.md` · `可维护性要求.md` · **`踩坑与复盘-面试用.md`（面试题库，K-01~K-28；G 节=AI 写码方 7 坑 + 7 闸门）** · `spec.md`/`plan.md`/`tasks.md`/`tasks-starter.md` · `decisions.md`（**74 条**，最新 D-070）· `接入指南.md` · `review/2026-11-14-T3.0-T3.1验收.md`（最新）· `配置清单.md`（55 yml / 71 env / 死配置 16）· `scripts/backup.ps1`/`restore.ps1` · `rules/dev.md`（§4.1 配置文件铁律）。
+`00-先看这个.md` · `开工准备清单.md` · `架构一页纸.md` · `可维护性要求.md` · **`踩坑与复盘-面试用.md`（K-01~K-30；G 节=AI 写码方 7 坑 + 7 闸门）** · `spec.md`/`plan.md`（§5.1 三档）/`tasks.md`/`tasks-starter.md` · `decisions.md`（**77 条**，最新 D-071/072/073）· `接入指南.md` · `review/2026-11-14-T3.2验收.md`（最新，16 份）· `配置清单.md` · `scripts/backup.ps1`/`restore.ps1` · `rules/dev.md`（§4.1 配置文件铁律）。
 
 ## 4. 未决
 
-T3.2 起 W3 剩余 · 认证 T4.6 · 真机 UI T4.13 · 发布硬门禁 + 回滚 · 可维护性技术债 2 条（M5）· 死配置 16 键（T4.12）· LLM 真超时/长音频摘要耗时未实测（T3.8 补）。
+T3.3 三档 + F-5/F-6/F-8 · T3.4 抽取式质量（分词库选型）· F-7 DONE 前最长等待（建议合并两次 LLM 调用）· 认证 T4.6 · 真机 UI T4.13 · 发布硬门禁 + 回滚 · 技术债：详情 API 每行 `new ObjectMapper()`（F-10）+ M5 2 条 · 死配置 16（T4.12）· LLM 真 120s 超时/长音频耗时未测（T3.8）。

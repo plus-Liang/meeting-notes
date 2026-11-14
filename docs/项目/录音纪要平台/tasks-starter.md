@@ -907,7 +907,7 @@ docker compose exec -T postgres psql -U mn -d meetingnotes -t -A -c "select task
 
 ---
 
-## T3.2 待办抽取（`todos` JSON）+ 两处前置收口（约 2h）
+## T3.2 待办抽取（`todos` JSON）+ 两处前置收口（约 2h）✅ **已完成（`cd35a6b`；我复跑 干净 shell 68/68、F-2 两层变异各造一次红、task 85 首次 DONE 即 summary/todos 就绪、task 86 无 key = DONE+全 null、22 条待办 0 编造；遗留 F-5~F-10 已并入 T3.3）**
 
 > 现状：`task_result.todos`（JSONB）还是空的；摘要已能落库（T3.1）。本卡先把 T3.1 验收发现的 2 个问题收掉（30 min），再做"待办"。
 > **前置收口（先做，30 min）**：
@@ -952,6 +952,72 @@ curl.exe -s --noproxy "*" http://localhost:8080/api/v1/tasks/<id>   # todos 是�
 【可维护性】提示词集中一处；`ai/` 单向依赖（worker → ai）；对外字段 snake_case；新增公共逻辑必须带测试。
 
 【回报·测试三问】检查了哪些场景 ｜ 实际命令 + 输出（含 F-1 顺序证据、F-2 反例、3 份待办对照）+ exit code ｜ 还有哪些没验证（**不许留空**）。
+
+---
+
+## T3.3 三档降级（CLOUD / LOCAL / EXTRACTIVE）+ `ai_tier` 落库 + T3.2 遗留收口（约 3h）
+
+> **现状**：只有第一档。`OLLAMA_ENABLED` / `OLLAMA_BASE_URL` / `OLLAMA_MODEL` / `OFFLINE_MODE` 四个键**目前是死配置**
+> （yml 里注释写了"二、三档在 AiConfig 里按开关决定"，但代码没有）；没 key 时 summary/todos **全 null**（任务 DONE 但没内容）。
+> **本卡目标**：不填任何 key 也能产出摘要/待办（N15「零成本可跑」），并把"用了哪一档"落库、对外可见。
+> **验收报告**：`docs/协作/review/2026-11-14-T3.2验收.md`（F-5~F-10 的原始描述都在里面）。
+
+> **前置收口（先做，约 40min；都是小改，别拖成主任务）**：
+> - **F-8（P2，用户已批准，只改值不改键）**：`application.yml` 的 `max-tokens: ${LLM_MAX_TOKENS:1024}` → **`8192`**；
+>   `.env.example` 已是 8192，改完三处一致。**原因**：deepseek-flash 是推理模型，1024 全被 thinking 吃光 → 空 content（D-071）。
+> - **F-5（P3）**：`TodoService` 提示词"最多抽取 5 条"**模型不遵守**（实测 21 条）→ 改为"最多 20 条"，
+>   并在 `parseTodos` 末尾**代码层截断 20 条**（防 JSON 过长被 `finish_reason=length` 截断）。commit message 里不要再写"max 5"。
+> - **F-6（P3，测试要能造红）**：`TodoServiceTest` 里"不重试"的断言 `verify(chatModel, never()).call(contains("重试"))`
+>   **不可证伪**（真重试同一 prompt 也照样绿）→ 改 `verify(chatModel, times(1)).call(anyString())`。
+>
+> 主任务（约 2h）：
+> ① 新增 `ai/AiTier`（enum：`CLOUD`/`LOCAL`/`EXTRACTIVE`）+ `ai/AiStructuringRouter`（或 `AiConfig`）：
+>    **判定顺序按 plan §5.1**：① 有 `LLM_API_KEY`+`LLM_BASE_URL`+`LLM_MODEL` 且 `OFFLINE_MODE=false` → CLOUD；
+>    ② `OLLAMA_ENABLED=true` 且 `OLLAMA_BASE_URL` **探活成功（≤2s，别复用 120s）** 且 `OLLAMA_MODEL` 非空 → LOCAL；
+>    ③ 其它 → EXTRACTIVE。**启动期绝不因探活失败而起不来**（K-04 铁律：尽力而为 + WARN）。
+> ② LOCAL 档：用独立 `ChatModel` 实例（`base-url=${OLLAMA_BASE_URL}`、`model=${OLLAMA_MODEL}`、超时沿用 120s 路由），
+>    **不要覆盖/污染 CLOUD 的 bean**；两档可同时配置时 CLOUD 优先。
+> ③ EXTRACTIVE 档**最小实现**（T3.4 再提质，本卡只要"能产出且不是乱码"）：按 `。！？；\n` 分句 →
+>    关键句打分（词频 + 位置 + 长度惩罚）取前 5 句作 `summary`；`keywords` 取高频词（**先不引入分词库**，
+>    用字符 n-gram + 停用词表 + 标点切分，避免 T3.4 的选型提前定死）；`todos` 用规则版（命中"明天/截止/负责/需要/要"的句子 → `action`，`owner/deadline` 能抽就抽、抽不到 null）。
+> ④ **三档输出同构**：统一一个 DTO（`summary` / `keywords` / `todos` / `ai_tier`），上层不写三套分支；
+>    `ai_tier` 必须落 `task_result.ai_tier`（CLOUD/LOCAL/EXTRACTIVE）。**空 transcript（D-048 无语音）→ 跳过结构化，`ai_tier` 也留 null**（没有可结构化内容，别假装有档位）。
+> ⑤ 顺序不变，仍守 F-1/D-069：transcript → 结构化（摘要+待办）→ **最后** DONE。
+>    **可选优化（推荐但不强制）**：把"摘要 + 待办"两次 LLM 调用**合并成一次**（同构 JSON 一次出），
+>    DONE 前最坏等待从 2×120s 降到 120s（F-7）；若时间紧就留下次，但要在这里写一句"没做"。
+
+【规划四问】
+- **改哪里**：`ai/AiTier.java`（新）、`ai/AiStructuringRouter`（新，或并入现有 config）、`ai/SummaryService`/`ai/TodoService`（改为按档执行/复用同一 ChatModel 选择）、`ai/ExtractiveStructurer`（新）、`worker/TranscriptionWorker`（调用点改一处）、`web/`（**不改**，`ai_tier` 已在 T3.1 返回）、`application.yml`（F-8 一行默认值）、单测 3~4 个文件。
+- **复用什么**：T3.1 `SummaryService` 结构与"解析失败 WARN 截 200 字不重试"；T3.2 `TodoService` 的"未知→null/空 action 丢弃"；`AsrHttpClientConfig` 的 120s 路由；`LlmModelSwitchEnvironmentPostProcessor`（无 key 时 bean 不存在 → 用它而不是 `new`）；**`task_result.todos/summary/keywords/ai_tier` 列都已存在，不要新迁移**。
+- **影响哪些功能**：无 key 时从"全 null"变成"有抽取式结果"（用户可见变化）；`ai_tier` 三个取值；启动期多一次 ≤2s 的 ollama 探活（失败只 WARN）；LLM 调用次数 2→1（若做合并）。
+- **怎么验证**：见【验收】，反例是"删 key 仍产出"和"ollama 配了但没起也要能启动"。
+
+【范围声明】
+- 做：tier 判定 + LOCAL 接线 + EXTRACTIVE 最小实现 + 同构 DTO + `ai_tier` 落库 + F-5/F-6/F-8 收口 + 单测。
+- 不做：T3.4 的抽取式**质量提升**（分词库选型/TextRank 深做/规则待办精细化）、T3.9 模板、前端展示（T4.13）、待办勾选（T3.5）；不改表结构、不新增迁移、不加新配置键（`OLLAMA_*`/`OFFLINE_MODE` 都是已有键）。
+- 禁：把 EXTRACTIVE 结果标成 CLOUD（`ai_tier` 必须诚实，D-020）；无 key/ollama 不可达时抛异常或 500；启动期因探活失败而失败；删改已有断言；为省事把待办塞进 summary。
+- **公共面**：只允许 `application.yml` 里 `LLM_MAX_TOKENS` 默认值这一处（用户 2026-11-14 已批准，F-8）；其它公共面要动先报。
+
+【验收】（反例必须进；**证据任务行不删**，报告里写 taskId，D-073）
+```powershell
+# ① 零依赖档（核心反例）：.env 里 LLM_API_KEY= + OLLAMA_ENABLED=false（改前先备份 .env，D-070）→ 重建 app → 传有语音样本
+#    期望：status=DONE，summary 非空、todos 非空（或至少 summary 非空），ai_tier=EXTRACTIVE，无 500
+docker compose exec -T postgres psql -U mn -d meetingnotes -t -A -c "select task_id, ai_tier, length(summary), jsonb_array_length(todos) from task_result order by task_id desc limit 5"
+# ② 云档：恢复 key（.env 哈希与备份一致）→ 重建 → 传样本 → ai_tier=CLOUD，摘要 150~250 字、todos 可追溯
+# ③ LOCAL 档：OLLAMA_ENABLED=true 但 ollama 没起（或模型没拉）→ **应用仍 healthy** + 启动 WARN + 该任务 ai_tier=EXTRACTIVE
+docker compose logs app --since 5m | Select-String 'ollama' ; curl.exe -s --noproxy "*" http://localhost:8080/actuator/health
+# ④ 空音频（纯静音/纯音乐样本）→ transcript="" + summary/todos=null + ai_tier=null（不是 EXTRACTIVE）
+# ⑤ 变异验证：把 tier 判定顺序/返回值写反（例如 CLOUD 判成 EXTRACTIVE）→ 新单测必须红，验完还原
+# ⑥ 顺序不变（F-1 回归）：taskId 日志链仍是 转写落库 → 摘要 → 待办 → DONE
+# ⑦ 回归：错误四连（404/405/415/400）、列表、详情字段只增不减；全量 `scripts\test.ps1` ≥76 用例 exit 0；
+#    check-maintainability exit 0；worker ≤300 行；干净 shell（不预置环境变量）
+```
+**通过标准**：三档都能选对且 `ai_tier` 诚实落库；**删 key 后仍产出非空 summary（EXTRACTIVE）且无 500**；ollama 不可达时应用照常启动；空 transcript 的 null 语义不被破坏；单测 ≥76 exit 0；F-5/F-6/F-8 三处收口各有一条可判据。
+
+【可维护性】tier 判定集中在一个类（不要散在 service 里 if/else）；三档同构 DTO；`ai/` 单向依赖（`worker → ai`，不许反向）；
+新增分支必须有测试（每个档位至少一条）；EXTRACTIVE 不用第三方分词库（T3.4 再定）；commit 前 `check-maintainability.ps1` exit 0。
+
+【回报·测试三问】检查了哪些场景（三档 × 可用性矩阵逐格）｜ 实际命令 + 输出（三档各一份 taskId + `ai_tier` + 长度；ollama 不可达的启动日志；变异反例；exit code）｜ 还有哪些没验证（**不许留空**；F-7 的 120s 真超时留到 T3.8 就写"留到 T3.8"）。
 
 ---
 

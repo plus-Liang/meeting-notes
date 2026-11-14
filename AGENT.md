@@ -49,8 +49,8 @@
 | 阶段 0 底座（T0.1–T0.5） | ✅ 全过：RTF **0.105/0.113**、无 key 可启动（`ChatModel` Bean=0）、5/5 healthy |
 | 阶段 1（T1.1–T1.9） | ✅ 全过（含 T1.9 测试入口）。T1.5 实测：397s 中文音频 → **31s** 出 1853 字；停 ASR **9s** 走完 `RETRYING×2 → DEAD` |
 | 第 2 周（T2.1–T2.12） | ✅ 全过（含 T2.9 收口、T3.0 前置小修） |
-| 第 3 周（T3.x） | **T3.0 ✅**（测试入口/TZ）、**T3.1 ✅**（摘要生成：`ai/SummaryService` → `summary/keywords/ai_tier`，详情 API 已增字段）；**T3.2 待做** |
-| **下一张卡** | **T3.2 待办抽取 + 两处前置收口**（`tasks-starter.md`）：F-1 `DONE 必须最后写`（D-069）、F-2 超时路由测试方向断言；主任务 `todos` JSON |
+| 第 3 周（T3.x） | **T3.0 ✅**（测试入口/TZ）、**T3.1 ✅**（摘要 → `summary/keywords/ai_tier`）、**T3.2 ✅**（`ai/TodoService` → `todos`；worker 管线改为 transcript → 摘要 → 待办 → **最后** DONE）；**T3.3 待做** |
+| **下一张卡** | **T3.3 三档降级（CLOUD/LOCAL/EXTRACTIVE）+ `ai_tier` 落库**（`tasks-starter.md` 末尾）：前置 F-8 yml `max-tokens` 默认 1024→**8192**（用户已批）、F-5 待办提示词 5→20 条 + 代码截断、F-6 "不重试"断言改 `times(1)` |
 
 任务总表 `tasks.md`；起栈 `docker compose up -d`（5/5 healthy 才算通过）。**一次只做一张卡，先贴证据再要下一张。**
 完成后按 §5 格式回报；`state.md`/`handoff.md` 里的"下一步"与本节同步更新。
@@ -108,8 +108,10 @@ pip install -i https://pypi.tuna.tsinghua.edu.cn/simple <pkg>
 | **ASR 超时（T2.2/D-058）** | connect **5s** + read **900s**，由 `config/AsrHttpClientConfig` 统一设置（`ASR_CONNECT_TIMEOUT_SEC`/`ASR_TIMEOUT_SEC`）；**探活/其它调用不许复用 900s**（健康探活另用 2s，D-059）。停 ASR 到 DEAD 由 78s 降到 **7.7s** |
 | **LLM 超时（T3.1/D-068）** | `config/AsrHttpClientConfig` 已改**按 URI 路由**：`/v1/audio/transcriptions` 900s、chat 走 `app.llm.timeout-sec`（`LLM_TIMEOUT_SEC` 默认 **120s**），connect 都 5s；摘要失败不阻塞 DONE |
 | **摘要（T3.1）** | `ai/SummaryService`：`ChatModel`（`spring.ai.chat.model.ChatModel`）+ 严格 JSON 提示词（严禁编造）+ 解析失败 WARN 截 200 字不重试 + 无 ChatModel 跳过；写 `task_result.summary/keywords/ai_tier='CLOUD'`；详情 API 已增 `summary/keywords/ai_tier`（只增） |
-| **DONE 语义（T3.1 验收/D-069）** | **DONE 必须最后写**：先写 transcript → 摘要/待办（try/catch，失败也继续）→ **最后**置 DONE。禁止先 DONE 后补（Webhook/轮询会读到半成品；实测窗口 3.3s） |
-| **测试入口（T3.0）** | `scripts/test.ps1` 会跳过 `.env` 的 `ASR_BASE_URL`（容器地址）并**保留 shell 已设的键**；`MAVEN_OPTS=-Dfile.encoding=UTF-8`；干净 shell 全量应为 **57/57** |
+| **待办（T3.2）** | `ai/TodoService`：严格 JSON `{"todos":[{action,owner,deadline}]}`，**owner/deadline 未知必须 null 不许猜**、空 action 丢弃、解析失败 WARN 截 200 字**不重试**、无 ChatModel 跳过；写 `task_result.todos`(JSONB)；详情 API 只增 `todos`。`null`=没生成、`[]`=确实没待办（D-072）；**验收样本任务行不许删**（D-073） |
+| **LLM 输出为空（T3.2/D-071）** | `deepseek-flash` 是**推理模型**，`max_tokens` 是"思考+正文"合计：1024 必空 content（`finish_reason=length`）、4096 不稳、**8192** 才稳；`.env`/`.env.example`/`application.yml` 三处默认值统一 8192（yml 的 1024 由 T3.3 F-8 改） |
+| **DONE 语义（T3.1 验收/D-069）** | **DONE 必须最后写**：先写 transcript → 摘要/待办（try/catch，失败也继续）→ **最后**置 DONE。禁止先 DONE 后补（Webhook/轮询会读到半成品；T3.1 实测窗口 3.3s，T3.2 已修好并实测"首次 DONE 即就绪"） |
+| **测试入口（T3.0）** | `scripts/test.ps1` 会跳过 `.env` 的 `ASR_BASE_URL`（容器地址）并**保留 shell 已设的键**；`MAVEN_OPTS=-Dfile.encoding=UTF-8`；干净 shell 全量应为 **68/68**（T3.2 后） |
 | **健康检查（T2.4/D-059）** | `health/MinioHealthIndicator`（headBucket + 2s）与 `health/AsrHealthIndicator`（GET `{base-url}/health` + 独立 2s 工厂）；readiness 组 = `readinessState,db,redis,minio,asr`；任一依赖挂 → `/actuator/health` **503 DOWN**；测试里用 `management.health.minio/asr.enabled=false` 关闭 |
 | **结构化日志（T2.7/D-062）** | `LOG_JSON`（默认 true）→ Boot 内建 `logging.structured.format.console=logstash`；`taskId` 是**独立字段**（MDC，处理结束清理）；查一个任务：`docker compose logs app \| grep '"taskId":"<id>"'`；`LOG_JSON=false` 回退可读文本 |
 | **备份/恢复（T2.8/D-063）** | `scripts/backup.ps1`（`pg_dump -Fc` + MinIO volume tar + manifest 行数/sha256）、`scripts/restore.ps1 -Force`；**恢复前 postgres/minio 必须先 running**；备份**不含 `.env`**；自动备份交宿主 cron（README 有示例） |
