@@ -541,6 +541,24 @@
 - **已排除项**：新增错误码（违反 D-047"只增不改、固定 7 个"——这里用既有 `STORAGE_ERROR` + 非业务兜底码）；
   只改文档不改实现（接入方按文档写代码会踩空）。
 
+### D-057 框架异常不许吞状态码：通用码分层 + 列表参数严格校验
+- **日期**：2026-11-14（T2.11/T2.10 验收时实测发现）｜**决策人**：本人
+- **结论**：
+  1. **兜底 handler 必须先尊重框架语义**：`@ExceptionHandler(Exception.class)` 里若 `e instanceof org.springframework.web.ErrorResponse`，
+     按它自己的 `getStatusCode()` 返回（404/405/415/400 各回各的），只有**真未知异常**才 `500 INTERNAL_ERROR`。
+     原因：实测 T2.11 之后 `GET /api/v1/nope`、`DELETE /api/v1/tasks`、`GET /api/v1/tasks/abc`、`Content-Type: application/json`
+     **全部变成 500**（`NoResourceFoundException` / `HttpRequestMethodNotSupportedException` / `HttpMediaTypeNotSupportedException` 被吞）。
+  2. **错误码分层**（不破坏 D-047 的"只增不改"）：
+     - **业务码 7 个**（保持）：`INVALID_MEDIA` / `SIZE_EXCEEDED` / `DURATION_EXCEEDED` / `QUOTA_EXCEEDED`(+`TOO_MANY_REQUESTS`) / `TASK_NOT_FOUND` / `ASR_ERROR`（`error_code` 字段）/ `STORAGE_ERROR`；
+     - **通用码（新增，非业务）**：`INVALID_PARAM`(400，参数/查询串/路径参数类型错)、`NOT_FOUND`(404，路径或资源不存在)、
+       `METHOD_NOT_ALLOWED`(405)、`UNSUPPORTED_MEDIA_TYPE`(415)、`INTERNAL_ERROR`(500 兜底)。
+     接口参数校验**不许再借用 `INVALID_MEDIA`**（语义是"文件格式不合法"）。
+  3. **`GET /api/v1/tasks` 的 `status` 严格校验**：只接受 `PENDING/RUNNING/RETRYING/DONE/DEAD`，其它 → 400 `INVALID_PARAM`
+     （静默返回空列表会让接入方把"参数写错"误判成"没数据"）。
+- **依据**：T2.11/T2.10 验收报告 F-1/F-2/F-3（`review/2026-11-14-T2.11-T2.10验收.md`）的实测响应码表；现在**没有任何外部接入方**，此时定码表成本最低。
+- **已排除项**：继续用 `INVALID_MEDIA` 表示参数错误（语义污染，接入方会去查文件）；把框架 4xx 一律映射成 500（客户端会无脑重试）；
+  重新编号 7 个业务码（破坏 D-047"只增不改"）。
+
 ---
 
 ## 面试速查（由本文件派生，勿单独维护）
