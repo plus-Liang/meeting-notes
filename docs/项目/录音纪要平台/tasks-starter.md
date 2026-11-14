@@ -1329,7 +1329,7 @@ curl.exe -s --noproxy "*" "http://localhost:8080/api/v1/tasks/123/export?format=
 
 **【回报·测试三问】** 检查了哪些场景（导出/PASTE/字幕/空值/404/变调）｜ 实际命令 + 输出（导出 markdown 正文、PASTE taskId + 耗时 + ai_tier、变异红/绿、exit code）｜ 还有哪些没验证（**不许留空**；批量导出/前端按钮/PDF 可写"留 T4.x"）。
 
-## T3.9 摘要模板机制（5 模板，US-12）（约 3h，含 shortvideo +0.5h）
+## T3.9 摘要模板机制（5 模板，US-12）（约 3h，含 shortvideo +0.5h） ✅ **已完成（`f880b6a`；我独立复跑 185/185、可维护性 exit 0、两处变异红→绿；零配额实机全过；实机 129 自动 meeting + 130 显式 course + 131 PASTE interview：同段语音结构明显不同、template 落库、ai_tier=CLOUD；见 `review/2026-11-14-T3.9验收.md`）**
 
 > **现状**：结构化只有一套"会议纪要"提示词；`task_result.template` 列已有（VARCHAR(32)）但恒为 NULL；提交入口没有模板参数。
 > 学生/播客/访谈/短视频用户拿到的结构全是"会议纪要"——US-12 四类场景（D/E/F/G/K）无证据。

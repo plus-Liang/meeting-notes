@@ -932,7 +932,7 @@
 - **日期**：2026-11-14（T3.9 代码验收）｜**决策人**：本人
 - **结论**：
   1. **T3.9 代码通过**（`f880b6a`，17 文件全在 `app/src`）：5 模板 + 提交可选 `template` + 文件名自动推荐 + `task_result.template` 零迁移落库 + 详情第 12 键；导出抽 `TaskExportController` 后与 T3.7 **逐字节一致**。我独立复跑 185/185、可维护性 exit 0、**两处变异红→绿**；零配额实机：详情恰好 12 键且 template 末尾、旧任务 123/124 为 null、非法 template 400 逐字、幂等命中不覆盖旧模板、满配额新内容 429 后 task/配额零变化（事务回滚含 template 行）、日志 `模板：meeting（来源：文件名）`/`course（来源：显式）`。
-  2. **状态一律写"待实机定案"（不打 ✅）**：DoD 的"同音频换模板 → 结构不同"必须真跑 2 条任务；今日配额 50/50 已满，等 00:00 重置后补 `腾讯会议_t39a.wav`（自动 meeting）与 `t39b_course.wav`（显式 course），验完再打 ✅、更新报告并推送本地提交（代码+docs）。
+  2. **实机已补跑通过（2026-11-15 00:00–00:01）**：`腾讯会议_t39a.wav`（不传 template）→ task **129** `template=meeting`（日志"来源：文件名"）、`t39b_course.wav`（显式 course）→ task **130** `template=course`，两条 `ai_tier=CLOUD`、`duration_sec=61`；同段语音 summary 结构明显不同（130 为"要点：1)…5)…未提及公式/考点/作业"的课程体，129 为"议题/问题/举例"的会议体）；另 PASTE `template=interview` → task **131** `template=interview`、输出问答体。随后报告改"通过"、打 ✅ 并推送（代码 `f880b6a` + docs）。
   3. **满配额验收方法（K-36）**：用"必拒绝请求"（满配额提交新内容 → 429）走真实链路（解析→INSERT→写 template→配额守卫→回滚），再复算 task 行数/配额定格不变来证明**事务边界与无脏行**；**不许**为验收临时改 `QUOTA_*` 配置、删证据行（D-073）或把 reused 旧任务当新证据。
   4. **T3.10 卡与样本就绪**：`tasks-starter.md` 已写 amr/opus 卡（只许 2 条实机）；样本 `D:\new\artifacts\t310-amr.amr` / `t310-opus.opus`（同一段真实语音 60s 转码），我已在 app 容器实测 ffmpeg 可解（60.02s / 59.999s）→ 实机风险低；失败提示补"转成 mp3"文案。
   5. **F-19（P3）**：结构化前多一次 `task_result.template` 只读查询；量级可忽略，T3.8 做性能基线时一并看。
