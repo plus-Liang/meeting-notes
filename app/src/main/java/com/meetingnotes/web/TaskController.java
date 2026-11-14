@@ -1,5 +1,6 @@
 package com.meetingnotes.web;
 
+import com.meetingnotes.task.TaskQueryService;
 import com.meetingnotes.task.TaskService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -30,10 +31,14 @@ public class TaskController {
     private static final long DEFAULT_USER_ID = 1L;
 
     private final TaskService taskService;
+    private final TaskQueryService taskQueryService;
     private final JdbcTemplate jdbc;
 
-    public TaskController(TaskService taskService, JdbcTemplate jdbc) {
+    public TaskController(TaskService taskService,
+                          TaskQueryService taskQueryService,
+                          JdbcTemplate jdbc) {
         this.taskService = taskService;
+        this.taskQueryService = taskQueryService;
         this.jdbc = jdbc;
     }
 
@@ -48,6 +53,38 @@ public class TaskController {
     @GetMapping("/")
     public String home() {
         return "forward:/index.html";
+    }
+
+    /**
+     * 服务端任务列表（T2.10 / D-053）：keyset 分页（before_id 游标，禁 OFFSET），
+     * user_id 服务端过滤（D-040）。limit 默认 20、上限 50；非数字/越界 → 400（码沿用既有校验类）。
+     */
+    @GetMapping("/tasks")
+    public TaskQueryService.TaskListResponse list(
+            @org.springframework.web.bind.annotation.RequestParam(required = false) String status,
+            @org.springframework.web.bind.annotation.RequestParam(required = false) String limit,
+            @org.springframework.web.bind.annotation.RequestParam(name = "before_id", required = false) String beforeId) {
+        int lim = TaskQueryService.DEFAULT_LIMIT;
+        if (limit != null) {
+            try {
+                lim = Integer.parseInt(limit.trim());
+            } catch (NumberFormatException e) {
+                throw new ApiException(400, "INVALID_MEDIA", "limit 必须是数字");
+            }
+            if (lim < 1 || lim > TaskQueryService.MAX_LIMIT) {
+                throw new ApiException(400, "INVALID_MEDIA",
+                        "limit 取值范围 1.." + TaskQueryService.MAX_LIMIT);
+            }
+        }
+        Long before = null;
+        if (beforeId != null && !beforeId.isBlank()) {
+            try {
+                before = Long.parseLong(beforeId.trim());
+            } catch (NumberFormatException e) {
+                throw new ApiException(400, "INVALID_MEDIA", "before_id 必须是数字");
+            }
+        }
+        return taskQueryService.list(DEFAULT_USER_ID, status, lim, before);
     }
 
     /**

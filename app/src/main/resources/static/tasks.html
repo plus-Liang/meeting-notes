@@ -16,10 +16,7 @@
 <main>
   <div class="card">
     <h1>任务列表</h1>
-    <p class="hint">
-      这里记录<b>本浏览器</b>提交过的任务（跨浏览器/清缓存后不保留）。
-      未完成任务每 3 秒自动刷新状态。
-    </p>
+    <p class="hint">服务端任务列表（最近 50 条），未完成任务每 3 秒自动刷新。</p>
     <div id="list"><p class="hint">加载中…</p></div>
   </div>
 </main>
@@ -27,49 +24,25 @@
 <script>
 (function () {
   var listEl = document.getElementById('list');
-  var pollers = {};
+  var timer = null;
 
-  function render() {
-    var index = loadTaskIndex();
-    if (!index.length) {
-      listEl.innerHTML = '<p class="hint">还没有任务。去 <a href="index.html">提交</a> 一个音/视频文件吧。</p>';
-      return;
-    }
-    listEl.innerHTML = index.map(function (item) {
-      return '<div class="task-row" data-id="' + item.id + '">' +
-        '<span>#' + item.id + ' ' + escapeHtml(item.name) + '</span>' +
-        '<span><span class="badge" id="badge-' + item.id + '">加载中</span> ' +
-        '<a href="task.html?id=' + item.id + '">详情 →</a></span></div>';
-    }).join('');
-    refreshAll();
+  /* localStorage：仅作"上次提交"的名称缓存与服务不可用时的兜底展示 */
+  function localName(id) {
+    var hit = loadTaskIndex().filter(function (item) { return item.id === id; })[0];
+    return hit ? hit.name : null;
   }
 
-  function refreshAll() {
-    loadTaskIndex().forEach(function (item) {
-      var badge = document.getElementById('badge-' + item.id);
-      if (!badge) return;
-      getJson('api/v1/tasks/' + item.id).then(function (data) {
-        paint(badge, data);
-        schedulePoll(item.id, badge, data);
-      });
-    });
+  function badgeHtml(status) {
+    var cls = status === 'DONE' ? 'done' : (status === 'DEAD' ? 'dead' : 'busy');
+    return '<span class="badge ' + cls + '">' + statusText(status) + '</span>';
   }
 
-  function paint(badge, data) {
-    if (data.__httpStatus === 404) { badge.textContent = '不存在'; badge.className = 'badge dead'; return; }
-    if (data.__httpStatus === 0) { badge.textContent = '服务不可用'; badge.className = 'badge dead'; return; }
-    var status = data.status;
-    badge.textContent = statusText(status);
-    badge.className = 'badge ' + (status === 'DONE' ? 'done' : (status === 'DEAD' ? 'dead' : 'busy'));
-  }
-
-  /* 已到终态的任务不再轮询；未完成的进 3 秒轮询（D-024） */
-  function schedulePoll(id, badge, data) {
-    var finished = data.status === 'DONE' || data.status === 'DEAD';
-    if (finished || pollers[id]) return;
-    pollers[id] = pollUntil('api/v1/tasks/' + id,
-      function (d) { paint(badge, d); },
-      function (d) { return d.status === 'DONE' || d.status === 'DEAD' || d.__httpStatus === 404; });
+  function rowHtml(item) {
+    var name = item.original_name || localName(item.id) || ('任务 ' + item.id);
+    return '<div class="task-row" data-id="' + item.id + '">' +
+      '<span>#' + item.id + ' ' + escapeHtml(name) + '</span>' +
+      '<span>' + badgeHtml(item.status) + ' ' +
+      '<a href="task.html?id=' + item.id + '">详情 →</a></span></div>';
   }
 
   function escapeHtml(s) {
@@ -77,7 +50,43 @@
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
 
-  render();
+  function renderServer(data) {
+    if (!data.items || !data.items.length) {
+      listEl.innerHTML = '<p class="hint">还没有任务。去 <a href="index.html">提交</a> 一个音/视频文件吧。</p>';
+      return;
+    }
+    listEl.innerHTML = data.items.map(rowHtml).join('');
+    /* 未完成任务存在时每 3 秒刷新整页列表（D-024） */
+    var busy = data.items.some(function (item) {
+      return item.status === 'PENDING' || item.status === 'RUNNING' || item.status === 'RETRYING';
+    });
+    if (busy && !timer) {
+      timer = setTimeout(function () { timer = null; getJson('api/v1/tasks?limit=50').then(renderServer); }, 3000);
+    }
+  }
+
+  function renderFallback() {
+    var index = loadTaskIndex();
+    if (!index.length) {
+      listEl.innerHTML = '<p class="hint">服务暂时不可用，且本浏览器没有提交记录。</p>';
+      return;
+    }
+    listEl.innerHTML = '<p class="hint">服务暂时不可用，以下为本浏览器上次提交的缓存：</p>' +
+      index.map(function (item) {
+        return '<div class="task-row"><span>#' + item.id + ' ' + escapeHtml(item.name) + '</span>' +
+          '<span><a href="task.html?id=' + item.id + '">详情 →</a></span></div>';
+      }).join('');
+  }
+
+  getJson('api/v1/tasks?limit=50').then(function (data) {
+    if (data.__httpStatus === 200) {
+      renderServer(data);
+    } else if (data.__httpStatus === 404) {
+      listEl.innerHTML = '<p class="hint">接口不存在（旧版本服务），请更新服务端。</p>';
+    } else {
+      renderFallback();
+    }
+  });
 })();
 </script>
 </body>
