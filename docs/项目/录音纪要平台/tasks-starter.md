@@ -813,7 +813,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\restore.ps1 -BackupD
 
 ---
 
-## T3.0 W3 前置小修（约 0.5h，**W2 关账条件**，D-066 / D-067）
+## T3.0 W3 前置小修（约 0.5h，**W2 关账条件**，D-066 / D-067）✅ **已完成（`0072fdd`；我复跑 干净 shell 57/57、ASR_PORT=9999 必红、两边 CST、Retry-After 33491=距本地零点 33491s）**
 
 > 现状：T2.9 验收发现三处"没真正收掉"的问题，而 W3 每张卡都要跑测试/发请求，必须先修：
 > ①`scripts/test.ps1` 把 `.env` 里**容器内地址** `ASR_BASE_URL=http://asr:8000` 注进测试进程 → **干净 shell 跑全量必红**（`UnknownHostException: asr`）；
@@ -853,7 +853,7 @@ docker compose exec -T app date; docker compose exec -T postgres date
 
 ---
 
-## T3.1 摘要生成：云 `ChatModel` → `summary` / `keywords` / `ai_tier`（约 2.5h）
+## T3.1 摘要生成：云 `ChatModel` → `summary` / `keywords` / `ai_tier`（约 2.5h）✅ **已完成（`ffbc95c`；我复跑 3 样本 CLOUD 160~170 字、keywords 8 个、无编造；F-1 DONE 顺序 → T3.2 收口）**
 
 > 现状：只有转写全文；`task_result` 的 `summary/keywords/ai_tier` **全空**，代码里**没有业务级 `ChatModel` 调用**
 > （`LlmModelSwitchEnvironmentPostProcessor` 只决定 bean 开不开）。本卡做 W3 第一块：把"文字"变成"纪要"。
@@ -904,6 +904,54 @@ docker compose exec -T postgres psql -U mn -d meetingnotes -t -A -c "select task
 新公共逻辑必须有测试；对外字段 snake_case。
 
 【回报·测试三问】检查了哪些场景 ｜ 实际命令 + 输出（3 份摘要对照 + exit code）｜ 还有哪些没验证（**不许留空**）。
+
+---
+
+## T3.2 待办抽取（`todos` JSON）+ 两处前置收口（约 2h）
+
+> 现状：`task_result.todos`（JSONB）还是空的；摘要已能落库（T3.1）。本卡先把 T3.1 验收发现的 2 个问题收掉（30 min），再做"待办"。
+> **前置收口（先做，30 min）**：
+> - **F-1（必修，P1）**：现在"转写落库并置 DONE"早于"摘要"——实测 3.3s 窗口里外部能读到 `DONE + summary:null`（D-069 明令禁止）。
+>   改：worker 里先写 transcript → 调摘要（try/catch）→ **最后**置 DONE（摘要失败也 DONE）。验收判据：日志时间线**"摘要已落库"必须早于"任务 DONE"**；
+>   并加一条单测覆盖该顺序（用现有 `TranscriptionWorkerTest` 的 mock 结构即可）。
+> - **F-2（测试洞）**：`AsrHttpClientConfigTest` 的路由方向没真断言（两条 `assertEquals(x,x)` 是自比较，映射写反仍全绿）。
+>   改成用 `assertSame`/包私有 getter 断言"转写 URI → 900s 工厂、chat URI → 120s 工厂"两个方向。
+
+【规划四问】
+- **改哪里**：
+  ① 新增待办抽取（建议放 `ai/TodoService` 或复用 `SummaryService` 的第二段逻辑）：提示词要求**只输出 JSON**
+     `{"todos":[{"action":"...","owner":"...","deadline":"..."}]}`；**`owner`/`deadline` 未知就 `null`，不许猜**；
+     解析失败 → WARN（原始输出截 200 字）+ 不重试 + 留空；写 `task_result.todos`(JSONB)；
+  ② `GET /api/v1/tasks/{id}` **只增** `todos` 字段（数组，元素 snake_case：`action/owner/deadline`）；
+  ③ 单测 **+4**：提示词约束（JSON + 不许猜）、合法解析落库、缺字段容错（只给 action 也行）、解析失败降级不抛；
+  ④ 回归：摘要、详情、错误四连不变。
+- **复用什么**：T3.1 的 `SummaryService` 结构、LLM 超时路由（120s）、失败不阻塞 DONE 的策略；`ObjectMapper`；`task_result.todos` 列已存在（**不改表**）。
+- **影响哪些功能**：DONE 前多一次 LLM 调用（秒级）；详情 API 增字段；不动转写/状态机/幂等。
+- **怎么验证**：3 个有语音样本 → DONE → `todos` 非空且每条 action 能在 transcript 找到依据（owner/deadline 没有就必须是 null）。
+
+【范围声明】
+- 做：前置 F-1、F-2 + 主任务 ①~④；API 只增字段（已报备）；`.env.example` 无需加键。
+- 不做：三档降级（T3.3）、抽取式兜底（T3.4）、模板（T3.9）、待办勾选（T3.5）；不改表结构；不动 `docs/`。
+- 禁：编造 owner/deadline（没有就 null，宁缺毋滥）；把待办塞进 summary 字段里；解析失败重试；先 DONE 后补结果（D-069）。
+
+【验收】（反例必须进）
+```powershell
+# ① 前置 F-1：日志时间线 —— "摘要已落库" 必须早于 DONE（贴taskId那条链的3行）
+docker compose logs app --since 10m | Select-String '"taskId":"<id>"'   # 看 order
+# ② 前置 F-2：路由测试改成方向断言后仍全绿；故意把映射写反 → 测试必须红（贴反例）
+# ③ 3 个样本：DONE 后查 todos
+docker compose exec -T postgres psql -U mn -d meetingnotes -t -A -c "select task_id, todos, ai_tier from task_result where todos is not null order by task_id desc limit 3"
+curl.exe -s --noproxy "*" http://localhost:8080/api/v1/tasks/<id>   # todos 是数组、元素含 action/owner/deadline
+# ④ 人工比对：每条 action 能在 transcript 找到依据；没有 owner/deadline 的必须是 null（贴 3 份对照，脱敏）
+# ⑤ 反例：临时清空 LLM key（或断网模拟）→ 仍 DONE、todos null、无 500（验完恢复）
+# ⑥ 全量 `scripts\test.ps1` ≥61 用例 exit 0；check-maintainability exit 0；worker ≤300 行
+# ⑦ 回归：上传/列表/详情/错误四连（404/405/415/400）不变
+```
+**通过标准**：前置两项都过（DONE 顺序 + 路由方向断言）；3 个样本 todos 非空、无编造；无 key 时优雅降级；单测 ≥61；脚本 exit 0。
+
+【可维护性】提示词集中一处；`ai/` 单向依赖（worker → ai）；对外字段 snake_case；新增公共逻辑必须带测试。
+
+【回报·测试三问】检查了哪些场景 ｜ 实际命令 + 输出（含 F-1 顺序证据、F-2 反例、3 份待办对照）+ exit code ｜ 还有哪些没验证（**不许留空**）。
 
 ---
 

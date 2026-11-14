@@ -48,8 +48,9 @@
 |---|---|
 | 阶段 0 底座（T0.1–T0.5） | ✅ 全过：RTF **0.105/0.113**、无 key 可启动（`ChatModel` Bean=0）、5/5 healthy |
 | 阶段 1（T1.1–T1.9） | ✅ 全过（含 T1.9 测试入口）。T1.5 实测：397s 中文音频 → **31s** 出 1853 字；停 ASR **9s** 走完 `RETRYING×2 → DEAD` |
-| 第 2 周（T2.1–T2.12） | ✅ 全过（T2.9 主体通过；3 处遗留见下） |
-| **下一张卡** | **T3.0 W3 前置小修**（`tasks-starter.md`）：`test.ps1` 跳过 `.env` 的 `ASR_BASE_URL`（D-066）、`MAVEN_OPTS` 编码、compose `TZ`（D-067，人类点头后）；**之后 T3.1 摘要生成**（云 `ChatModel` → summary/keywords/ai_tier） |
+| 第 2 周（T2.1–T2.12） | ✅ 全过（含 T2.9 收口、T3.0 前置小修） |
+| 第 3 周（T3.x） | **T3.0 ✅**（测试入口/TZ）、**T3.1 ✅**（摘要生成：`ai/SummaryService` → `summary/keywords/ai_tier`，详情 API 已增字段）；**T3.2 待做** |
+| **下一张卡** | **T3.2 待办抽取 + 两处前置收口**（`tasks-starter.md`）：F-1 `DONE 必须最后写`（D-069）、F-2 超时路由测试方向断言；主任务 `todos` JSON |
 
 任务总表 `tasks.md`；起栈 `docker compose up -d`（5/5 healthy 才算通过）。**一次只做一张卡，先贴证据再要下一张。**
 完成后按 §5 格式回报；`state.md`/`handoff.md` 里的"下一步"与本节同步更新。
@@ -105,7 +106,10 @@ pip install -i https://pypi.tuna.tsinghua.edu.cn/simple <pkg>
 | **Spring AI 内部重试（D-046）** | `OpenAiAudioTranscriptionModel` 走 `RetryUtils.DEFAULT_RETRY_TEMPLATE`，**默认 10 次指数退避**（ASR 挂掉时单次尝试 7 分钟才交给外层）→ 已用 `spring.ai.retry.max-attempts=2` / `backoff 2s~10s` 收敛；**重试语义只归 worker 状态机** |
 | **`GET /api/v1/tasks/{id}`（T1.5）** | 查询带 `user_id`（D-040）；不存在 → `404 TASK_NOT_FOUND`（固定码第 7 个，D-047）；`duration_sec` 等 INT4 列必须 `getLong + wasNull`（强转 `Long` 会 500）；`transcript: ""` = 未识别到语音、任务仍是 DONE（D-048） |
 | **ASR 超时（T2.2/D-058）** | connect **5s** + read **900s**，由 `config/AsrHttpClientConfig` 统一设置（`ASR_CONNECT_TIMEOUT_SEC`/`ASR_TIMEOUT_SEC`）；**探活/其它调用不许复用 900s**（健康探活另用 2s，D-059）。停 ASR 到 DEAD 由 78s 降到 **7.7s** |
-| **LLM 超时（D-068，T3.1 落）** | 现有 `RestClientCustomizer` 对所有 RestClient 是 900s —— LLM 同步调用会拖死单线程 worker。T3.1 改为**按 URI 路由**：`/v1/audio/transcriptions` 900s、chat 走 `app.llm.timeout-sec`（`LLM_TIMEOUT_SEC` 默认 **120s**）；摘要失败不阻塞 DONE |
+| **LLM 超时（T3.1/D-068）** | `config/AsrHttpClientConfig` 已改**按 URI 路由**：`/v1/audio/transcriptions` 900s、chat 走 `app.llm.timeout-sec`（`LLM_TIMEOUT_SEC` 默认 **120s**），connect 都 5s；摘要失败不阻塞 DONE |
+| **摘要（T3.1）** | `ai/SummaryService`：`ChatModel`（`spring.ai.chat.model.ChatModel`）+ 严格 JSON 提示词（严禁编造）+ 解析失败 WARN 截 200 字不重试 + 无 ChatModel 跳过；写 `task_result.summary/keywords/ai_tier='CLOUD'`；详情 API 已增 `summary/keywords/ai_tier`（只增） |
+| **DONE 语义（T3.1 验收/D-069）** | **DONE 必须最后写**：先写 transcript → 摘要/待办（try/catch，失败也继续）→ **最后**置 DONE。禁止先 DONE 后补（Webhook/轮询会读到半成品；实测窗口 3.3s） |
+| **测试入口（T3.0）** | `scripts/test.ps1` 会跳过 `.env` 的 `ASR_BASE_URL`（容器地址）并**保留 shell 已设的键**；`MAVEN_OPTS=-Dfile.encoding=UTF-8`；干净 shell 全量应为 **57/57** |
 | **健康检查（T2.4/D-059）** | `health/MinioHealthIndicator`（headBucket + 2s）与 `health/AsrHealthIndicator`（GET `{base-url}/health` + 独立 2s 工厂）；readiness 组 = `readinessState,db,redis,minio,asr`；任一依赖挂 → `/actuator/health` **503 DOWN**；测试里用 `management.health.minio/asr.enabled=false` 关闭 |
 | **结构化日志（T2.7/D-062）** | `LOG_JSON`（默认 true）→ Boot 内建 `logging.structured.format.console=logstash`；`taskId` 是**独立字段**（MDC，处理结束清理）；查一个任务：`docker compose logs app \| grep '"taskId":"<id>"'`；`LOG_JSON=false` 回退可读文本 |
 | **备份/恢复（T2.8/D-063）** | `scripts/backup.ps1`（`pg_dump -Fc` + MinIO volume tar + manifest 行数/sha256）、`scripts/restore.ps1 -Force`；**恢复前 postgres/minio 必须先 running**；备份**不含 `.env`**；自动备份交宿主 cron（README 有示例） |
