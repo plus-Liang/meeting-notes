@@ -1000,13 +1000,22 @@ curl.exe -s --noproxy "*" http://localhost:8080/api/v1/tasks/<id>   # todos 是�
 >    【规划四问】里要给出你的估算与**超限策略**（建议：todos 代码截断 20、summary 限 200 字、keywords ≤10；
 >    `finish_reason=length` → 该任务**降级 EXTRACTIVE** + WARN 带 reason，**不做无限重试**）。
 >    不允许"跑样本时才发现被截断"——预算先算，样本只用来验证预算。
-> ⑧ **LOCAL 档真实生成也要验（用户 2026-11-14 已批准拉取，别只验降级路径）**：
->    环境已由验收方备好：`docker compose --profile local-llm up -d ollama`（该服务在 `profiles: ["local-llm"]`，默认不启动）；
->    模型用 **`qwen2.5:1.5b`**（中文可用、体积 ~1GB；拉取命令 `docker compose exec -T ollama ollama pull qwen2.5:1.5b`）。
+> ⑧ **LOCAL 档真实生成也要验（用户 2026-11-14 已批准；环境验收方已备好，别自己拉）**：
+>    `ollama` 服务在 `profiles: ["local-llm"]`，验收方已 `up -d` 并**导入好模型 `qwen2.5:1.5b`**（`ollama list` 可见，1.1GB）。
+>    ⚠️ **不要执行 `ollama pull`**：本网络下 ollama registry 的 blob 宿主（r2.cloudflarestorage.com）不可达，会 3 次 EOF 失败；
+>    模型是用 hf-mirror 的 GGUF + `ollama create` 导入的。若模型丢失，找验收方重新导入，不要自己硬拉。
 >    验证：`.env` 设 `OLLAMA_ENABLED=true` / `OLLAMA_MODEL=qwen2.5:1.5b` / `OLLAMA_BASE_URL=http://ollama:11434/v1` → 重建 app →
 >    传样本 → 期望 `ai_tier=LOCAL` 且 summary/todos 可解析非空。**小模型 JSON 不达标是允许的结论**：
->    此时必须能观察到"LOCAL 失败 → 降级 EXTRACTIVE，`ai_tier=EXTRACTIVE`，WARN 带 reason"——这条比"LAN 成功"更重要（级联降级就是这个兜底）。
+>    此时必须能观察到"LOCAL 失败 → 降级 EXTRACTIVE，`ai_tier=EXTRACTIVE`，WARN 带 reason"——这条比"LOCAL 成功"更重要（级联降级兜底）。
+>    验收方实测基线（供你对照）：`POST http://ollama:11434/v1/chat/completions`（qwen2.5:1.5b，max_tokens 512，temperature 0）
+>    → **4.8s、`finish_reason=stop`、合法 JSON、out 68 tok**；但**编造了原文没有的日期**（原文"下周三"→ 输出 `2023-04-15`）→ 所以 ⑨ 必须做。
 >    验完把 `.env` 恢复 `OLLAMA_ENABLED=false`（默认关闭、用户可选开），并在回报里写清"LOCAL 成功/降级"到底发生了哪个。
+> ⑨ **待办依据校验（所有档位统一，治编造；LOCAL 实测会编日期）**：`owner` / `deadline` 必须在转写里有依据，否则一律置 `null`：
+>    - `owner`：抽取到的人名/称呼**出现在 transcript** 才保留，否则 null；
+>    - `deadline`：日期/时间词（如"下周三""下个月初""11月20日"）**在 transcript 中出现**才保留，否则 null——
+>      不许把"下周三"直接改写成具体日期（模型会瞎算，实测 2023-04-15 就是编的）；
+>    - `action` 同样要能对回 transcript（允许概括，但核心词要有依据）；
+>    - 这套校验写成公共方法，CLOUD/LOCAL/EXTRACTIVE 三档都走，单测覆盖"编造的 deadline 被置 null"。
 
 【规划四问】
 - **改哪里**：`ai/AiTier.java`（新）、`ai/AiStructuringRouter`（新，或并入现有 config）、`ai/StructuringService`（新：**一次** LLM 调用出 summary/keywords/todos；`SummaryService`/`TodoService` 保留还是收编由实现方定，但对外行为按 DTO 统一）、`ai/ExtractiveStructurer`（新）、`worker/TranscriptionWorker`（调用点改一处）、`web/`（**不改**，`ai_tier` 已在 T3.1 返回）、`application.yml`（F-8 一行默认值）、单测 3~4 个文件。
@@ -1027,16 +1036,20 @@ curl.exe -s --noproxy "*" http://localhost:8080/api/v1/tasks/<id>   # todos 是�
 docker compose exec -T postgres psql -U mn -d meetingnotes -t -A -c "select task_id, ai_tier, length(summary), jsonb_array_length(todos) from task_result order by task_id desc limit 5"
 # ② 云档：恢复 key（.env 哈希与备份一致）→ 重建 → 传样本 → ai_tier=CLOUD，摘要 150~250 字、todos 可追溯
 # ③a LOCAL 降级路径：OLLAMA_ENABLED=true 但 ollama 没起（或模型没拉）→ **应用仍 healthy** + 启动 WARN + 该任务 ai_tier=EXTRACTIVE
-# ③b LOCAL 真实生成（已备好环境）：--profile local-llm 起 ollama + 拉 qwen2.5:1.5b → 传样本 → 贴 ai_tier（LOCAL 或"LOCAL失败→EXTRACTIVE"）+ WARN 里的 reason
-docker compose --profile local-llm up -d ollama ; docker compose exec -T ollama ollama pull qwen2.5:1.5b
+# ③b LOCAL 真实生成（环境已备好、模型已导入，**不要 ollama pull**）→ 传样本 → 贴 ai_tier（LOCAL 或"LOCAL失败→EXTRACTIVE"）+ WARN 里的 reason
+docker compose --profile local-llm up -d ollama ; docker compose exec -T ollama ollama list    # 应见 qwen2.5:1.5b
 docker compose logs app --since 5m | Select-String 'ollama' ; curl.exe -s --noproxy "*" http://localhost:8080/actuator/health
+# ③c 待办依据校验（⑨）：LOCAL/CLOUD 输出里凡是原文没有的 owner/deadline 必须被置 null（贴一条"编造被拦下"的单测或日志）
 # ④ 空音频（纯静音/纯音乐样本）→ transcript="" + summary/todos=null + ai_tier=null（不是 EXTRACTIVE）
 # ⑤ 变异验证：把 tier 判定顺序/返回值写反（例如 CLOUD 判成 EXTRACTIVE）→ 新单测必须红，验完还原
-# ⑤b 变异验证二：把"合并调用"改回两次调用（或把 DTO 某字段写死 null）→ 相关单测必须红，还原后必须再绿（K-30：touch 防 Maven 增量编译）\n# ⑥ 顺序不变（F-1 回归）：taskId 日志链仍是 转写落库 → 结构化（一次调用）→ DONE；贴一条完整时间线\n# ⑥b 合并调用证据：日志/单测证明**一次** LLM 调用同时产出 summary+keywords+todos（不是两次），失败时三字段**一起**留空\n# ⑥c 新反例要新任务 → 用未上传过的样本（a_1113.wav / a_11月7日.wav），禁止删证据行（D-073）
+# ⑤b 变异验证二：把"合并调用"改回两次调用（或把 DTO 某字段写死 null）→ 相关单测必须红，还原后必须再绿（K-30：touch 防 Maven 增量编译）
+# ⑥ 顺序不变（F-1 回归）：taskId 日志链仍是 转写落库 → 结构化（一次调用）→ DONE；贴一条完整时间线
+# ⑥b 合并调用证据：日志/单测证明**一次** LLM 调用同时产出 summary+keywords+todos（不是两次），失败时三字段**一起**留空
+# ⑥c 新反例要新任务 → 用未上传过的样本（a_1113.wav / a_11月7日.wav），禁止删证据行（D-073）
 # ⑦ 回归：错误四连（404/405/415/400）、列表、详情字段只增不减；全量 `scripts\test.ps1` ≥76 用例 exit 0；
 #    check-maintainability exit 0；worker ≤300 行；干净 shell（不预置环境变量）
 ```
-**通过标准**：三档都能选对且 `ai_tier` 诚实落库；**删 key 后仍产出非空 summary（EXTRACTIVE）且无 500**；ollama 不可达时应用照常启动；空 transcript 的 null 语义不被破坏；**F-7 合并成一次调用**（三字段同生同灭、DONE 前最坏 120s）；**JSON 体积预算在开工确认时给出、样本实测未出现 `finish_reason=length` 截断（若出现，必须有降级证据）**；单测 ≥76 exit 0；F-5/F-6/F-8 三处收口各有一条可判据。
+**通过标准**：三档都能选对且 `ai_tier` 诚实落库（**级联：CLOUD→LOCAL→EXTRACTIVE**）；**删 key 后仍产出非空 summary（EXTRACTIVE）且无 500**；ollama 不可达时应用照常启动；**LOCAL 档有明确结论**（成功=ai_tier LOCAL，或失败=降级 EXTRACTIVE + WARN reason）；空 transcript 的 null 语义不被破坏；**F-7 合并成一次调用**（三字段同生同灭、DONE 前最坏 120s）；**JSON 体积预算在开工确认时给出、样本实测未出现 `finish_reason=length` 截断（若出现，必须有降级证据）**；**⑨ 依据校验生效：编造的 owner/deadline 被置 null（有单测 + 一条实测证据）**；单测 ≥76 exit 0；F-5/F-6/F-8 三处收口各有一条可判据。
 
 【可维护性】tier 判定集中在一个类（不要散在 service 里 if/else）；三档同构 DTO；`ai/` 单向依赖（`worker → ai`，不许反向）；
 新增分支必须有测试（每个档位至少一条）；EXTRACTIVE 不用第三方分词库（T3.4 再定）；commit 前 `check-maintainability.ps1` exit 0。

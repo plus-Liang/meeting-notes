@@ -805,11 +805,22 @@
   3. **ollama 默认不启动**：服务在 `docker-compose.yml` 的 `profiles: ["local-llm"]`，默认 `up -d` 不起（省内存/磁盘，符合"零成本可跑"默认体验）；
      启用 = `docker compose --profile local-llm up -d ollama` + `docker compose exec -T ollama ollama pull qwen2.5:1.5b` + `.env` 三个 `OLLAMA_*`。
      `OLLAMA_ENABLED` 默认 **false**（可选功能），README 必须写清启用步骤。
+     实际落地补充（2026-11-14 本机实测）：**`ollama pull` 在本网络不通**——registry 的 blob 宿主 `r2.cloudflarestorage.com` 不可达（3 次 EOF）；
+     可用路线 = **hf-mirror 下载 GGUF → `docker cp` 进容器 → `ollama create qwen2.5:1.5b -f Modelfile`**（耗时约 4 分钟/1.1GB）。
   4. 小模型 JSON 不达标是**允许的结论**：此时应观察到"LOCAL 失败 → 降 EXTRACTIVE + WARN 带 reason"，这比"LOCAL 成功"更能验证级联。
 - **依据**：`plan.md` §5.1（三档）；T3.3 卡（⑦ 预算 / ⑧ LOCAL 真实生成）；用户 2026-11-14 批准拉取镜像与模型。
 - **已排除项**：静态选一档（无兜底，出现"选中档失败 → 全空"，与 D-020/N15 冲突）；默认启动 ollama（1.5GB 镜像 + 内存占用，
   破坏"不填 key 也能跑"的开箱体验）；在代码里硬编码模型名（换模型要改代码）。
 
+### D-076 待办字段必须回原文校验：owner/deadline 无依据一律 null（LOCAL 实测会编日期）
+- **日期**：2026-11-14（T3.3 开工前，验收方用 ollama 实测发现）｜**决策人**：本人
+- **结论**：
+  1. **三档统一后处理**：`owner` / `deadline` 必须在 transcript 中有依据，否则置 `null`；`action` 允许概括但核心词要有依据（二元组命中率 ≥0.5），否则丢弃该条。
+  2. `deadline` 特别处理：**输出具体日期（如 `2023-04-15`）而原文没有该日期串 → 置 null**；原文说"下周三"就保留相对时间词，**不许把相对时间改写成绝对日期**（模型会瞎算）。
+  3. 目的：提示词约束（"严禁猜测"）**不能保证**——本地 1.5B 实测直接违反；靠代码层校验兜住 K-21（编造）。
+- **依据**：2026-11-14 实测 `POST http://ollama:11434/v1/chat/completions`（qwen2.5:1.5b，temperature 0）：
+  4.8s、`finish_reason=stop`、合法 JSON、68 tok，但把原文"下周三"编成 `2023-04-15`、"下个月初"编成 `2023-06-01`（`review/` 后续 T3.3 报告记录）。
+- **已排除项**：只靠提示词（1.5B 明确违反）；只对 LOCAL 档校验（CLOUD 也会编，统一校验才对；K-21 的 T3.1 样本是运气好没编）；把"下周三"自动换算成日期（时区/当年歧义，会造出更难查的错）。
 ---
 
 ## 面试速查（由本文件派生，勿单独维护）
