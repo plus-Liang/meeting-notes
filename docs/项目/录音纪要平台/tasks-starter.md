@@ -627,7 +627,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\check-maintainability.
 
 ---
 
-## T2.4 健康检查四项（约 1h，D-059 已定口径）
+## T2.4 健康检查四项（约 1h，D-059 已定口径）✅ **已完成（`74c0ed8`；我复跑 MinIO/ASR/Redis 三反例 + readiness 组 + 47/47）**
 
 > 现状：`/actuator/health` 只有 `db` / `redis` / `diskSpace`——**MinIO 和 ASR 挂了没人知道**（进程还是"健康"的）。
 > 目标：四项（DB / Redis / MinIO / ASR）任一不可用 → 整体 `DOWN`，但**不能因为探活把应用拖死/拖慢**。
@@ -673,6 +673,94 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\check-maintainability.
 【可维护性】两个指标各一个类（别塞进 worker/service）；超时值走配置/常量集中；日志用 DEBUG 不刷屏。
 
 【回报·测试三问】检查了哪些场景 ｜ 实际命令 + health JSON + `time_total` + exit code ｜ 还有哪些没验证（**不许留空**）。
+
+---
+
+## T2.7 结构化 JSON 日志 + taskId 贯穿（约 1h，消费 `app.log-json`，D-054）
+
+> 现状：日志是普通文本，`taskId` 混在中文句子里（`任务 33 开始转写…`）；`app.log-json`（`LOG_JSON`）是**没有消费方的死配置**（D-054 登记）。
+> 目标：给 self-hosted 用户一条命令就能捞出"一个任务的全链路"：`docker compose logs app | grep <taskId>` → ≥5 条**结构化**行。
+
+【规划四问】
+- **改哪里**：①`application.yml`：把 `app.log-json` 接到 Spring Boot 3.5 内建的**结构化日志**（`logging.structured.format.console: ecs` 或等价，
+  **不引入新依赖、不写自定义 encoder**），`LOG_JSON=false` 时保持现在的可读文本；②`TranscriptionWorker` 在处理任务期间用 **MDC** 放 `taskId`
+  （处理结束/异常都要 `MDC.clear()`，线程复用不能串号）；③`StartupRecovery` 回收日志也带结构化字段；④补测试。
+- **复用什么**：Boot 3.5 内建 `logging.structured.format.console`（无需 logstash 依赖）、SLF4J MDC、现有 `LOG_LEVEL` 配置。
+- **影响哪些功能**：日志格式（**运维可见性**）；不影响 API/业务。`LOG_JSON=false` 必须能回退成人类可读。
+- **怎么验证**：跑一个真实任务 → `docker compose logs app | grep "<taskId>"` ≥5 条且每行可被 JSON 解析、含 `taskId`；`LOG_JSON=false` 重启后是文本。
+
+【范围声明】
+- 做：上述 ①~④；`.env.example` 无需加键（`LOG_JSON` 已有）；`配置清单.md` 的"计划中"表里 `app.log-json` 由我除名（你不改 docs）。
+- 不动：业务逻辑、错误码、`/api/v1`、健康检查、compose。
+- 禁：`System.out`、把整个日志消息塞进 JSON 的 `message` 就完事（taskId 必须是**独立字段**）；日志里打印 transcript 全文/密钥；
+  为 JSON 日志引入 logstash/encoder 依赖。
+
+【验收】（反例必须进）
+```powershell
+# ① 起一个真实任务（用有语音的样本，确保有 transcript）
+curl.exe -s --noproxy "*" -X POST -F "file=@D:\datasets\meeting-notes-samples\probe.wav" http://localhost:8080/api/v1/tasks
+# ② 拿到 task_id 后：≥5 条命中，且每行是合法 JSON 且有 taskId 字段
+docker compose logs app | Select-String "<taskId>"
+# ③ 解析验证（PowerShell）：逐行 ConvertFrom-Json 成功、字段含 taskId 与 level
+# ④ 反例：LOG_JSON=false 重启 app → 日志回到可读文本（不是 JSON）
+# ⑤ 回归：健康检查仍 UP；上传/列表/详情正常
+cd app; powershell -NoProfile -ExecutionPolicy Bypass -File ..\scripts\test.ps1   # 期望 ≥49 用例 exit 0
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\check-maintainability.ps1   # exit 0
+```
+**通过标准**：≥5 条结构化行 + 每行合法 JSON 含 `taskId`；`LOG_JSON=false` 可回退；单测 ≥49；脚本 exit 0。
+
+【可维护性】MDC 的 put/clear 用 try/finally；日志字段名统一 camelCase（`taskId`）；不新增第三方依赖。
+
+【回报·测试三问】检查了哪些场景 ｜ 实际命令 + 日志样例（脱敏）+ exit code ｜ 还有哪些没验证（**不许留空**）。
+
+---
+
+## T2.8 备份与恢复（US-11，约 2h，**数据安全是 P1 用户 B 的买点**）
+
+> 现状：一个 `docker compose down -v` 就把用户所有任务和结果删光（**没有备份=不是"能给别人的自托管产品"**）。
+> 目标：`scripts\backup.ps1` 一条命令产出可核对的备份；`scripts\restore.ps1 -Force` 能从备份恢复到"数据一致"。
+
+【规划四问】
+- **改哪里**：①`scripts/backup.ps1`：`pg_dump -Fc`（DB 全量）+ **MinIO 音频对象**（用 `docker run --rm --volumes-from` tar 打包 volume 或等价 `mc mirror`），
+  产物放 `backups/<时间戳>/`（**不进 git**，`.gitignore` 加 `backups/`），支持 `-Keep 7` 保留最近 N 份；②`scripts/restore.ps1 -Force`：
+  校验备份完整性 → 停 app worker（避免边恢复边消费）→ `pg_restore --clean` → 恢复 MinIO volume → 起服务 → 自检；
+  ③`backup.ps1` 打印"备份了什么/多大/校验和"，`restore.ps1` 打印同样信息并核对行数；④补测试（脚本级：备份→删卷→恢复→数据一致）。
+- **复用什么**：`docker exec meeting-notes-postgres-1 pg_dump`、compose 的 volume 名、`scripts/test.ps1` 的 PowerShell 风格（UTF-8 BOM）。
+- **影响哪些功能**：运维/数据安全（**不动 API/表结构/业务代码**）。
+- **怎么验证**：造 2 个有 transcript 的任务 → 备份 → `docker compose down -v`（删卷）→ `up -d` → `restore.ps1 -Force` → **任务数、task_id、transcript 全文、列表 API 结果一致**。
+
+【范围声明】
+- 做：上述 ①~④ + `README` 由我写用法（你只报告）。
+- 不动：业务代码、Flyway、`/api/v1`；**备份包不含 `.env`**（D-023，密钥不进备份）。
+- 禁：`restore` 不加 `-Force` 就执行（防误删生产数据）；恢复时不校验备份文件存在/非空；把备份放在会被 `down -v` 删掉的 volume 里。
+
+【验收】（反例必须进；**必须贴前后数据对比**）
+```powershell
+# ① 造数据：传 2 个真实音频 → 等 DONE（记录 task_id + transcript 长度）
+# ② 备份
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\backup.ps1
+#    期望：打印 DB 行数/对象数/大小/校验和，产物在 backups\<ts>\
+
+# ③ 反例：不带 -Force 恢复 → 拒绝执行（exit != 0）
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\restore.ps1 -BackupDir backups\<ts>
+
+# ④ 灾难：删卷重建
+docker compose down -v; docker compose up -d --build; sleep 40
+#    期望：此时 API 里任务数 = 0（证明真的删光了）
+
+# ⑤ 恢复
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\restore.ps1 -BackupDir backups\<ts> -Force
+#    期望：任务数/task_id/transcript 全文与①一致；列表 API 返回一致；能继续上传新任务
+
+# ⑥ 保留策略：-Keep 2 → 第三次备份后只留 2 份
+cd app; powershell -NoProfile -ExecutionPolicy Bypass -File ..\scripts\test.ps1   # 期望 ≥49 用例 exit 0
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\check-maintainability.ps1   # exit 0
+```
+**通过标准**：③拒绝、⑤数据一致（贴对比）、⑥保留策略生效、备份包不含 `.env`、单测 ≥49、脚本 exit 0。
+
+【可维护性】脚本参数集中、错误信息可操作；不硬编码绝对路径（用 `$PSScriptRoot`）；中文 `.ps1` 存 UTF-8 **带 BOM**。
+
+【回报·测试三问】检查了哪些场景 ｜ 实际命令 + 前后数据对比 + exit code ｜ 还有哪些没验证（**不许留空**）。
 
 ---
 
