@@ -1421,7 +1421,7 @@ GET /api/v1/tasks/124
 
 **【开工方式（新会话）】** 仓库 `D:\new\projects\meeting-notes` → 读根 `AGENT.md` → `git pull`（确认 HEAD 含 `2027406` 之后的 docs 提交）→ 读本卡 + `docs/项目/录音纪要平台/state.md`/`handoff.md` → 直接开工；**契约不用再报**，先做单测，配额重置后做实机。
 
-## T3.10 格式扩展校验：amr / opus（ass 已由 T3.7 覆盖）（约 1.5h）
+## T3.10 格式扩展校验：amr / opus（ass 已由 T3.7 覆盖）（约 1.5h） ✅ **已完成（`0abbe0e`；187/187 exit 0、可维护性 exit 0、我独立变异红→绿；实机 amr=132（62s/96038B/CLOUD）/opus=133（61s/244460B/CLOUD）DONE；未知容器 400 新文案实测零任务；配额 8 分钟/5 任务复算吻合；见 `review/2026-11-15-T3.10验收.md`）**
 
 > **现状**：`MediaMagic` 已识别 `amr`（`#!AMR`）与 opus（`OggS` → `ogg`）；容器 ffmpeg 我已预跑实测能解码
 > （amr → 60.02s、opus → 59.999s 的 16k 单声道 wav）。但 **W3 验收要求"每种格式各传一个真实样本 → DONE"，目前 amr/opus 没有实机证据**；
@@ -1469,6 +1469,53 @@ curl.exe -s --noproxy "*" -X POST http://localhost:8080/api/v1/tasks -F "file=@D
 
 **【开工方式（新会话）】** 仓库 `D:\new\projects\meeting-notes` → 读根 `AGENT.md` → `git status` 干净（HEAD 应含 `f880b6a` T3.9 代码，**别回退/重写 T3.9**）→
 读本卡 + `docs/项目/录音纪要平台/state.md`/`handoff.md` → 先做文案 + 单测（不等配额），配额重置后再跑 2 条实机。
+
+## T3.8 第 3 周验收（W3 收口：测试补强 + 56.7min 长音频 + 真 120s 超时 + 遗留评估）（约 4h）
+
+> **现状**：W3 功能任务 T3.0~T3.11 已全 ✅（T3.7 导出/PASTE、T3.9 模板、T3.10 amr/opus 均已验收）；本卡是**周验收收口**：
+> 补测试缺口 → 用真实长音频跑通 → 实测 LLM 真超时降级 → 把 F-14~F-19 逐条评估落结论。
+> 配额：2026-11-15 已用 **8 分钟 / 5 任务**；本卡实机**最多 4 条任务**：①长音频 1 条（56.7min → 57 分钟配额）
+> ②真超时实验 PASTE 1 条（0 分钟）③F-14 实验 PASTE 1~2 条（0 分钟）→ 合计 ≤57 分钟 / ≤9 任务，安全。
+> ⚠️ **不改 `.env` 持久值**：打超时/本地档预算实验一律用「外部 override 文件 + `docker compose -f` 临时叠加」，验完恢复基础 compose。
+
+**主任务**：
+
+1. **补测试缺口（只补真缺口，不重复覆盖）**：
+   - Schema 畸形矩阵：`todos` 元素缺 `action`/类型错、`keywords` 元素非字符串、`summary` 非字符串/超长、JSON 被截断、围栏/散文包裹（`JsonExtractor` 已盖的写"已覆盖"）→ 期望统一"三字段一起留空 + 降级，DONE 不失败"。
+   - 三档选择：补 1 条 **LOCAL 调用抛异常 → 降级 EXTRACTIVE 且 `ai_tier=EXTRACTIVE`**（mock ChatModel throw，断言不重试同一档）；OFFLINE_MODE 已有 WARN 断言则记"已覆盖"。
+   - 模板选择：显式/文件名/默认/旧任务 null/详情 12 键已有（T3.9）→ 若缺"非法 template 在 PASTE 路径"补 1 条。
+   - T3.9 遗留：`StructuringServiceTest` 的 `never()).update(anyString(), any(Object[].class))` 按 K-31 可能空过 → 改成可靠断言（捕获实际调用数/`verifyNoMoreInteractions` 配合 stub），确保"失败路径零写库"不是假绿。
+2. **56.7min 长音频实机（1 条）**：样本 `D:\datasets\meeting-notes-samples\a_1113b.wav`（56.7min / 103.8MB，<60min/<200MB 内）。
+   验：`DONE`、`duration_sec`≈3402、transcript 非空且长度合理、`ai_tier`、`summary/keywords/todos` 正常、**总墙钟耗时 + ASR RTF**、`docker stats` 期间 app 内存峰值（不 OOM）、DONE 最后写。
+3. **LLM 真 120s 超时（实机，1 条 PASTE）**：写 override 文件（放 `D:\new\artifacts\t38-override.yml`，**不进仓库**）给 app 加：`LLM_TIMEOUT_SEC=2`、`LLM_BASE_URL=http://10.255.255.1:81`（黑洞地址）、`LLM_API_KEY=dummy`、`OFFLINE_MODE=false`；
+   `docker compose -f docker-compose.yml -f D:\new\artifacts\t38-override.yml up -d app` → POST 一段 PASTE 文本 → 期望 ~2s 后 **ReadTimeout → 降级**、WARN 带 `timed out`、任务仍 `DONE`、`ai_tier=EXTRACTIVE`；
+   验完 `docker compose up -d app` 恢复基础配置，确认 `.env` 哈希 `2BCC440F1C9E` 不变、6 容器 healthy。
+4. **F-14 本地档实验（≤2 条 PASTE，0 分钟配额）**：同样用 override（`OLLAMA_ENABLED=true`、`LLM_LOCAL_MAX_TOKENS=1024`，仍截断再试 2048）跑 1 条 PASTE 短文本，记录 `ai_tier` 与 WARN（`finish_reason=length` / 超时）：成功出 `ai_tier=LOCAL` → 记录可行预算；仍失败 → 结论"v1 记已知限制（零成本 LOCAL 档不可用，EXTRACTIVE 兜底）"，**不改 `.env`**、本卡不改代码。
+5. **遗留逐条评估并落结论**（给"结论 + 依据 + 排期/不修理由"，写进回报；我复核后并入 decisions）：
+   **F-15**（EXTRACTIVE 不读 glossary：评估确定性替换成本，>30 行或要改公共面 → 不修，记 T4.x）· **F-16**（字幕编码/纯数字行边界：不修，写进文档）· **F-17**（幂等键不含模板 → 留 T4.1 重跑）· **F-18**（EXTRACTIVE 模板分化：spec §6.1 是否必须？给判据与建议）· **F-19**（模板只读查询：P3 不修）· 本机 C 盘存储纪律执行情况（样本/日志/override 是否都在 D 盘）。
+6. **W3 过关材料汇总**（放进回报，我据此写周验收报告）：US-3 Independent Test（task 122/123）· N15 三档证据（95/96/97/98/100/101/120/121 + 本轮长音频/超时）· US-12 证据（129/130/131）· 错误四连/详情 12 键/导出回归。
+
+**【范围声明】**
+- 做：补测试缺口 + 2~4 条实机（长音频/超时/可选 F-14）+ 遗留评估报告。
+- 不做：新功能（F-15/F-18 若评估要改代码，先报我批准；本卡默认不改）；不改 `.env`/配额/表结构/公共契约；不删证据行；不动 `docs/`；不 push。
+- **存储纪律（2026-11-15 起，新）**：所有样本/日志/override/临时数据放 **D 盘**（`D:\new\artifacts\` 或 `D:\cache\`），不许写 `C:\Users\ljh` 下的大文件。
+
+**【验收】**
+```powershell
+# ① 单测：全量 ≥189 exit 0（现 187 + 新增 ≥2）；check-maintainability exit 0（allowlist 0）
+# ② 长音频实机（1 条）：POST a_1113b.wav → DONE，贴 taskId/耗时/duration_sec/ai_tier/transcript 前 80 字/内存峰值
+# ③ 真超时实机（1 条 PASTE）：贴降级 WARN 原文 + 最终 DONE + ai_tier；恢复 compose 后 .env 哈希不变、6 容器 healthy
+# ④ F-14 实验：贴 override 关键行 + ai_tier/WARN；结论一句话
+# ⑤ 变异：把"LOCAL 异常→降级"用例的降级断言改坏 → 红 → 还原 → 绿（至少 1 处）
+# ⑥ 收尾：git diff --name-only 只含 app/src；单 commit；证据行不删；配额记实际值（我的 8 分钟 + 本卡 57 分钟 = 65/120 上限内）
+```
+**通过标准**：长音频 `DONE` 且耗时/内存有数；真超时能降级且任务不失败；遗留逐条有结论；全量 ≥189 exit 0；可维护性 exit 0；零 `.env`/表结构/契约改动；实机 ≤4 任务；证据行不删。
+
+**【可维护性】** 测试集中在既有测试类/新小类；不引依赖；commit 前 `check-maintainability.ps1` exit 0；override/日志不进仓库。
+
+**【回报·测试三问】** 检查了哪些场景（畸形 JSON 矩阵/三档降级/模板/长音频/真超时/F-14）｜ 实际命令 + 输出（taskId + 耗时 + ai_tier + transcript 摘录 + WARN 原文 + 内存峰值 + 变异红绿 + exit code）｜ 还有哪些没验证（**不许留空**）。
+
+**【开工方式（新会话）】** 仓库 `D:\new\projects\meeting-notes` → 读根 `AGENT.md` → `git status` 干净（HEAD 应含 `0abbe0e` + 本轮 docs 提交）→ 读本卡 + `state.md`/`handoff.md` → 先补测试，再跑实机。
 
 ---
 

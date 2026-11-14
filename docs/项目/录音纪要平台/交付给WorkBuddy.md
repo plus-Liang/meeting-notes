@@ -145,3 +145,12 @@ T1.7/T1.8 已验收通过（报告 docs/协作/review/2026-11-14-T1.7-T1.8验收
 
 > **把 `D:\new\projects\meeting-notes` 作为工作目录打开 → 粘第 1 节那条消息 → 每轮只推进一张卡 → 只看"验证命令 + 实际输出 + exit code"。**
 > 需求不用你解释（它读 `AGENT.md` + `docs/`）；判断不用你懂代码（有 DoD 与验证命令）。
+
+---
+
+## 9. 存储纪律（2026-11-15 起，必须遵守）
+
+- 本机 C 盘曾只剩 9.9GB：已把 Docker 数据（`D:\DockerData\wsl`，junction 保持原路径）、模型缓存（`D:\cache\dsh-asr`）、Maven 仓库（`D:\cache\m2`）迁到 D 盘，C 盘现 41GB 可用。
+- WorkBuddy 开发时：**样本 / 日志 / override / 临时 / 构建产物一律放 D 盘**（项目资料用 `D:\new\artifacts\`，缓存用 `D:\cache\`）；**不许**在 `C:\Users\ljh` 下新建大文件、下载大模型/数据集。
+- 临时实验配置（override yml 等）放 `D:\new\artifacts\`，**不进仓库**；验完恢复基础 compose。
+- 若必须用 C 盘，先在回报里说明原因。

@@ -940,6 +940,32 @@
 - **已排除项**：今天硬等 2.3 小时到 00:00（无效等待，验收报告已如实标注）；用 PASTE 任务代替音频实机（配额同样 50/50 满，且 DoD 要音频路径）；把 template 加进幂等键（需迁移，D-085 已排除）；先给 T3.9 打 ✅（纪律：没实机不打勾）；为截图/证据临时调高配额（造假）。
 ---
 
+### D-087 T3.10 验收通过（amr/opus 实机 + mp3 兜底文案）；容器重建会销毁日志，验收前先存日志
+- **日期**：2026-11-15（T3.10 验收）｜**决策人**：本人
+- **结论**：
+  1. **T3.10 通过**（`0abbe0e`，基线 `2c053e1`，3 文件 +29/-1 全在 `app/src`）：只改 `INVALID_MEDIA` 文案（补"若仍失败，请先把音频转成 mp3 再上传"，错误码/码表不变）+ 2 组单测；`MediaMagic`/上传/worker 零改动。
+  2. **我独立复跑**：187/187 exit 0、可维护性 exit 0、**我另做一处变异红→绿**；实机 amr=132（62s/96038B/CLOUD/transcript 490 字）、opus=133（61s/244460B/CLOUD/495 字）均 DONE；未知容器 400 新文案实测且零任务零配额；导出/详情契约零回归。
+  3. **配额口径**：`ceil(61/60)=2 分钟/条`（音频按秒 ceil 到分钟，既有口径）→ 当日 8 分钟/5 任务（129/130/131/132/133）逐条复算吻合。
+  4. **新教训（记入 K-36）**：为载入新文案**重建 app 容器**会把旧容器日志一起销毁→132/133 的 worker 日志不可回溯，只能用 DB 行+API+文件字节交叉验证；**以后重建容器前先 `docker compose logs app > artifacts\logs-*.txt`** 存档。
+- **依据**：`review/2026-11-15-T3.10验收.md`；187/187；我的变异红→绿；DB/API 行 132/133；400 原文；配额复算。
+- **已排除项**：为验证再传一次 amr/opus（超 2 条红线）；改 `MediaMagic` 支持新容器（本卡不做）；为拿 DONE 而转码（伪造证据）；把 amr-wb/手机私有变体纳入本卡（留后续/不承诺）。
+
+---
+
+### D-088 存储迁移（C 盘 9.9GB → 41.45GB）：Docker WSL 数据/模型缓存/Maven 仓库迁 D 盘；开发数据一律不落 C 盘
+- **日期**：2026-11-15｜**决策人**：本人
+- **结论**：
+  1. **Docker WSL 数据迁到 `D:\DockerData\wsl`**（26.76GB），原路径 `C:\Users\ljh\AppData\Local\Docker\wsl` 改为**目录 junction**（Docker Desktop 配置未改、无感）；迁移前停 Docker + `wsl --shutdown`，copy→rename→junction→启动→验证。
+  2. **`C:\Users\ljh\.cache\dsh-asr`（2.45GB 模型缓存）→ `D:\cache\dsh-asr` + junction**；**Maven 仓库 → `D:\cache\m2\repository`**（用户级 `~/.m2/settings.xml` 指定 `localRepository`）。
+  3. **清理**：`docker builder prune -af` 释放 8.9GB 构建缓存（可重建）；删除 C 盘陈旧 pnpm store（1.99GB，活动 store 已 `D:\.pnpm-store`）与 npm 旧 cache（33MB，活动 `E:\dsh\cache\npm`）、TEMP 旧文件。
+  4. **用户环境变量（未来）**：`TEMP/TMP=D:\cache\temp`、`PIP_CACHE_DIR=D:\cache\pip`、`HF_HOME=D:\cache\hf`、`GRADLE_USER_HOME=D:\cache\gradle`（新进程生效；npm/pnpm 已在 E:/D:）。
+  5. **结果**：C 盘可用 **9.9GB → 41.45GB（+31.5GB）**，D 盘 347GB；迁移后实证：6 容器 healthy、`task`/`task_result` 各 49 行、MinIO 导出与 T3.7 存档逐字节一致、`scripts\test.ps1` **187/187 exit 0**（依赖来自 `D:\cache\m2`）。
+  6. **纪律（长期）**：样本/日志/override/临时/构建缓存一律 D 盘（`D:\new\artifacts`、`D:\cache`、`D:\DockerData`）；不在 `C:\Users\ljh` 下新建大文件；必须用 C 盘先报。已写进 `handoff.md` §5、`交付给WorkBuddy.md` §9、代码仓 `AGENT.md` 硬约束 11。
+- **依据**：迁移前后 `Get-PSDrive C` 可用空间；`D:\DockerData\wsl` vhdx 存在；测试与 API/DB 实证；Docker 数据走 junction 后容器与卷完整。
+- **已排除项**：改 Docker Desktop 的 `DataFolder` 设置或重装（风险高、junction 已达成目的）；迁移 Docker Desktop 程序本体（3.36GB，重装风险，暂留）；删除用户 Videos/Downloads（个人数据，未动）；用临时调高配额/改 `.env` 掩盖空间问题。
+
+---
+
 ## 面试速查（由本文件派生，勿单独维护）
 
 | 面试问题 | 取哪条 |
