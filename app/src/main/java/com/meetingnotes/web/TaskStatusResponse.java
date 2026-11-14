@@ -12,7 +12,8 @@ import java.util.List;
  * transcript 恒为 null（接入方以 status 为准轮询）；{@code error_code} 仅 RETRYING/DEAD 有值
  * （稳定错误码，如 ASR_ERROR），其余为 null（D-047，只增不改）；{@code summary/keywords/ai_tier}
  * 为摘要结果（D-068）；{@code todos} 为待办数组（元素 snake_case：action/owner/deadline，
- * owner/deadline 未知为 null），AI 未启用或失败时为 null（T3.2/D-069）。
+ * T3.5 起元素**只增** `done`（勾选状态，老数据无此字段按 false 读），owner/deadline 未知为 null），
+ * AI 未启用或失败时为 null（T3.2/D-069）。
  */
 public record TaskStatusResponse(
         long taskId,
@@ -25,5 +26,5 @@ public record TaskStatusResponse(
         String summary,
         List<String> keywords,
         String aiTier,
-        List<com.meetingnotes.ai.TodoService.TodoItem> todos) {
+        List<TodoItemView> todos) {
 }

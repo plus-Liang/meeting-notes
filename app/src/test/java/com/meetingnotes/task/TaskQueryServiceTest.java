@@ -109,7 +109,9 @@ class TaskQueryServiceTest {
         com.meetingnotes.web.TaskController controller = new com.meetingnotes.web.TaskController(
                 org.mockito.Mockito.mock(com.meetingnotes.task.TaskService.class),
                 newService(),
-                jdbc);
+                org.mockito.Mockito.mock(com.meetingnotes.task.TaskMutationService.class),
+                jdbc,
+                new com.fasterxml.jackson.databind.ObjectMapper());
 
         assertEquals("INVALID_PARAM", assertThrows(ApiException.class, () -> controller.list(null, "51", null)).getCode());
         assertEquals(400, assertThrows(ApiException.class, () -> controller.list(null, "0", null)).getStatus());
@@ -121,7 +123,9 @@ class TaskQueryServiceTest {
     void controllerValidatesStatusFilterStrictly() throws Exception {
         com.meetingnotes.task.TaskService taskService = org.mockito.Mockito.mock(com.meetingnotes.task.TaskService.class);
         com.meetingnotes.web.TaskController controller = new com.meetingnotes.web.TaskController(
-                taskService, newService(), jdbc);
+                taskService, newService(),
+                org.mockito.Mockito.mock(com.meetingnotes.task.TaskMutationService.class),
+                jdbc, new com.fasterxml.jackson.databind.ObjectMapper());
 
         // 非法 status → 400 INVALID_PARAM，不再静默空列表（T2.12）
         ApiException e = assertThrows(ApiException.class, () -> controller.list("BOGUS", null, null));

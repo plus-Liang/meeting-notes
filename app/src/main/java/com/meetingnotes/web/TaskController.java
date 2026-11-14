@@ -1,14 +1,22 @@
 package com.meetingnotes.web;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.meetingnotes.task.GlossaryRepository;
+import com.meetingnotes.task.TaskMutationService;
 import com.meetingnotes.task.TaskQueryService;
 import com.meetingnotes.task.TaskService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
@@ -16,9 +24,11 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
- * 任务入口 API（T1.4 上传 / T1.5 状态查询）。
+ * 任务入口 API（T1.4 上传 / T1.5 状态查询 / T3.5 改词回流与待办勾选删除）。
  *
  * <p>认证（API_TOKEN / 401，spec US-9）在后续卡接入，先固定单用户；
  * 所有查询必须带 user_id（D-040）。
@@ -36,14 +46,21 @@ public class TaskController {
 
     private final TaskService taskService;
     private final TaskQueryService taskQueryService;
+    private final TaskMutationService taskMutationService;
     private final JdbcTemplate jdbc;
+    /** F-10：详情解析用的单例 ObjectMapper（此前每行 new，属技术债）。 */
+    private final ObjectMapper mapper;
 
     public TaskController(TaskService taskService,
                           TaskQueryService taskQueryService,
-                          JdbcTemplate jdbc) {
+                          TaskMutationService taskMutationService,
+                          JdbcTemplate jdbc,
+                          ObjectMapper mapper) {
         this.taskService = taskService;
         this.taskQueryService = taskQueryService;
+        this.taskMutationService = taskMutationService;
         this.jdbc = jdbc;
+        this.mapper = mapper;
     }
 
     @PostMapping(value = "/tasks", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -122,24 +139,26 @@ public class TaskController {
                     Long duration = rs.wasNull() ? null : durationSec;
                     long sizeBytes = rs.getLong("size_bytes");
                     Long size = rs.wasNull() ? null : sizeBytes;
-                    // keywords 列是 JSONB：取文本再解析成数组（T3.1），坏数据降级为 null 不炸接口
-                    java.util.List<String> keywords = null;
+                    // keywords 列是 JSONB：取文本再解析成数组（T3.1），坏数据降级为 null 不炸接口（F-10：单例 mapper）
+                    List<String> keywords = null;
                     String keywordsRaw = rs.getString("keywords");
                     if (keywordsRaw != null && !keywordsRaw.isBlank()) {
                         try {
-                            keywords = new com.fasterxml.jackson.databind.ObjectMapper()
-                                    .readValue(keywordsRaw, new com.fasterxml.jackson.core.type.TypeReference<java.util.List<String>>() { });
+                            keywords = mapper.readValue(keywordsRaw, new TypeReference<List<String>>() { });
                         } catch (Exception e) {
                             keywords = null;
                         }
                     }
-                    // todos 列是 JSONB（T3.2）：解析成待办数组，元素 snake_case；坏数据降级为 null 不炸接口
-                    java.util.List<com.meetingnotes.ai.TodoService.TodoItem> todos = null;
+                    // todos 列是 JSONB（T3.2/T3.5）：JsonNode → 视图（元素只增 done，老数据无 done 按 false 读）；
+                    // 坏数据降级为 null 不炸接口
+                    List<TodoItemView> todos = null;
                     String todosRaw = rs.getString("todos");
                     if (todosRaw != null && !todosRaw.isBlank()) {
                         try {
-                            todos = new com.fasterxml.jackson.databind.ObjectMapper()
-                                    .readValue(todosRaw, new com.fasterxml.jackson.core.type.TypeReference<java.util.List<com.meetingnotes.ai.TodoService.TodoItem>>() { });
+                            JsonNode array = mapper.readTree(todosRaw);
+                            if (array.isArray()) {
+                                todos = TodoItemView.listFrom(array);
+                            }
                         } catch (Exception e) {
                             todos = null;
                         }
@@ -155,5 +174,49 @@ public class TaskController {
             throw new ApiException(404, "TASK_NOT_FOUND", "任务 " + id + " 不存在");
         }
         return resp;
+    }
+
+    /**
+     * 改词回流（T3.5）：事务内替换本任务 transcript/summary/keywords/todos 里的错词，
+     * 并沉淀 glossary（hits 递增，供 T3.6 注入）。请求 Content-Type 只接受 application/json。
+     */
+    @PostMapping(value = "/tasks/{id}/corrections", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public CorrectionResponse applyCorrections(@PathVariable("id") long id,
+                                               @RequestBody CorrectionsRequest body) {
+        List<TaskMutationService.Correction> corrections =
+                body == null || body.corrections() == null ? List.of() : body.corrections();
+        TaskMutationService.CorrectionOutcome outcome =
+                taskMutationService.applyCorrections(id, DEFAULT_USER_ID, corrections);
+        List<CorrectionResponse.GlossaryEntryView> entries = new ArrayList<>();
+        for (GlossaryRepository.Entry entry : outcome.glossary()) {
+            entries.add(new CorrectionResponse.GlossaryEntryView(
+                    entry.wrongText(), entry.rightText(), entry.hits()));
+        }
+        return new CorrectionResponse(outcome.taskId(), outcome.replacedCount(), entries);
+    }
+
+    /** 待办勾选/取消（T3.5，幂等）：写库持久，重新 GET 详情可见。 */
+    @PatchMapping("/tasks/{id}/todos/{index}")
+    public TodoUpdateResponse setTodoDone(@PathVariable("id") long id,
+                                          @PathVariable("index") int index,
+                                          @RequestBody TodoPatchRequest body) {
+        if (body == null || body.done() == null) {
+            throw new ApiException(400, "INVALID_PARAM", "请求体必须包含布尔字段 done");
+        }
+        TaskMutationService.TodoUpdateResult result =
+                taskMutationService.setTodoDone(id, DEFAULT_USER_ID, index, body.done());
+        TaskMutationService.TodoData data = result.todoData();
+        return new TodoUpdateResponse(result.taskId(), result.index(),
+                new TodoItemView(data.action(), data.owner(), data.deadline(), data.done()));
+    }
+
+    /** 待办删除（T3.5，**非幂等**：删除后后续 index 移位）。 */
+    @DeleteMapping("/tasks/{id}/todos/{index}")
+    public TodoDeleteResponse deleteTodo(@PathVariable("id") long id,
+                                         @PathVariable("index") int index) {
+        TaskMutationService.TodoDeleteResult result =
+                taskMutationService.deleteTodo(id, DEFAULT_USER_ID, index);
+        return new TodoDeleteResponse(result.taskId(), result.index(),
+                result.removedCount(), result.remainingCount());
     }
 }
