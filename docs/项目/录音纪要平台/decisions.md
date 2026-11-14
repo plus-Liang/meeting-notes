@@ -614,6 +614,50 @@
 - **依据**：`plan.md` 单实例假设；T2.6 原 DoD 的两半（429 / 顺序执行）分别已被 T1.4 与单线程实现覆盖；宪法 IV（YAGNI）。
 - **已排除项**：为 ASR 引入线程池做多路转写（v1 无需求，且 60min 音频并发会打爆内存）；删掉 `app.asr.max-concurrency`（P2 加回还要迁移配置）。
 
+### D-062 结构化日志接线：EnvironmentPostProcessor 注入 Boot 内建格式（默认开，`LOG_JSON=false` 回退可读文本）
+- **日期**：2026-11-14（T2.7 验收）｜**决策人**：本人
+- **结论**：
+  1. `app.log-json` → `logging.structured.format.console=logstash`（**Spring Boot 3.5 内建**，零新依赖、不写自定义 encoder）。
+  2. 用 **EnvironmentPostProcessor** 而不是 yml：yml 表达不了"**条件缺席**"——`false` 时必须让属性**根本不存在**，
+     `logstash` 一旦出现就消不掉。默认 `true`（运维要一条命令捞全链路）。
+  3. `taskId` 走 **MDC 独立字段**（camelCase），覆盖流水线 5 个节点；处理结束 `finally MDC.remove`（线程复用不串号）；
+     **禁止**把 taskId 拼进中文 message 就算完。
+  4. 单测固定三态：缺省 / 显式 true / 显式 false。
+- **依据**：`review/2026-11-14-T2.7-T2.8验收.md` §1（10 条 taskId 行、10/10 JSON 解析、45/46 不串号、`LOG_JSON=false` 反例 0 行 JSON）；
+  spec N4（按 taskId 检索）。
+- **已排除项**：引入 `logstash-logback-encoder` 依赖；自己写 JSON encoder；默认关 JSON（用户要的是"一条命令捞链路"）；
+  在 yml 里写 `%false` 之类的占位技巧（隐蔽、难判）。
+- **已知代价**：`mvn test` 控制台也被套上 JSON（同一 JVM fork 内 `NoKeyStartupTest` 初始化日志系统），Windows GBK 控制台中文乱码 →
+  F-1，T2.9 用 `src/test/resources/application.yml` 的 `app.log-json: false` 一行修掉。
+
+### D-063 备份/恢复口径：脚本自带 manifest+校验和；**自动备份由宿主 cron 触发，不做内置调度**
+- **日期**：2026-11-14（T2.8 验收）｜**决策人**：本人
+- **结论**：
+  1. 一次备份 = `db.dump`（`pg_dump -Fc`）+ `minio-data.tar.gz`（volume 打包）+ `manifest.json`（5 表行数 / 对象数 / 大小 / sha256）；
+     `backups/` 进 `.gitignore`；`-Keep` 默认 **7**。
+  2. 恢复必须 `-Force`（无则 exit 10）；先停 app 再恢复；`pg_restore --clean --if-exists`；恢复后按 manifest 逐表核对 + health。
+  3. **自动备份 = 宿主定时任务**（Linux `cron` / Windows 任务计划）调用 `scripts/backup.ps1`，README 给一行示例；
+     **不做容器内调度器、不做 Spring `@Scheduled`**。
+  4. 备份包**不含 `.env`**（D-023）。
+- **依据**：`review/2026-11-14-T2.7-T2.8验收.md` §2（10 任务 `down -v` 后逐字一致；恢复后对象可读：重入队 → DONE）；spec US-11 AC1/AC2。
+- **已排除项**：用 `ofelia`/cron sidecar 镜像（新依赖 + 本机 Docker Hub 不通）；把备份写进 named volume（`down -v` 会把备份一起删掉，
+  等于没备份）；restore 不带闸门直接执行（一行命令删光数据）；内置调度器（自托管单机场景宿主 cron 最稳，且备份必须落宿主目录）。
+- **风险**：用户不设定时任务 → 仍只有手动备份。README「备份」一节必须给出可复制的 cron / 任务计划示例（我来写）。
+
+### D-064 恢复的运维前提与失败语义（preflight 缺失 → T2.9）
+- **日期**：2026-11-14（T2.8 验收）｜**决策人**：本人
+- **结论**：
+  1. **前提**：恢复前 `postgres`/`minio` 必须处于 running（灾难后先 `docker compose up -d` 让依赖起来，再 restore）；恢复期间 app 由脚本负责停。
+  2. **失败码约定**：无 `-Force` → **10**；备份缺失/为空 → **11**；`pg_restore` 失败 → **12**；volume 解包失败 → **13**；自检不一致 → **14**；
+     **依赖未起 → 20（待 T2.9 实现 preflight）**。
+  3. 已知偏差（F-4）：整栈停止时真实原因（postgres 容器没起）被误报成"pg_restore 失败"，且失败分支会去 `start app`（依赖全停，起了白起）；
+     **数据不会损坏**（随后 `up -d` 数据完好）。
+  4. **不清理 `.minio.sys`**（F-2，P3）：`rm -rf /data/*` 不匹配隐藏目录；实测无副作用（MinIO 健康、对象可读），严格语义是
+     `find /data -mindepth 1 -delete`，等下次动该脚本时改。孤儿对象会被**忠实搬运**（备份忠实于现状，恢复不清理孤儿）。
+- **依据**：`review/2026-11-14-T2.7-T2.8验收.md` §2/F-2/F-3/§3。
+- **已排除项**：让 `restore` 自己 `up -d`（隐式起服务会让"先恢复还是先起服务"更混乱）；`rm -rf /data` 连隐藏目录全删（要重测，
+  当前无收益）；把失败码做成单一 exit 1（运维分不清是闸门拒绝还是恢复失败）。
+
 ---
 
 ## 面试速查（由本文件派生，勿单独维护）
@@ -627,6 +671,8 @@
 | 为什么不用 Kafka/微服务？ | D-009 + D-015 |
 | 为什么不自己训练模型？ | D-005 |
 | 你怎么保证不丢任务？ | D-009 + `spec.md` N1–N3 |
+| **线上一个任务出问题，你怎么查？** | D-062（结构化 JSON 日志：`docker compose logs app \| grep <taskId>` 一把捞全链路） |
+| **数据丢了怎么办？备份能信吗？** | D-063 + D-064（`down -v` 删光后用备份逐字恢复，恢复脚本 `-Force` 闸门/exit 码/失败语义可判定；自动备份交宿主 cron） |
 | 你的项目凭什么有人用？ | D-003 + D-018 |
 | 换模型方便吗？ | D-006 + D-007 |
 | 为什么媒体处理在容器里？ | D-010（真实踩坑） |

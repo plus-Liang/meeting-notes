@@ -676,7 +676,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\check-maintainability.
 
 ---
 
-## T2.7 结构化 JSON 日志 + taskId 贯穿（约 1h，消费 `app.log-json`，D-054）
+## T2.7 结构化 JSON 日志 + taskId 贯穿（约 1h，消费 `app.log-json`，D-054）✅ **已完成（`ae982d8`；我复跑 50/50、task 45/46 各 5 条共 10 行 JSON 全解析、`LOG_JSON=false` 反例 0 行 JSON；D-062）**
 
 > 现状：日志是普通文本，`taskId` 混在中文句子里（`任务 33 开始转写…`）；`app.log-json`（`LOG_JSON`）是**没有消费方的死配置**（D-054 登记）。
 > 目标：给 self-hosted 用户一条命令就能捞出"一个任务的全链路"：`docker compose logs app | grep <taskId>` → ≥5 条**结构化**行。
@@ -715,7 +715,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\check-maintainability.
 
 ---
 
-## T2.8 备份与恢复（US-11，约 2h，**数据安全是 P1 用户 B 的买点**）
+## T2.8 备份与恢复（US-11，约 2h，**数据安全是 P1 用户 B 的买点**）✅ **已完成（`6ebcdef`；我复跑 10 任务备份→`down -v`→恢复逐字一致、恢复后对象可读、无 `-Force` exit 10、`-Keep 2` 生效；D-063/D-064）**
 
 > 现状：一个 `docker compose down -v` 就把用户所有任务和结果删光（**没有备份=不是"能给别人的自托管产品"**）。
 > 目标：`scripts\backup.ps1` 一条命令产出可核对的备份；`scripts\restore.ps1 -Force` 能从备份恢复到"数据一致"。
@@ -761,6 +761,55 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\check-maintainability.
 【可维护性】脚本参数集中、错误信息可操作；不硬编码绝对路径（用 `$PSScriptRoot`）；中文 `.ps1` 存 UTF-8 **带 BOM**。
 
 【回报·测试三问】检查了哪些场景 ｜ 实际命令 + 前后数据对比 + exit code ｜ 还有哪些没验证（**不许留空**）。
+
+---
+
+## T2.9 本周单测/验收 + 三处收口（约 1.5h；**不加新功能**）
+
+> 现状：本周功能卡（T2.1–T2.5、T2.10–T2.12、T2.2/T2.3/T2.4、T2.7/T2.8）全部已完成，`scripts\test.ps1` 一直是绿的（**50/50**）。
+> 所以 T2.9 不是"补测试"，而是**把三件悬而未决的事收掉 + 出一份整周回归证据**：
+> ① 配额 429 + `Retry-After` 只在单测里验过，**没走过真 HTTP**（D-061 明确并入本卡）；
+> ② 我的验收发现 F-1（测试控制台被 JSON 日志搞乱，一行可修）；③ F-4（restore 缺"依赖未启动"preflight，退出码误导）。
+
+【规划四问】
+- **改哪里**：
+  ① **429 真HTTP 复验（不改代码）**：临时把 `.env` 的 `QUOTA_TASKS_PER_DAY` 调成 2 → `docker compose up -d app` 重启（**不要改 compose 文件**）→
+     连续上传到第 3 次，期望 **HTTP 429 + `Retry-After` 响应头 + 业务码 `QUOTA_EXCEEDED`** → 验完**恢复 `.env` 原值并重启**，贴 quota 表现状；
+  ② **F-1 一行修**：`app/src/test/resources/application.yml` 加 `app.log-json: false`（测试里日志保持可读文本；产品默认仍是 JSON，D-062 不变）；
+  ③ **F-4 restore preflight**：`scripts\restore.ps1` 开头检查 `postgres`/`minio` 容器是否 **running**，否则打印可操作提示并 **exit 20**
+     （不要让它掉进 `pg_restore` 分支误报 exit 12；也别自动 `up -d`，D-064）。
+- **复用什么**：`ApiExceptionHandler` 的 `QUOTA_EXCEEDED`（T1.4 已实现）；`scripts/restore.ps1` 现有退出码约定（10/11/12/13/14）。
+- **影响哪些功能**：只动**测试配置 + 恢复脚本**；API/业务/健康检查/表结构/compose 一律不动。
+- **怎么验证**：见下方【验收】，每条都要 exit code 或 HTTP 状态码。
+
+【范围声明】
+- 做：① ② ③ + 整周回归证据。
+- 不动：业务代码、`/api/v1`、错误码、健康检查、compose、Flyway、`docs/`（README 备份/日志用法我写）。
+- 禁：为凑测试数写无断言测试；把 429 的特例逻辑塞进业务层（配额判定已经在 `QuotaService`，只验不改）；restore 里自动起依赖。
+
+【验收】（反例必须进）
+```powershell
+# ① 429 真 HTTP（临时改 .env 后重启 app，验完必须改回来再重启！）
+#    $env 里改 QUOTA_TASKS_PER_DAY=2 → docker compose up -d app
+curl.exe -s -o NUL -w "HTTP=%{http_code}\n" --noproxy "*" -X POST -F "file=@D:\datasets\meeting-notes-samples\fake_evidence.mp3" http://localhost:8080/api/v1/tasks
+#    期望：第 3 次 HTTP=429；再用 -i 看响应头 Retry-After 与 body 里的 error_code
+curl.exe -s -i --noproxy "*" -X POST -F "file=@..." http://localhost:8080/api/v1/tasks | Select-String "HTTP/|Retry-After|QUOTA"
+#    ⚠️ 验完：.env 恢复原值 → docker compose up -d app → 再传 1 个应恢复 201
+# ② F-1：改完 test yml 后跑测试，控制台不应再出现 {"@timestamp" 行
+cd app; powershell -NoProfile -ExecutionPolicy Bypass -File ..\scripts\test.ps1
+# ③ F-4 反例：整栈停掉 → restore 必须 exit 20 且提示"先 up -d postgres minio"
+docker compose stop
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\restore.ps1 -BackupDir backups\<最新> -Force; echo "EXPECTED_EXIT=20"
+# ③ 正例：docker compose up -d（等 healthy）→ 同一命令恢复成功（或至少 preflight 过、进入恢复流程）
+# ④ 整周回归：健康 UP、上传→DONE、列表/详情、错误语义四连（/api/v1/nope=404、DELETE=405、JSON POST=415、/tasks/abc=400）
+#    单测 ≥50 exit 0；check-maintainability exit 0；备份仍可用（backup.ps1 一次，校验 manifest）
+# ⑤ 证据：本周每个卡一行"证据在哪"总表（贴到回报里，我核）
+```
+**通过标准**：429 + `Retry-After` 真 HTTP 命中且 `.env` 已复原；测试控制台无 JSON 行；`restore` 停机时 exit 20、恢复后成功；整周回归全绿；**不许靠改断言凑绿**。
+
+【可维护性】restore preflight 用与现有脚本一致的风格（`Write-Host` 提示 + exit 码表更新到文件头注释）；`backup.ps1`/`restore.ps1` 仍 ≤300 行。
+
+【回报·测试三问】检查了哪些场景 ｜ 实际命令 + HTTP 码/退出码/日志（脱敏）｜ 还有哪些没验证（**不许留空**）。
 
 ---
 
