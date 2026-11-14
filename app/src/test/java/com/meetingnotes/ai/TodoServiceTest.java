@@ -1,141 +1,90 @@
 package com.meetingnotes.ai;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.ai.chat.model.ChatModel;
-import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.jdbc.core.JdbcTemplate;
+
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.contains;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.lenient;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
 /**
- * T3.2：待办抽取——提示词约束（严格 JSON + 严禁猜 owner/deadline）、合法解析落库、
- * 缺字段容错（只给 action 也行，owner/deadline 归一化为 null）、宁缺毋滥（空 action 丢弃）、
- * 解析失败/调用失败降级不抛不重试、无 ChatModel 跳过。
+ * T3.3 / F-5：待办解析口径——提示词"最多 20 条"（模型不遵守，实测 21 条）、
+ * 代码层截断 20 条、空 action 丢弃、owner/deadline 缺失归一化为 null、缺 todos 数组按解析失败处理。
+ *
+ * <p>T3.3 起 {@link TodoService} 不再自己发起 LLM 调用（摘要+关键词+待办已合并成一次调用，F-7），
+ * 只负责"解析一次 JSON 里的 todos"；"不重试/只调用一次"的可证伪断言在
+ * {@link StructuringServiceTest}（{@code verify(model, times(1)).call(...)}）。
  */
-@ExtendWith(MockitoExtension.class)
 class TodoServiceTest {
 
-    @Mock
-    private ChatModel chatModel;
-    @Mock
-    private ObjectProvider<ChatModel> chatModelProvider;
-    @Mock
-    private JdbcTemplate jdbc;
+    private final TodoService service = new TodoService();
+    private final ObjectMapper mapper = new ObjectMapper();
 
-    private TodoService newService() {
-        when(chatModelProvider.getIfAvailable()).thenReturn(chatModel);
-        return new TodoService(chatModelProvider, jdbc);
+    private List<TodoService.TodoItem> parse(String json) throws Exception {
+        return service.parse(mapper.readTree(json));
     }
 
     @Test
-    void promptContainsStrictJsonAndNoGuessConstraints() {
-        String prompt = TodoService.buildPrompt("转写全文示例");
+    void promptSectionRequiresStrictJsonNoGuessAndAtMost20() {
+        String prompt = TodoService.promptSection();
 
-        assertTrue(prompt.contains("JSON"), "必须要求模型只输出 JSON（可判）");
         assertTrue(prompt.contains("todos"), "输出形状必须是 todos 数组");
+        assertTrue(prompt.contains("最多 20 条"), "F-5：口径必须是 20 条（旧文案'最多 5 条'与实现不符）");
         assertTrue(prompt.contains("严禁猜测"), "owner/deadline 未知必须为 null，不许猜");
         assertTrue(prompt.contains("不得编造或引申"), "action 必须有 transcript 依据");
-        assertTrue(prompt.contains("转写全文示例"), "必须把 transcript 交给模型");
+        assertTrue(prompt.contains("不要换算成具体日期"), "D-076：相对时间词保留原词");
     }
 
     @Test
-    void validTodosJsonPersistsAllFields() {
-        when(chatModel.call(anyString()))
-                .thenReturn("{\"todos\":[{\"action\":\"整理会议纪要\",\"owner\":\"张三\",\"deadline\":\"周五\"}]}");
+    void validTodosJsonParsesAllFields() throws Exception {
+        List<TodoService.TodoItem> todos = parse(
+                "{\"todos\":[{\"action\":\"整理会议纪要\",\"owner\":\"张三\",\"deadline\":\"周五\"}]}");
 
-        boolean ok = newService().extract(7L, "转写全文示例");
-
-        assertTrue(ok);
-        verify(jdbc).update(contains("todos = ?::jsonb"),
-                eq("[{\"action\":\"整理会议纪要\",\"owner\":\"张三\",\"deadline\":\"周五\"}]"), eq(7L));
+        assertEquals(1, todos.size());
+        assertEquals(new TodoService.TodoItem("整理会议纪要", "张三", "周五"), todos.get(0));
     }
 
     @Test
-    void missingOwnerDeadlineToleratedAsNull() {
-        // 只给 action 也行：owner/deadline 缺失归一化为 null（不许补猜）
-        when(chatModel.call(anyString())).thenReturn("{\"todos\":[{\"action\":\"发周报\"}]}");
+    void missingOwnerDeadlineToleratedAsNull() throws Exception {
+        List<TodoService.TodoItem> todos = parse("{\"todos\":[{\"action\":\"发周报\"}]}");
 
-        boolean ok = newService().extract(8L, "转写全文示例");
-
-        assertTrue(ok);
-        verify(jdbc).update(contains("todos = ?::jsonb"),
-                eq("[{\"action\":\"发周报\",\"owner\":null,\"deadline\":null}]"), eq(8L));
+        assertEquals(new TodoService.TodoItem("发周报", null, null), todos.get(0));
     }
 
     @Test
-    void blankActionEntriesDroppedRatherThanGuessed() {
-        // 宁缺毋滥：action 为空的条目直接丢弃，剩下的正常保留
-        when(chatModel.call(anyString()))
-                .thenReturn("{\"todos\":[{\"action\":\"\",\"owner\":\"张三\"},{\"action\":\"发周报\"}]}");
+    void blankActionEntriesDroppedRatherThanGuessed() throws Exception {
+        List<TodoService.TodoItem> todos = parse(
+                "{\"todos\":[{\"action\":\"\",\"owner\":\"张三\"},{\"action\":\"发周报\"}]}");
 
-        boolean ok = newService().extract(9L, "转写全文示例");
-
-        assertTrue(ok);
-        verify(jdbc).update(contains("todos = ?::jsonb"),
-                eq("[{\"action\":\"发周报\",\"owner\":null,\"deadline\":null}]"), eq(9L));
+        assertEquals(1, todos.size(), "空 action 的条目丢弃");
+        assertEquals("发周报", todos.get(0).action());
     }
 
     @Test
-    void emptyTodosArrayPersistsAsEmptyArrayNotFailure() {
-        when(chatModel.call(anyString())).thenReturn("{\"todos\":[]}");
-
-        boolean ok = newService().extract(10L, "转写全文示例");
-
-        assertTrue(ok, "合法的空 todos 是正常业务结果，落 [] 而不是保持 null");
-        verify(jdbc).update(contains("todos = ?::jsonb"), eq("[]"), eq(10L));
+    void emptyTodosArrayIsValidBusinessResult() throws Exception {
+        assertTrue(parse("{\"todos\":[]}").isEmpty(), "合法的空 todos 是正常结果（[] 而不是解析失败）");
     }
 
     @Test
-    void malformedJsonWarnsLeavesTodosNullAndDoesNotRetry() {
-        String longGarbage = "x".repeat(500);
-        lenient().when(chatModel.call(anyString())).thenReturn(longGarbage);
+    void todosTruncatedTo20InCode() throws Exception {
+        StringBuilder json = new StringBuilder("{\"todos\":[");
+        for (int i = 1; i <= 25; i++) {
+            json.append(i == 1 ? "" : ",").append("{\"action\":\"事项").append(i).append("\"}");
+        }
+        json.append("]}");
 
-        boolean ok = newService().extract(11L, "转写全文示例");
+        List<TodoService.TodoItem> todos = parse(json.toString());
 
-        assertFalse(ok, "解析失败不得抛出、不得写库");
-        verify(jdbc, never()).update(contains("task_result"), any(), anyLong());
-        verify(chatModel, never()).call(contains("重试"));
+        assertEquals(TodoService.MAX_TODOS, todos.size(), "F-5：代码层必须截断到 20 条（模型会输出 21+ 条）");
+        assertEquals("事项1", todos.get(0).action());
+        assertEquals("事项20", todos.get(19).action());
     }
 
     @Test
-    void todosMissingArrayTreatedAsParseFailure() {
-        // 模型输出形状漂移（没有 todos 数组）→ 与解析失败同路：WARN + 留空，不写库
-        lenient().when(chatModel.call(anyString())).thenReturn("{\"summary\":\"形状不对\"}");
-
-        assertFalse(newService().extract(12L, "转写全文示例"));
-        verify(jdbc, never()).update(anyString(), any(), anyLong());
-    }
-
-    @Test
-    void chatModelFailureIsSwallowedAndTaskOutcomeUnaffected() {
-        when(chatModel.call(anyString())).thenThrow(new RuntimeException("LLM 超时"));
-
-        boolean ok = newService().extract(13L, "转写全文示例");
-
-        assertFalse(ok, "LLM 失败只 WARN，任务仍 DONE");
-        verify(jdbc, never()).update(anyString(), any(), anyLong());
-    }
-
-    @Test
-    void missingChatModelSkipsSilently() {
-        when(chatModelProvider.getIfAvailable()).thenReturn(null);
-        TodoService svc = new TodoService(chatModelProvider, jdbc);
-
-        assertFalse(svc.extract(14L, "转写全文示例"), "无 ChatModel（未配 key）必须优雅跳过");
-        verify(jdbc, never()).update(anyString(), any(Object[].class));
+    void missingTodosArrayTreatedAsParseFailure() {
+        assertThrows(IllegalArgumentException.class, () -> service.parse(mapper.readTree("{\"summary\":\"形状不对\"}")),
+                "缺 todos 数组 = 解析失败（上层三字段一起留空并降级）");
     }
 }

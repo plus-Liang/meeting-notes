@@ -25,7 +25,8 @@ import java.util.concurrent.TimeUnit;
  * 状态机：PENDING/RETRYING → RUNNING → DONE；失败：重试未耗尽 → RETRYING 重新入队（队尾，FIFO 不插队），
  * 耗尽 → DEAD + dead_letter；兜底 catch 保证任务不永久卡 RUNNING（崩溃恢复属 T2.3）。
  * <p>管线：MinIO 拉文件 → ffmpeg 抽 16k 单声道 wav（D-010）→ {@link TranscriptionModel} 转写
- * （容器内 http://asr:8000，D-034）→ 写 transcript → 摘要/待办 → 最后置 DONE（D-069：DONE 时结果必已落库）。
+ * （容器内 http://asr:8000，D-034）→ 写 transcript → 结构化（T3.3：摘要+关键词+待办一次调用、三档级联降级）
+ * → 最后置 DONE（D-069：DONE 时结果必已落库）。
  */
 @Component
 public class TranscriptionWorker implements SmartLifecycle {
@@ -36,8 +37,7 @@ public class TranscriptionWorker implements SmartLifecycle {
     private final JdbcTemplate jdbc;
     private final S3Client s3;
     private final TranscriptionModel transcriptionModel;
-    private final com.meetingnotes.ai.SummaryService summaryService;
-    private final com.meetingnotes.ai.TodoService todoService;
+    private final com.meetingnotes.ai.StructuringService structuringService;
     private final String queueKey;
     private final Duration pollTimeout;
     private final String ffmpegBin;
@@ -51,8 +51,7 @@ public class TranscriptionWorker implements SmartLifecycle {
                                JdbcTemplate jdbc,
                                S3Client s3,
                                TranscriptionModel transcriptionModel,
-                               com.meetingnotes.ai.SummaryService summaryService,
-                               com.meetingnotes.ai.TodoService todoService,
+                               com.meetingnotes.ai.StructuringService structuringService,
                                @Value("${app.worker.queue-key}") String queueKey,
                                @Value("${app.worker.poll-timeout-sec}") long pollTimeoutSec,
                                @Value("${app.media.ffmpeg-bin:ffmpeg}") String ffmpegBin,
@@ -62,8 +61,7 @@ public class TranscriptionWorker implements SmartLifecycle {
         this.jdbc = jdbc;
         this.s3 = s3;
         this.transcriptionModel = transcriptionModel;
-        this.summaryService = summaryService;
-        this.todoService = todoService;
+        this.structuringService = structuringService;
         this.queueKey = queueKey;
         this.pollTimeout = Duration.ofSeconds(pollTimeoutSec);
         this.ffmpegBin = ffmpegBin;
@@ -182,12 +180,11 @@ public class TranscriptionWorker implements SmartLifecycle {
         }
     }
 
-    /** 结果收口（F-1/T3.2，D-069）：先写 transcript → 摘要 → 待办 → **最后**置 DONE（AI 失败也 DONE）；
-     * 外部读到 DONE 时 summary/todos 必已落库，不存在 DONE+null 窗口。 */
+    /** 结果收口（F-1/T3.2，D-069）：先写 transcript → 结构化（T3.3 F-7：摘要+关键词+待办**一次**调用）→
+     * **最后**置 DONE（AI 失败也 DONE）；外部读到 DONE 时 summary/todos 必已落库，不存在 DONE+null 窗口。 */
     void finalizeResult(long taskId, String text) {
         saveTranscript(taskId, text);
-        runAiStep("摘要", () -> summaryService.summarize(taskId, text));
-        runAiStep("待办", () -> todoService.extract(taskId, text));
+        runAiStep("结构化", () -> structuringService.structure(taskId, text));
         jdbc.update("UPDATE task SET status = 'DONE', updated_at = now() WHERE id = ?", taskId);
         log.info("任务已置 DONE（transcript/摘要/待办均已收口）");
     }

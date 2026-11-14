@@ -24,13 +24,15 @@ import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
  * D-048：ASR 返回空文本（纯音乐/静音/无人声）是业务结果，不是故障，必须正常落 task_result。
- * F-1/T3.2（D-069）：DONE 必须最后置 —— transcript 落库 → 摘要 → 待办 → DONE，
+ * F-1/T3.2（D-069）：DONE 必须最后置 —— transcript 落库 → 结构化 → DONE，
  * 外部读到 DONE 时 summary/todos 必已落库；AI 失败不阻塞 DONE。
+ * T3.3（F-7）：结构化是**一次**调用（摘要+关键词+待办合并），worker 只调一次、只调一个服务。
  */
 @ExtendWith(MockitoExtension.class)
 class TranscriptionWorkerTest {
@@ -44,15 +46,13 @@ class TranscriptionWorkerTest {
     @Mock
     private TranscriptionModel transcriptionModel;
     @Mock
-    private com.meetingnotes.ai.SummaryService summaryService;
-    @Mock
-    private com.meetingnotes.ai.TodoService todoService;
+    private com.meetingnotes.ai.StructuringService structuringService;
     @Mock
     private ListOperations<String, String> listOps;
 
     private TranscriptionWorker newWorker() {
         return new TranscriptionWorker(redis, jdbc, s3, transcriptionModel,
-                summaryService, todoService,
+                structuringService,
                 "meetingnotes:task-queue", 10, "ffmpeg", "meetingnotes", 3);
     }
 
@@ -85,25 +85,24 @@ class TranscriptionWorkerTest {
         verify(jdbc).update(contains("'DONE'"), eq(7L));
     }
 
-    /* ---- F-1/T3.2（D-069）：DONE 顺序 —— transcript → 摘要 → 待办 → 最后 DONE ---- */
+    /* ---- F-1/T3.2（D-069）+ T3.3 F-7：DONE 顺序 —— transcript → 结构化（一次调用）→ 最后 DONE ---- */
 
     @Test
-    void doneIsSetOnlyAfterTranscriptSummaryAndTodos() {
+    void doneIsSetOnlyAfterTranscriptAndStructuring() {
         TranscriptionWorker worker = newWorker();
         worker.finalizeResult(11L, "会议明确了下一步安排");
 
-        InOrder order = inOrder(jdbc, summaryService, todoService);
+        InOrder order = inOrder(jdbc, structuringService);
         order.verify(jdbc).update(contains("task_result"), eq(11L), eq("会议明确了下一步安排"));
-        order.verify(summaryService).summarize(11L, "会议明确了下一步安排");
-        order.verify(todoService).extract(11L, "会议明确了下一步安排");
+        order.verify(structuringService).structure(11L, "会议明确了下一步安排");
         order.verify(jdbc).update(contains("'DONE'"), eq(11L));
+        verify(structuringService, times(1)).structure(11L, "会议明确了下一步安排");
     }
 
     @Test
     void aiFailureDoesNotBlockDone() {
         TranscriptionWorker worker = newWorker();
-        when(summaryService.summarize(anyLong(), anyString())).thenThrow(new RuntimeException("LLM 超时"));
-        when(todoService.extract(anyLong(), anyString())).thenThrow(new RuntimeException("LLM 不可用"));
+        when(structuringService.structure(anyLong(), anyString())).thenThrow(new RuntimeException("LLM 超时"));
 
         worker.finalizeResult(12L, "会议内容");
 
@@ -170,6 +169,6 @@ class TranscriptionWorkerTest {
 
         recovery.run(null);
 
-        verify(listOps, org.mockito.Mockito.never()).leftPush(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString());
+        verify(listOps, org.mockito.Mockito.never()).leftPush(org.mockito.Mockito.anyString(), org.mockito.Mockito.anyString());
     }
 }

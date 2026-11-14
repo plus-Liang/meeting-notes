@@ -59,7 +59,8 @@ spring:
         options:
           model: ${LLM_MODEL:}
           # deepseek-flash 默认开启 thinking，max-tokens 过小会让 content 为空
-          max-tokens: ${LLM_MAX_TOKENS:1024}
+          # F-8（D-071）：默认 8192——推理模型的思考链吃 token，1024 必空、4096 不稳
+          max-tokens: ${LLM_MAX_TOKENS:8192}
       audio:
         transcription:
           # 契约端点：http://asr:8000/v1/audio/transcriptions
