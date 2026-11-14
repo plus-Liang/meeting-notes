@@ -134,7 +134,13 @@ public class TaskService {
                 quotaService.consume(DEFAULT_USER_ID, minutes);
                 // 6) MinIO（tasks/{taskId}/）→ 回填 source_uri；失败 → 事务回滚，不留无对象的任务
                 String key = "tasks/" + newId + "/" + sanitizeFilename(file.getOriginalFilename(), format);
-                putObjectEnsuringBucket(key, tmp);
+                try {
+                    putObjectEnsuringBucket(key, tmp);
+                } catch (software.amazon.awssdk.core.exception.SdkException e) {
+                    // T2.11 F-2：存储故障映射为稳定错误码，接入方才能按码分支（不外泄内部细节）
+                    log.error("任务 {} 写入对象存储失败", newId, e);
+                    throw new ApiException(500, "STORAGE_ERROR", "对象存储写入失败，请检查 MinIO 服务是否可用");
+                }
                 jdbc.update("UPDATE task SET source_uri = ?, updated_at = now() WHERE id = ?",
                         "s3://" + bucket + "/" + key, newId);
                 return newId;
@@ -152,6 +158,8 @@ public class TaskService {
                             UPDATE task SET attempts = 0, status = 'PENDING', error_code = NULL, updated_at = now()
                             WHERE id = ?
                             """, existing.id());
+                    // T2.11 F-1：复活即清死信，否则死信列表出现"已 DONE 的任务"，再失败还会写第二条
+                    jdbc.update("DELETE FROM dead_letter WHERE task_id = ?", existing.id());
                     enqueue(existing.id());
                     log.info("任务 {} 已 DEAD，重传触发复活重投（D-049）", existing.id());
                     return new TaskCreatedResponse(existing.id(), "PENDING", sha256, durationSec, size, true);

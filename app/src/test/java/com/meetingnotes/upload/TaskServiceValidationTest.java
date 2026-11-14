@@ -183,6 +183,26 @@ class TaskServiceValidationTest {
     }
 
     @Test
+    void storageFailureYields500StorageError() throws IOException {
+        // T2.11 F-2：MinIO 故障 → 500 STORAGE_ERROR（稳定错误码），而不是裸 SdkException
+        when(probe.durationSeconds(any())).thenReturn(90.0);
+        runCallbackForReal();
+        doReturn(11L).when(jdbc).query(contains("ON CONFLICT (user_id, content_hash)"),
+                ArgumentMatchers.<ResultSetExtractor<Long>>any(), eq(1L), any(), any(), any());
+        when(s3.putObject(ArgumentMatchers.<software.amazon.awssdk.services.s3.model.PutObjectRequest>any(),
+                ArgumentMatchers.<software.amazon.awssdk.core.sync.RequestBody>any()))
+                .thenThrow(software.amazon.awssdk.core.exception.SdkClientException.builder()
+                        .message("connection refused").build());
+
+        ApiException e = assertThrows(ApiException.class,
+                () -> newService(209715200L, 3600L).createUpload(wav(64)));
+
+        assertEquals(500, e.getStatus());
+        assertEquals("STORAGE_ERROR", e.getCode());
+        assertFalse(e.getMessage().contains("connection refused"), "错误消息不得外泄底层异常细节");
+    }
+
+    @Test
     void duplicateRetryingTaskReturnsRealStatusWithoutRevival() throws IOException {
         // RETRYING：markFailure 已重新入队过，命中时只返回真实状态，不重复入队/不复活
         when(probe.durationSeconds(any())).thenReturn(90.0);

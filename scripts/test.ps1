@@ -47,7 +47,12 @@ if (-not $UnitOnly) {
     } else {
         Write-Host "[test.ps1] ASR_BASE_URL 保持外部值：$env:ASR_BASE_URL"
     }
-    if (-not $env:ASR_SMOKE_AUDIO) { $env:ASR_SMOKE_AUDIO = 'D:\datasets\meeting-notes-samples\probe.wav' }
+    if (-not $env:ASR_SMOKE_AUDIO) {
+        Write-Host '[test.ps1] 未设置 ASR_SMOKE_AUDIO：冒烟用例需要一个本地真实音频（绝对路径）'
+        Write-Host '[test.ps1] 用法示例：  $env:ASR_SMOKE_AUDIO = "D:\datasets\meeting-notes-samples\probe.wav"; scripts\test.ps1'
+        Write-Host '[test.ps1] 或跳过冒烟：  scripts\test.ps1 -UnitOnly'
+        exit 3
+    }
     if (-not (Test-Path $env:ASR_SMOKE_AUDIO)) {
         Write-Host "[test.ps1] 冒烟音频不存在：$env:ASR_SMOKE_AUDIO（设 ASR_SMOKE_AUDIO 指向本地真实音频）"
         exit 3
