@@ -38,7 +38,7 @@
 | **T0.4** | Spring AI 最小转写跑通 | 独立复跑 exit 0 | ✅ `25528b9` + `review/2026-11-13-T0.4验收.md` |
 | **T0.5** | 云 LLM 通道 + **无 key 可启动** | 真实摘要 + 清空 key 仍能启动 | ✅ `483d6f2` + `review/2026-11-13-T0.5验收.md`（DeepSeek 实测 3 条摘要；无 key 时 ChatModel=0、health UP） |
 
-**下一步**：第 3 周 **T3.7 导出 Markdown + PASTE 入口（含 srt/ass 跳过转写）**（T3.6 US-3 闭环已验收；配额只剩 **1 个任务额度 49/50**，实机只许 1 条 PASTE 任务，导出/字幕解析用已有任务 + 单测）→ T3.9/T3.10 → T3.8 周验收。**阶段 1 全 ✅；W2 全 ✅；W3 T3.0~T3.6 + T3.11 ✅**。
+**下一步**：第 3 周 **T3.9 摘要模板机制（5 模板：meeting/course/interview/podcast/shortvideo，US-12）**——契约已在 D-085 预批准，按卡写码；配额今日 50/50 已满，实机等次日重置（2 条任务：同语音 hash 变体 meeting/course，另 1 条文件名自动推荐）。→ T3.10 格式扩展 → T3.8 周验收（含 F-14/F-15/F-16/F-17 评估）。**阶段 1 全 ✅；W2 全 ✅；W3 T3.0~T3.7 + T3.11 ✅**。
 **T1.5 开工前**（已完成）：先修 T1.4 审查的 P1/P2（snake_case 契约 + 幂等真实状态 + `user_id` 过滤，D-040/D-041），一个 commit（`7c90e9a`）。
 **已处理**：`glossary."right"` 改名 `right_text`（D-037，用户拍板）；列名已在真实 PG16 空卷验证。
 
@@ -96,7 +96,7 @@
 | **T3.4** | **抽取式提质 + 结构化输出容错** | EXTRACTIVE 摘要非"前 N 字截断"、kw ≥5、todos ≥1；模型输出带散文/围栏也能解析 | ✅ `27d7ed8` + `review/2026-11-14-T3.4验收.md`（D-080）。四级分句 fallback（`ai/ExtractiveSegmenter`：句末标点→逗号/空格→连接词边界→50 字窗口）、打分加**结尾加分**、拼接**丢句不截句**、keywords 阈值 3→2 + 口头禅表 + 数字过滤、todos 触发词扩充 + 口头前缀剥离、`ai/JsonExtractor`（```json 围栏 + 括号配对 + 转义处理）接入 `parse`。**同时抓出并修复 T3.3 遗留 bug**（`summaryOf` 循环上界用 `indexes.size()` 被 remove 缩小 → 少选一半句子，实机 104 暴露）。我复跑：120/120 exit 0、维护性 exit 0、双变异各造一次红（17/3F、28/8F）、**我独立实机 108/109 EXTRACTIVE（181/156 字、kw 10、todos 4/3、非前缀）**、110 CLOUD 141 字、112 空音频四字段 null、错误四连与详情 11 键不变 |
 | **T3.5** | 改词 → 写 `glossary`；待办可勾选/删除 | 改一次即入库；勾选持久 | ✅ `9a34fcf` + 复核 `9f05c69` + `review/2026-11-14-T3.5-T3.11验收.md`。三个写端点（corrections / PATCH todos / DELETE todos）+ `glossary` upsert（hits 递增、priority 保原值）+ `done` 放 jsonb（视图 record，`TodoItem` 不动）；**M5/M9 按纪律清账**：`ApiException`/`TaskCreatedResponse` 迁 `com.meetingnotes.common`，M5 零容忍、M9 只扫注释，allowlist **技术债清零（净减 5 行）**。我独立实测（task 119）：改词 `replaced_count=1`、重复改 0 且 hits 1→2、勾选/删除刷新后持久、反例 400/404/415 全对、详情 11 键不变；133/133 exit 0；M9 闸门我独立造红（真 TODO 被抓）+ 还原绿 |
 | **T3.6** | 术语注入下次转写（US-3 闭环） | 第二次输出正确 | ✅ `a8845b4` + `review/2026-11-14-T3.6验收.md`（D-083）。`GlossaryTermSource`（hits desc/priority desc 取 ≤20 条、总长 ≤400 字、空表返回空串 → prompt 逐字节不变）→ `StructuringPrompt` 注入段 → 日志 `术语注入：N 条/长度 M 字`（不泄露词条）；CLOUD/LOCAL 生效、EXTRACTIVE 不调 LLM（F-15）。我独立复跑：139/139 exit 0、变异造红后绿；**独立实机 task 123**（同段语音去 3 采样点 → 新 hash）：transcript 仍含 ASR 错词"工作副盘"，summary/keywords 全部输出"工作复盘/AI Coding"；写码方 task 122 结论一致 |
-| **T3.7** | 导出 Markdown + `PASTE` 入口（含 ass） | 文件含三节；srt 秒出纪要 | 下载确认；传 srt 跳过转写 |
+| **T3.7** | 导出 Markdown + `PASTE` 入口（含 ass） | 文件含三节；srt 秒出纪要 | ✅ `2027406` + `review/2026-11-14-T3.7验收.md`（D-084/D-085）。`web/TaskMarkdownExporter`（三节/done/（无））+ 导出端点；`task/TextTaskService`（PASTE/字幕共用：解析后文本 hash、`source_type=PASTE`、`duration_sec=null`、幂等同序 + DEAD 复活）+ `upload/SubtitleParser`（srt/ass、UTF-8→GBK→400、5MB→413、>10 万字符→400）+ worker PASTE 无音频分支（抽 `PasteTextReader`/`MonoWavExtractor` 保行数闸 286）；`durationSec`→`Long`。我独立复跑：160/160 exit 0、可维护性 exit 0、**我另做变异红（4 run/3 failures）→还原绿**；实机 task 124（PASTE，2.57s DONE、跳过 ASR、不变量 hash==sha256(对象字节) 成立、复用不扣配额）、导出 123/124 三节、负例 404/400/413/415/429 全对；配额 50/50、102/120（回报 103 已更正）。**F-16** 字幕编码边界、**F-17** 幂等不含 template → T3.9/T3.8 |
 | **T3.8** | 本周单测（Schema 畸形、三档选择、模板选择） | `mvn test` 全绿 | BUILD SUCCESS + 用例数 |
 | **T3.9** | **摘要模板机制**（US-12）：会议/课程/访谈/播客 4 模板 + 提交时可选 + 按文件名自动推荐 + 落库 | 同音频换模板 → 结构不同且都可用 | 用"腾讯会议"命名的文件 → 自动选会议模板；手工选课程 → 输出含知识点/考点 |
 | **T3.10** | **格式扩展校验**：amr / opus / ass 可解可转 | 三种格式各传一个真实样本 → DONE | 各格式转写成功，失败时给出"请转 mp3"提示 |

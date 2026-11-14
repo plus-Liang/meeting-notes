@@ -1278,7 +1278,7 @@ docker compose exec -T postgres psql -U mn -d meetingnotes -c "delete from gloss
 
 **【回报·测试三问】** 检查了哪些场景（排序/上限/空表/注入生效/实机闭环）｜ 实际命令 + 输出（taskId + 日志"术语注入"行 + 前后 summary 对比 + 单测红/绿；exit code）｜ 还有哪些没验证（**不许留空**；EXTRACTIVE 的确定性替换、跨任务词表增长可写"留 T3.8/T4.x"）。
 
-## T3.7 导出 Markdown + PASTE 入口（JSON 文本 / srt / ass，跳过转写）（约 2.5h）
+## T3.7 导出 Markdown + PASTE 入口（JSON 文本 / srt / ass，跳过转写）（约 2.5h）✅ **已完成（`2027406`；我独立复跑 160/160、可维护性 exit 0、**我另做变异红→绿**；实机 task 124 PASTE 2.57s DONE/跳过 ASR/复用不扣配额、不变量 hash==sha256(对象字节) 成立、导出 123/124 三节、负例 404/400/413/415/429；回报配额 103→我复算 102；F-16/F-17 见 D-085）**
 
 > **现状**：只能 `multipart` 上传音频 → ASR → 结构化；**没有导出端点**；**PASTE（贴文本）/字幕入口未实现**；
 > 用户拿不到"下载一份纪要"，粘贴一段会议记录也得先转成音频——spec US-2 的"PASTE 入口"和 T3.7 的"文件含三节"都没兑现。
@@ -1328,6 +1328,98 @@ curl.exe -s --noproxy "*" "http://localhost:8080/api/v1/tasks/123/export?format=
 **【可维护性】** 字幕解析独立小类（别塞进 controller）；导出格式化单独方法（便于以后加 PDF）；上限常量集中；不引第三方依赖；commit 前 `check-maintainability.ps1` exit 0。
 
 **【回报·测试三问】** 检查了哪些场景（导出/PASTE/字幕/空值/404/变调）｜ 实际命令 + 输出（导出 markdown 正文、PASTE taskId + 耗时 + ai_tier、变异红/绿、exit code）｜ 还有哪些没验证（**不许留空**；批量导出/前端按钮/PDF 可写"留 T4.x"）。
+
+## T3.9 摘要模板机制（5 模板，US-12）（约 3h，含 shortvideo +0.5h）
+
+> **现状**：结构化只有一套"会议纪要"提示词；`task_result.template` 列已有（VARCHAR(32)）但恒为 NULL；提交入口没有模板参数。
+> 学生/播客/访谈/短视频用户拿到的结构全是"会议纪要"——US-12 四类场景（D/E/F/G/K）无证据。
+>
+> ✅ **契约已预批准（D-085）**：本卡内的 API 契约由 Lead 在卡内定死，**不用再单独报草案**；按卡写码即可。
+> 若实现中发现契约不可行（例如详情加键会破坏既有测试语义）→ **立刻停，报"契约冲突"+2 个候选方案**，不要自行改契约。
+>
+> ⚠️ **配额红线**：今天（2026-11-14）**50/50 任务已满**；写码 + 单测可立即做，**实机等次日 00:00 配额重置**（或环境日期已滚动）。
+> 本卡实机**最多 3 条任务**（PASTE 也可以但音频更贴 DoD）：2 条音频（同语音 hash 变体 × meeting/course）+ 1 条文件名自动推荐证据；不够就先做单测，等额度。
+
+**主任务**：
+
+1. **5 套模板提示词**：新增 `ai/TemplatePrompts`（模板文案集中一处），值固定为 `meeting`（默认）/`course`/`interview`/`podcast`/`shortvideo`。
+   三字段 JSON 结构不变（`summary`/`keywords`/`todos`，预算约束沿用 T3.3/T3.6：summary ≤200 字、keywords ≤10、todos ≤20）；
+   只改 `summary` 的**结构与关注点**：
+   - `meeting`：议题 / 结论 / 待办（**必须与现有提示词逐字节一致**——回归不变量，见【测试】）；
+   - `course`：课堂知识点分点（含定义/公式/例题结论）、讲师强调的重点与考点、课后作业/复习要求；
+   - `interview`：问答结构（问题 → 回答要点）、受访者核心观点、结论/金句；
+   - `podcast`：Show notes（主题、章节要点、提到的资源/人名/作品、可执行启发）；
+   - `shortvideo`：核心观点、论据/例子、可执行动作、**是否值得收藏的结论**（K 场景，D-027–D-029 增量）。
+   **注入顺序不变**：模板主体 → glossary 注入段（为空时逐字节不变）→ 共用要求（`TodoService.promptSection()` + 严禁编造）→ transcript。
+2. **提交时可选**：
+   - 音频 multipart：新增**可选**表单字段 `template`；字幕 multipart 同字段；JSON PASTE body 新增可选 `template`（`PasteRequest(String text, String template)`）。
+   - 解析：`trim()` + `toLowerCase(Locale.ROOT)`；**非法值 → 400 `INVALID_PARAM`**，message `template 只支持 meeting/course/interview/podcast/shortvideo`（**不静默回落**，US-12 case 4）。
+   - 顺手修 T3.7 遗留：`TaskController.upload` 与 `TextTaskService.createSubtitle` 的 `toLowerCase()` 缺 `Locale.ROOT`（土耳其 locale 会坏）。
+3. **文件名自动推荐（仅音频 UPLOAD）**：显式 `template` 优先；否则按原文件名小写**包含**关键字匹配，**优先级顺序固定**
+   `shortvideo → course → interview → podcast → meeting`，未命中默认 `meeting`；规则表写成命名常量（`TemplateResolver` 独立小类，便于单测）：
+   - shortvideo：`抖音` `快手` `小红书` `视频号` `bilibili` `b站` `短视频` `shortvideo`
+   - course：`课程` `网课` `讲座` `课堂` `公开课` `lesson` `course` `lecture`
+   - interview：`访谈` `面试` `采访` `interview`
+   - podcast：`播客` `电台` `podcast`
+   - meeting：`会议` `腾讯会议` `例会` `zoom` `飞书` `钉钉` `meeting` `teams`
+   - 文本 PASTE / 字幕：**不做自动推荐**（没有有意义的文件名），显式值否则 `meeting`。
+   - 日志一行可追溯：`模板：course（来源：文件名）` / `（来源：显式）` / `（来源：默认）`。
+4. **落库（零迁移）**：`task_result.template`（列已存在，**不许加迁移**）。**提交事务内**先 `INSERT INTO task_result (task_id, template) VALUES (?, ?)`；
+   worker 的 `saveTranscript`（`ON CONFLICT … SET transcript`）与 `StructuringService.persist`（`UPDATE … SET summary/keywords/todos/ai_tier`）**只能更新各自列，不得把 template 覆盖成 NULL**。新任务 `template` 恒非空；T3.7 之前的旧任务保持 NULL。
+5. **详情响应加第 12 个键 `template`**：`GET /tasks/{id}` 在 `todos` 之后追加（旧任务 null）。**列表、POST 201、导出 Markdown 的响应/正文一律不变**；错误码不变。
+6. **结构化读模板**：`StructuringService.structure(taskId, transcript)` 内部 `SELECT COALESCE(template,'meeting') FROM task_result WHERE task_id=?`（查不到/旧任务→meeting），传给 `StructuringPrompt.build(transcript, glossaryText, template)`；
+   **不要给 worker 加参数/加行**（worker 现 286 行 ≤300）。`ai_tier` 级联语义、EXTRACTIVE 行为、DONE 最后写（D-069）不变。
+7. **EXTRACTIVE 不做模板分化**（只落 template）：记 F-18，T3.8 评估 spec §6.1"模板摘要"是否必须；本卡不扩范围。
+
+**【契约（预批准，按此写）】**
+
+```text
+POST /api/v1/tasks                     multipart/form-data
+  file=@会议.mp3
+  template=course                      ← 可选；缺省 → 文件名自动推荐 → 默认 meeting
+
+POST /api/v1/tasks                     application/json
+  {"text":"……会议记录……", "template":"interview"}   ← template 可省
+
+GET /api/v1/tasks/124
+  → 原 11 键 + 末尾 "template": "course" | null（旧任务）
+
+非法 template → 400 {"code":"INVALID_PARAM","message":"template 只支持 meeting/course/interview/podcast/shortvideo"}
+```
+
+**约束**：不改 table/迁移/配置键；不改 `content_hash`（幂等键不变，F-17）；不改已有键名与语义；不加新业务码。
+
+**【范围声明】**
+- 做：5 套提示词 + 模板解析（显式/文件名推荐/默认）+ 落库 + 详情第 12 键 + 单测（≥12 条）+ 实机取证（≤3 条任务）。
+- 不做：前端模板选择器（T4.13）、用户自定义模板（P3）、EXTRACTIVE 模板分化（F-18）、批量换模板重跑（F-17 → T4.1）、导出内显示模板。
+- 禁：改已有响应字段语义/键序；加迁移/配置键；改幂等键；动 `docs/`；超 3 条实机任务；push。
+
+**【开工前必读的 3 个坑】**
+1. **行数闸会先红**：`web/TaskController` 已 **294 行**（上限 300），加模板参数必撞闸 → **先把导出端点整体抽到 `web/TaskExportController`**（新类，导出行为逐字节不变，T3.7 用例回归），controller 回到 ~230 行再写模板。
+   其他预算：`StructuringService` 266、`TaskService` 253、`TextTaskService` 188、`worker` 286 —— 新增逻辑进独立小类（`TemplatePrompts`/`TemplateResolver`），别往大文件堆；allowlist **只许 0 条**。
+2. **同音频换模板拿不到两个任务**：幂等键是 `content_hash`（不含 template）→ 同文件会 `reused=true` 返旧任务。实机必须用 **hash 变体样本**（同一段语音复制两份，各用 ffmpeg 前加 10ms 静音或丢 1~3 个采样点改 hash，方法同 K-33/T3.6 的 123）。
+3. **`task_result` 早写不能盖掉**：提交时先写 template 行；worker/结构化若用 `INSERT … DO UPDATE SET` 或整行覆盖，可能把 template 写成 NULL → 单测要抓（断言各自 SQL 不含 `template` 列，或断言 persist 参数里没有 template）。
+
+**【验收】**
+```powershell
+# ① 单测：总数 ≥172（现 160）exit 0；含 meeting 提示词逐字节不变、5 模板互不相同、自动推荐优先级/大小写/未命中、
+#    非法 template 400、详情 12 键且旧任务 null、template 不被 worker 覆盖；check-maintainability exit 0（allowlist 0）
+# ② 实机（配额重置后，≤3 条任务）：
+#    A) 复制 T3.7 用过的短样本 t36-verify.wav 两个 hash 变体；A 命名 "腾讯会议_20261115.wav" 不传 template
+#       → 期望详情 template=meeting、日志"来源：文件名"；B 普通命名 + template=course
+#       → 期望 template=course；两条 ai_tier=CLOUD，summary 结构不同且各自含模板要素（course 有知识点/考点/复习）
+#    C) template=foo → 400（不建任务）；GET /tasks/123 → template=null（旧任务兼容）
+# ③ 回归：导出 123 正文与 T3.7 完全一致；详情键集 = 原 11 + template（不多不少）；列表/POST 响应键不变；错误四连不变
+# ④ 变异：把 course 提示词换成 meeting 文案 → course 用例红；自动推荐短路成默认 → 推荐用例红；还原 → touch → 绿
+# ⑤ 收尾：`.env` 哈希 2BCC440F1C9E；`git diff --name-only` 只含 app/src；1 个 commit；证据行不删；配额记实际值（别编）
+```
+**通过标准**：5 模板可切换且结构可区分（CLOUD 实测 2 条）；文件名自动推荐生效且可追溯；`task_result.template` 落库、新任务非空、旧任务 null；详情 12 键、其余契约零变化；单测 ≥172 exit 0；可维护性 exit 0；零迁移/零配置键；实机新增 ≤3 任务；证据行不删。
+
+**【可维护性】** 模板文案集中 `TemplatePrompts`（一处改文案）；推荐规则集中 `TemplateResolver`（常量表 + 单测）；导出类抽出后 controller 精简；不引第三方依赖；commit 前 `check-maintainability.ps1` exit 0。
+
+**【回报·测试三问】** 检查了哪些场景（5 模板选择/优先级/非法值/落库/旧任务兼容/键集/回归/变异）｜ 实际命令 + 输出（5 模板各自 summary 前 80 字对比、taskId + template + 来源日志、变异红/绿、exit code）｜ 还有哪些没验证（**不许留空**；EXTRACTIVE 模板分化 F-18、换模板重跑 F-17 可写"留 T3.8/T4.1"）。
+
+**【开工方式（新会话）】** 仓库 `D:\new\projects\meeting-notes` → 读根 `AGENT.md` → `git pull`（确认 HEAD 含 `2027406` 之后的 docs 提交）→ 读本卡 + `docs/项目/录音纪要平台/state.md`/`handoff.md` → 直接开工；**契约不用再报**，先做单测，配额重置后做实机。
 
 ---
 

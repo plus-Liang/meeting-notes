@@ -900,6 +900,34 @@
 - **已排除项**：把注入做成全局配置开关（不加新键）；把词条内容打进日志（隐私）；靠 prompt 保证 100% 遵守（小模型不可靠，故记 F-15 的确定性方案）。
 ---
 
+### D-084 T3.7 契约批准（导出 md + PASTE/字幕入口）；字幕幂等改为"解析后文本 hash"；字幕编码/上限/分派位置定死
+- **日期**：2026-11-14（T3.7 开工确认）｜**决策人**：本人
+- **结论**（写码方草案 + 我的 4 处收紧，批准后照此写码，不再逐条问）：
+  1. **导出**：`GET /api/v1/tasks/{id}/export?format=md`，三节固定顺序 `## 摘要/## 关键词/## 待办`；待办 `- [x]/- [ ]` + action + 非 null 才追加 `（owner: X / deadline: Y）`；节内无内容写 `（无）`（不跳过节标题）；`format` 缺失或非 `md` → 400；任务不存在/非本人 → 404 `TASK_NOT_FOUND`；`task_result` 缺失 / transcript 空 / 状态非 DONE → 400 `INVALID_PARAM`（不新增业务码）；导出不建任务、不耗配额。
+  2. **字幕幂等口径（推翻草案）**：`content_hash = sha256(解析后文本 UTF-8)`，**不是**原文件字节。理由：①保持全项目不变量 `content_hash == sha256(MinIO 对象字节)`（音频路径本就成立）；②同一内容存成 srt/ass/JSON 文本不重复建任务、不白耗配额。
+  3. **`source_type='PASTE'` 不新增取值**（V1 注释已预留，无 DB 枚举约束）；JSON 文本与 srt/ass 都走 PASTE。
+  4. **`duration_sec` 允许 null**：`TaskCreatedResponse.durationSec` 由 `long` 改 `Long`（仅 PASTE/字幕为 null，音频响应仍是数字、键不变）；`size_bytes` = 存储文本 UTF-8 字节数。
+  5. **编码**（spec §PASTE"注意 UTF-8 / GBK"）：字幕 UTF-8 优先（去 BOM），严格解码失败回退 GBK，仍失败 400；不许静默替换坏字符。
+  6. **上限**：JSON `text` trim 后 1..100_000 字符；字幕文件 ≤5 MB（超 → 413 `SIZE_EXCEEDED`），解析后文本 >100_000 字符 → 400。
+  7. **分派位置**：controller 按文件名后缀（大小写不敏感）分派 `.srt/.ass`，**先于** `MediaMagic` 魔数闸；解析器独立小类；其余后缀音频路径逐字节不动。
+  8. **可维护性硬约束**：`TranscriptionWorker`(295 行)/`TaskService`(253 行) 不得撞 300 行上限 → 先抽小类（如 `worker/PasteTextReader`、`worker/MonoWavExtractor`），PASTE/字幕提交放新类，**allowlist 仍为 0 条**；新类不得 import `com.meetingnotes.web.*`（M5）。
+- **依据**：`tasks-starter.md` T3.7 卡；spec US-5 与格式表 PASTE 行；V1 schema 注释；`TaskService` 幂等顺序（INSERT 冲突 → 不耗配额）；`ApiExceptionHandler` 已能出 415/400 统一体；`check-maintainability.ps1` 300 行上限 + 空 allowlist。
+- **已排除项**：新 `source_type` 取值；字幕按原文件字节做 hash；导出未 DONE 时返回 500/409；字幕解析放 controller 或 worker 异步解析（无法 fail-fast）；本轮扩 `vtt/txt/批量导出/PDF`（留 T3.10/T4.x）。
+---
+
+### D-085 T3.7 验收通过（导出 md + PASTE/字幕入口）；`/result` 不拆；T3.9 模板契约预批准；F-16/F-17 登记
+- **日期**：2026-11-14（T3.7 验收 + T3.9 开工）｜**决策人**：本人
+- **结论**：
+  1. **T3.7 通过**（`2027406`，单 commit，15 文件全在 `app/src`）：导出 `GET /tasks/{id}/export?format=md` 三节齐全（待办带 done、owner/deadline 非 null 才追加、空节写（无）、404/400 正确、零建任务）；PASTE JSON（`source_type=PASTE`、`duration_sec=null`、跳过 ASR、2.57s DONE、幂等同序 + reused 不扣配额）；字幕 srt/ass 解析（解析后文本 hash、UTF-8→GBK→400、5MB→413、>10 万字符→400、分派先于魔数闸）。我独立复跑 160/160、可维护性 exit 0、变异红→绿；实机 task 124 + 导出 123/124 + 负例 404/400/413/415/429；不变量 `content_hash==sha256(对象字节)` 在 124 上成立。
+  2. **数字更正（K-20）**：写码方回报"配额 103/120"，DB 复算 **102/120**（PASTE +0 分钟，行为正确）；worker 回报 285 行、我数 **286 行**。
+  3. **`/result` 不拆**（T3.7 卡遗留问题）：v1 保持 `GET /tasks/{id}` 一次拿全（DONE 时 transcript/summary/keywords/todos/ai_tier 全给），不新增独立 `/result` 端点——省一次往返、少一个公共面；流量问题 v1 可接受。
+  4. **F-16（P3，字幕解析边界）**：仅 UTF-8(+BOM)/GBK；UTF-16→400；srt 纯数字台词行会被当序号丢弃；GBK 字节恰为合法 UTF-8 时按 UTF-8 解（spec 口径写死）。
+  5. **F-17（P2，幂等 vs 模板）**：`content_hash` 不含 `template` → T3.9 后"同内容换模板"返回 reused 旧任务；"换模板重跑"留 T4.1 重跑端点（或改幂等键=迁移，另议）。T3.9 实机"同音频换模板"用 hash 变体样本取证。
+  6. **T3.9 契约预批准**（写码方按卡内契约直接写，不必再单独报草案）：multipart/JSON 可选字段 `template`（5 值 `meeting`(默认)/`course`/`interview`/`podcast`/`shortvideo`，trim+小写，非法→400）；音频按文件名自动推荐（优先级 shortvideo→course→interview→podcast→meeting，未命中默认 meeting；文本/字幕不自动推荐）；`task_result.template` 零迁移落库（提交事务内先写，worker/结构化只更新各自列不得覆盖）；详情响应**末尾新增 `template`**（12 键，旧任务 null），列表/POST/导出响应不变；`meeting` 提示词逐字节等于现有提示词（回归不变量）；EXTRACTIVE 落 template 但不做模板分化（F-16 之外的 F-18 备查：spec §6.1"模板摘要"若 T3.8 判定必须，再单开）。
+- **依据**：`review/2026-11-14-T3.7验收.md`；task 124 行 + 日志 + 导出/负例输出；`2027406` diff；160/160 + 变异红绿；DB quota 复算。
+- **已排除项**：`/result` 拆分端点；把 template 加进 `content_hash`（会破坏 N1 且需迁移）；字幕 UTF-16 支持；T3.7 扩 vtt/txt/批量导出；导出响应内加 template（等 T4.x 前端需要时再加）。
+---
+
 ## 面试速查（由本文件派生，勿单独维护）
 
 | 面试问题 | 取哪条 |
