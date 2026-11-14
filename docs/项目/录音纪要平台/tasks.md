@@ -38,7 +38,7 @@
 | **T0.4** | Spring AI 最小转写跑通 | 独立复跑 exit 0 | ✅ `25528b9` + `review/2026-11-13-T0.4验收.md` |
 | **T0.5** | 云 LLM 通道 + **无 key 可启动** | 真实摘要 + 清空 key 仍能启动 | ✅ `483d6f2` + `review/2026-11-13-T0.5验收.md`（DeepSeek 实测 3 条摘要；无 key 时 ChatModel=0、health UP） |
 
-**下一步**：第 3 周 **T3.3 三档降级 + `todos` 条数口径收口**（含 T3.2 验收遗留 F-5～F-10）→ T3.4 抽取式 → T3.5/T3.6 回流 → T3.7/T3.9/T3.10 → T3.8 周验收。**阶段 1 全 ✅；W2 全 ✅（T2.9 主体通过，3 处遗留由 T3.0 收）；W3 T3.0/T3.1/T3.2 ✅**。
+**下一步**：第 3 周 **T3.4 抽取式提质**（T3.3 已交付最小可用抽取式 + 三档级联；T3.4 做质量：分词/关键句/规则待办 + F-11 本地档预算）→ T3.5/T3.6 回流 → T3.7/T3.9/T3.10 → T3.8 周验收。**阶段 1 全 ✅；W2 全 ✅（T2.9 主体通过，3 处遗留由 T3.0 收）；W3 T3.0/T3.1/T3.2/T3.3 ✅**。
 **T1.5 开工前**（已完成）：先修 T1.4 审查的 P1/P2（snake_case 契约 + 幂等真实状态 + `user_id` 过滤，D-040/D-041），一个 commit（`7c90e9a`）。
 **已处理**：`glossary."right"` 改名 `right_text`（D-037，用户拍板）；列名已在真实 PG16 空卷验证。
 
@@ -92,7 +92,7 @@
 |---|---|---|---|
 | **T3.1** | 摘要生成：①云 `ChatModel` | ≥3 条摘要且不编造 | ✅ `ffbc95c` + `review/2026-11-14-T3.0-T3.1验收.md`（D-068/D-069）。`ai/SummaryService`：严格 JSON 提示词（严禁编造）+ 解析失败 WARN 截 200 字不重试 + 无 ChatModel 跳过；`AsrHttpClientConfig` 按 URI 路由超时（转写 900s / chat `LLM_TIMEOUT_SEC` 120s）；worker +5 行、详情 API 只增 `summary/keywords/ai_tier`；单测 50→**57**。我复跑：3 个不同 hash 样本 → `ai_tier=CLOUD`、摘要 160~170 字、keywords 8 个、要点全部可在 transcript 找到；F-1（DONE 写早于摘要 3.3s）→ **T3.2 收口** |
 | **T3.2** | 待办抽取：JSON Schema + 解析失败重试 | 含 `action/owner/deadline` | ✅ `cd35a6b` + `review/2026-11-14-T3.2验收.md`（D-069 落地/D-071～D-073）。`ai/TodoService`：严格 JSON + 严禁猜 owner/deadline（未知 null）+ 空 action 丢弃 + 解析失败 WARN 截 200 字不重试 + 无 ChatModel 跳过；worker 改为 transcript → 摘要 → 待办 → **最后** DONE（`finalizeResult`，**298 行**）；详情 API 只增 `todos`；F-2 路由断言换 `assertSame` 双向 + customizer 端到端。我复跑：干净 shell **68/68**、维护性 exit 0；F-2 两层变异各造一次红；task 85 首次 DONE 即 summary 172/8 keywords/2 todos、日志四步顺序正确；无 key task 86 = DONE+全 null 无 500；22 条待办可追溯 0 编造。遗留 F-5～F-10 → **T3.3** |
-| **T3.3** | **三档降级 + `ai_tier` 落库** | 按 ①→②→③ 选择并记录 | 删 key → 降 EXTRACTIVE 仍产出（R1 反例必须证伪测试能红） |
+| **T3.3** | **三档级联降级 + `ai_tier` 落库** + T3.2 遗留收口 | 按 ①→②→③ 判定并级联降档；`ai_tier` 诚实落实际档 | ✅ `991f429` + `review/2026-11-14-T3.3验收.md`（D-075/D-076/D-077 落地）。`ai/AiStructuringRouter`（首选档 + 级联 + D-077 离线硬门禁 WARN）、`ai/StructuringService`（**一次**调用出 summary/keywords/todos、失败降档不重试、⑦预算代码层截断）、`ai/ExtractiveStructurer`、`ai/TodoGrounding`（D-076 三档统一依据校验）、`config/OllamaChatModelConfig`（LOCAL 独立 ChatModel）、`TodoService` 收编为 todos 解析器、删除 `SummaryService`；worker **295 行**、详情 API 零改动（`ai_tier` 已有）。F-5/F-6/F-7/F-8 收口。我复跑：97/97 exit 0、维护性 exit 0、双变异各造一次红、三档实机 **95 CLOUD / 96 EXTRACTIVE / 97 离线门禁 EXTRACTIVE+WARN / 98+101 LOCAL 失败→降级 EXTRACTIVE+WARN / 100 空音频四字段 null**、错误四连与详情 11 键不变。**遗留 F-11**：LOCAL 档未产出 `ai_tier=LOCAL`（1.5B + max_tokens 8192 触顶 124.9s；512 时输出带散文致 JSON 解析失败）→ T3.4/T3.8 |
 | **T3.4** | 抽取式兜底（分句 + 关键句 + 规则待办） | 零依赖出 ≥3 摘要 + ≥1 待办 | 关掉全部 LLM 配置 → 走通 US-1 |
 | **T3.5** | 改词 → 写 `glossary`；待办可勾选 | 改一次即入库；勾选持久 | 改「章总」→「张总」→ DB 有记录；刷新后仍勾选 |
 | **T3.6** | 术语注入下次转写（US-3 闭环） | 第二次输出正确 | 按 US-3 Independent Test 走一遍 |

@@ -955,7 +955,7 @@ curl.exe -s --noproxy "*" http://localhost:8080/api/v1/tasks/<id>   # todos 是�
 
 ---
 
-## T3.3 三档降级（CLOUD / LOCAL / EXTRACTIVE）+ `ai_tier` 落库 + T3.2 遗留收口（约 3h）
+## T3.3 三档降级（CLOUD / LOCAL / EXTRACTIVE）+ `ai_tier` 落库 + T3.2 遗留收口（约 3h）✅ **已完成（`991f429`；我复跑 97/97 exit 0、维护性 exit 0、双变异各造一次红、三档实机 95/96/97/98/100/101、错误四连与详情 11 键不变；F-5/F-6/F-7/F-8 收口；遗留 F-11 LOCAL 档未产出 ai_tier=LOCAL → T3.4/T3.8）**
 
 > **现状**：只有第一档。`OLLAMA_ENABLED` / `OLLAMA_BASE_URL` / `OLLAMA_MODEL` / `OFFLINE_MODE` 四个键**目前是死配置**
 > （yml 里注释写了"二、三档在 AiConfig 里按开关决定"，但代码没有）；没 key 时 summary/todos **全 null**（任务 DONE 但没内容）。
@@ -1059,6 +1059,66 @@ docker compose logs app --since 5m | Select-String 'ollama' ; curl.exe -s --nopr
 新增分支必须有测试（每个档位至少一条）；EXTRACTIVE 不用第三方分词库（T3.4 再定）；commit 前 `check-maintainability.ps1` exit 0。
 
 【回报·测试三问】检查了哪些场景（三档 × 可用性矩阵逐格）｜ 实际命令 + 输出（三档各一份 taskId + `ai_tier` + 长度；ollama 不可达的启动日志；变异反例；exit code）｜ 还有哪些没验证（**不许留空**；F-7 的 120s 真超时留到 T3.8 就写"留到 T3.8"）。
+
+## T3.4 抽取式提质（EXTRACTIVE 质量）+ 结构化输出容错（约 2.5h）
+
+> **现状**：T3.3（`991f429`）已交付**最小可用**抽取式 + 三档**级联**降级（CLOUD→LOCAL→EXTRACTIVE），`ai_tier` 诚实落库；
+> 但实机证据行 96/97 显示 EXTRACTIVE 质量弱：`summary` 112~117 字但**基本等于"前 N 字截断"**（ASR 输出没有标点/空格，分句退化）、`keywords` 只有 **3 个**、`todos` 只有 **1 条**。
+> 另外 LOCAL 档（qwen2.5:1.5b）在 app 内**未产出 `ai_tier=LOCAL`**（F-11：全局 `LLM_MAX_TOKENS=8192` 触顶 120s；512 时输出带散文导致 JSON 解析失败）。
+>
+> **本卡目标（只做质量与容错，不加配置键）**：
+> ① 零依赖档在**无标点 ASR 文本**上也能产出"像摘要"的结果（不是前 200 字截断）、keywords ≥5、todos ≥1~2；
+> ② 云/本地档对"带散文/```json 代码块/前后缀"的模型输出能**抽出 JSON**，减少无谓降级；
+> ③ **F-11 只记录不实现**——本地档独立 `max_tokens`/读超时属于**新增配置键**，必须用户批准后另开卡（本卡禁止加键）。
+
+**【前置】** 读 T3.3 的 `ai/ExtractiveStructurer`（237 行）、`ai/TodoGrounding`、`ai/StructuringService.fromModel`，理解现有分句/打分/校验口径；不要推翻已验收的三档级联与 `ai_tier` 语义。
+
+**主任务（约 2h）**：
+1. **EXTRACTIVE 摘要提质（无标点退化路径）**：现在只按 `。！？；\n` 分句，ASR 无标点时退化为"前 200 字"。
+   实现退化路径：按**停顿/连接词**（然后/接下来/所以/首先/那么/就是/我们/大家/但是/因为/比如/最后）与**固定字符窗口**双重切分，
+   再用"词频 + 位置（开头/结尾加分）+ 长度惩罚"打分取前 5 句拼成 summary（≤200 字，**必须覆盖开头和结尾的要点**，不能只截开头）。
+2. **keywords 提质**：在现有字符 n-gram + 停用词基础上补"口头禅/虚词表"（嗯/啊/就是/然后/这个/那个/我们/大家/的话/对吧…），
+   过滤碎片（长度 ≥2、非纯数字/纯英文单字母），目标在真实样本上 **≥5 个**且不是碎片。
+3. **todos 规则提质**：命中信号词（需要/要/得/必须/记得/负责/截止/之前/完成/提交/确认/明天/下周）→ 抽 action（≤40 字、去掉"然后我们"这类口头前缀）；
+   owner/deadline 只能"原文里有才填"（**复用 `TodoGrounding`**，D-076：不换算相对时间、不猜）。
+4. **结构化输出容错（云/本地共用）**：新增一个小的"从文本抽 JSON"工具——找第一个 `{` 到**匹配的** `}`（支持 ```json 代码块包裹、前后有散文），
+   抽出来再交给现有 `parse`；抽不到才按"解析失败 → 降级"处理。**不要放宽提示词**里的 JSON 硬约束，也不要改 `ai_tier` 语义。
+5. **度量必须量化**：用**新样本**（见【验收】⑥）跑 3 条 EXTRACTIVE，记录 summary 是否"非前 N 字截断"（人工判：首句/末句是否覆盖不同议题）、keywords 数、todos 数，
+   与 T3.3 基线（96：summary 112 字/kw 3/todos 1；97：117 字/kw 3/todos 1）做**同列对比表**。
+
+**【规划四问】**（开工确认时回述）
+- **改哪里**：`ai/ExtractiveStructurer`（分句/打分/keywords/todos 规则）、新增 `ai/JsonExtractor`（或放 `StructuringService` 内的小工具）、`ai/StructuringService.fromModel` 调用点、`ai/StructuringPrompt`（**只在必要时**微调口头禅约束）；`web/`、`worker/`、表结构**不改**；测试 2~3 个文件。
+- **复用什么**：`TodoGrounding`（依据校验，别重写）、`StructuringResult` 同构 DTO、`MAX_SUMMARY_CHARS/MAX_KEYWORDS/MAX_TODOS` 常量、现有 WARN 截断语义。
+- **影响哪些功能**：只影响 EXTRACTIVE 档质量 + 云/本地档容错；CLOUD 成功路径、`ai_tier`、null 语义、DONE 顺序**不得变**。
+- **怎么验证**：见【验收】1~6。
+
+**【范围声明】**
+- 做：抽取式摘要/keywords/todos 质量、无标点退化路径、JSON 抽取容错、单测与实机对比表。
+- 不做：**不改 `application.yml`/`.env`/`.env.example` 任何键**（F-11 本地档预算待用户批准）；不引入第三方分词库（T3.4 只允许"自带停用词 + n-gram"；真要上分词库须先报）；不改 web/API 字段；不改表结构/迁移。
+- 禁：把 EXTRACTIVE 结果标成 CLOUD/LOCAL；为过验收改断言或删证据行（D-073）；删 T3.3 已有断言；把 todos 塞进 summary；**不许在仓库里留下临时脚本/大文件**。
+
+**【验收】（反例必须进；证据任务行不删，报告写 taskId，D-073）**
+```powershell
+# ① 全量单测（干净 shell）≥90 用例 exit 0（T3.3 基线 97；新增用例只能加不能减）
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\test.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File D:\new\tools\check-maintainability.ps1   # exit 0；worker ≤300 行
+# ② EXTRACTIVE 实机对比：.env 清 key + OLLAMA_ENABLED=false（改前备份，D-070）→ 重建 app → 传 3 个新样本
+docker compose exec -T postgres psql -U mn -d meetingnotes -t -A -c "select r.task_id, r.ai_tier, length(r.summary), jsonb_array_length(r.keywords), jsonb_array_length(r.todos) from task_result r order by r.task_id desc limit 3"
+#    期望：ai_tier=EXTRACTIVE；与 T3.3 基线（96/97：kw 3 / todos 1）同列对比，kw ≥5、todos ≥1、summary 首尾覆盖（贴 3 条 summary 原文）
+# ③ JSON 容错单测：输入"散文 + ```json {...} ``` + 尾巴" → 解析成功；输入 `{` 不闭合 → 解析失败并降级（两条用例必须能造红）
+# ④ CLOUD 回归：恢复 key（OFFLINE_MODE=false）→ 重建 → 传 1 个新样本 → ai_tier=CLOUD、summary≥150 字、无 500（成功路径不被容错改坏）
+# ⑤ 契约/顺序回归：空音频（新静音样本）→ 四字段 null；错误四连 404/405/415/400；详情 11 键不变；DONE 最后写（贴一条时间线）
+# ⑥ 新样本纪律：T3.3 证据行 88~101 不删；本轮用**未上传过**的新样本（如 probe25/26/27 或 a_1119.wav；先看上传响应里 reused=false）
+# ⑦ 变异验证（必须造红→还原→绿，还原后 touch 防增量编译 K-30）：
+#    删掉"无标点退化路径"（只留按标点分句）→ 新用例必须红；把 JSON 抽取改回直接 parse → 容错用例必须红
+```
+**通过标准**：EXTRACTIVE 在无标点样本上 summary **不再是前 N 字截断**（首尾覆盖可人工判 + 用例可判）、keywords ≥5、todos ≥1；JSON 容错生效且有"抽不到→降级"反例；
+CLOUD 回归不变；空音频 null 语义不变；单测 ≥90 exit 0；可维护性 exit 0；worker ≤300；**零配置键改动**（`git diff --name-only` 里不能出现 `.env*`/`application.yml`）；证据行不删。
+
+**【可维护性】** 新逻辑集中在 `ExtractiveStructurer` + 一个小的 JSON 抽取工具类；**别把 3 个规则分散到 5 个文件**；常量集中（200/10/20 已有）；
+不引入新依赖；`ai/` 单向依赖不变；commit 前 `check-maintainability.ps1` exit 0。
+
+**【回报·测试三问】** 检查了哪些场景（EXTRACTIVE × 3 新样本 / CLOUD × 1 / 空音频 / 错误四连 / 容错两反例）｜ 实际命令 + 输出（3 条 taskId + `ai_tier` + summary/kw/todos；T3.3 基线同列对比表；变异红/绿；exit code）｜ 还有哪些没验证（**不许留空**；F-11 本地档预算就写"待用户批准新键"；`finish_reason=length` 实机未触发可写"留 T3.8"）。
 
 ---
 
