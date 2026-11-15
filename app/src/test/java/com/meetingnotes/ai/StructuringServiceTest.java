@@ -34,6 +34,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 /**
@@ -192,8 +193,12 @@ class StructuringServiceTest {
 
         assertFalse(newService(false).structure(15L, TRANSCRIPT), "第三档被开关关掉时降级链耗尽 → 三字段留空");
 
-        // T3.9：structure 会先 SELECT 模板（只读），这里的红线是**没有任何写库**（persist 不发生）
-        verify(jdbc, never()).update(anyString(), any(Object[].class));
+        // T3.8（K-31）：varargs never() 按"逐位 matcher"才不会空过——这里改为可靠断言：
+        // jdbc 只发生 1 次 query（读模板，只读），除此之外**零交互**（失败路径零写库是真绿，
+        // persist 若发生，verifyNoMoreInteractions 必红）
+        verify(jdbc, times(1)).query(contains("COALESCE(template"),
+                ArgumentMatchers.<RowMapper<String>>any(), eq(15L));
+        verifyNoMoreInteractions(jdbc);
     }
 
     @Test
@@ -400,5 +405,76 @@ class StructuringServiceTest {
         assertTrue(sql.getValue().contains("summary") && sql.getValue().contains("ai_tier"),
                 "persist 只更新 summary/keywords/todos/ai_tier：" + sql.getValue());
         assertFalse(sql.getValue().contains("template"), "T3.9 坑 3：结构化不得把 template 覆盖成 NULL");
+    }
+
+    // ---- T3.8 测试补强：畸形 JSON 矩阵 + LOCAL 异常降级 ----
+
+    @Test
+    void localFailureCascadesToExtractiveWithoutRetryingSameTier() {
+        // T3.8 三档矩阵补缺：CLOUD 不可用（provider 空）→ LOCAL 调用抛异常 → **不重试同一档**（times(1)）
+        // → 降级 EXTRACTIVE，ai_tier 诚实落 EXTRACTIVE，任务不失败
+        when(localProvider.getIfAvailable()).thenReturn(localModel);
+        when(localModel.call(any(Prompt.class))).thenThrow(new RuntimeException("Ollama 进程崩溃"));
+
+        assertTrue(newService(true).structure(50L, TRANSCRIPT));
+
+        verify(localModel, times(1)).call(any(Prompt.class));
+        ArgumentCaptor<String> summary = ArgumentCaptor.forClass(String.class);
+        verify(jdbc).update(contains("UPDATE task_result"), summary.capture(),
+                anyString(), anyString(), eq("EXTRACTIVE"), eq(50L));
+        assertFalse(summary.getValue().isBlank(), "EXTRACTIVE 兜底必须产出非空 summary");
+    }
+
+    @Test
+    void nonStringSummaryFailsParsingAndDegradesToExtractive() {
+        // 畸形矩阵：summary 是 JSON 对象（非字符串）→ 解析失败 → 三字段一起留空并降级，任务不失败
+        when(cloudProvider.getIfAvailable()).thenReturn(cloudModel);
+        when(cloudModel.call(any(Prompt.class))).thenReturn(response(
+                "{\"summary\":{\"text\":\"对象型 summary\"},\"keywords\":[],\"todos\":[]}", "stop"));
+
+        assertTrue(newService(true).structure(51L, TRANSCRIPT));
+
+        verify(jdbc).update(contains("UPDATE task_result"), anyString(), anyString(), anyString(),
+                eq("EXTRACTIVE"), eq(51L));
+    }
+
+    @Test
+    void keywordNonStringElementsAreCoercedOrDroppedNotFatal() {
+        // 畸形矩阵：keywords 元素非字符串——数字被 asText 强转（"123"），对象/数组转空串被丢弃；其余照常
+        when(cloudProvider.getIfAvailable()).thenReturn(cloudModel);
+        when(cloudModel.call(any(Prompt.class))).thenReturn(response(
+                "{\"summary\":\"正常摘要\",\"keywords\":[123,{\"bad\":true},\"有效词\"],\"todos\":[]}", "stop"));
+
+        assertTrue(newService(true).structure(52L, TRANSCRIPT));
+
+        verify(jdbc).update(contains("UPDATE task_result"), eq("正常摘要"),
+                eq("[\"123\",\"有效词\"]"), eq("[]"), eq("CLOUD"), eq(52L));
+    }
+
+    @Test
+    void todoMissingActionOrNonObjectElementIsDropped() {
+        // 畸形矩阵：todos 元素缺 action / 元素是非对象（纯字符串）→ 该元素丢弃（宁缺毋滥），todos=[]，任务不失败
+        when(cloudProvider.getIfAvailable()).thenReturn(cloudModel);
+        when(cloudModel.call(any(Prompt.class))).thenReturn(response(
+                "{\"summary\":\"摘要\",\"keywords\":[],\"todos\":[{\"owner\":\"张三\",\"deadline\":\"下周三\"},\"纯文本\"]}",
+                "stop"));
+
+        assertTrue(newService(true).structure(53L, TRANSCRIPT));
+
+        verify(jdbc).update(contains("UPDATE task_result"), eq("摘要"), anyString(),
+                eq("[]"), eq("CLOUD"), eq(53L));
+    }
+
+    @Test
+    void truncatedJsonWithValidPrefixStillDegrades() {
+        // 畸形矩阵：JSON 断在中间（合法前缀 + 截断）→ JsonExtractor 括号不闭合抽取不到 → 按解析失败降级
+        when(cloudProvider.getIfAvailable()).thenReturn(cloudModel);
+        when(cloudModel.call(any(Prompt.class))).thenReturn(response(
+                "{\"summary\":\"合法摘要\",\"keywords\":[\"关键词1\",", "stop"));
+
+        assertTrue(newService(true).structure(54L, TRANSCRIPT));
+
+        verify(jdbc).update(contains("UPDATE task_result"), anyString(), anyString(), anyString(),
+                eq("EXTRACTIVE"), eq(54L));
     }
 }
