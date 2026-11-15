@@ -47,7 +47,59 @@
       <p class="hint">失败的文件可修改后重新提交；进入 <a href="tasks.html">任务列表</a> 可对失败（DEAD）任务批量重试。</p>
     </div>
   </div>
+
+  <div class="card">
+    <h2 style="margin-top:0">三步上手</h2>
+    <div class="steps">
+      <div class="step">
+        <span class="step-no">01</span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 16V4"/><path d="M7 9l5-5 5 5"/><path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></svg>
+        <h3>上传音/视频</h3>
+        <p>拖入或点击选择文件，支持批量（≤20 个），按文件头识别格式。</p>
+      </div>
+      <div class="step">
+        <span class="step-no">02</span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
+        <h3>等待自动转写</h3>
+        <p>排队与转写自动进行，列表页每 3 秒刷新进度，无需盯着。</p>
+      </div>
+      <div class="step">
+        <span class="step-no">03</span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h5"/></svg>
+        <h3>看纪要、勾待办、导出</h3>
+        <p>详情页查看摘要/待办，可勾选待办、导出 Markdown。</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" id="recentCard" hidden>
+    <h2 style="margin-top:0">最近提交的任务</h2>
+    <div id="recentList"></div>
+    <p class="hint" style="margin-top:8px">全部任务见 <a href="tasks.html">任务列表</a>。</p>
+  </div>
+
+  <div class="card">
+    <h2 style="margin-top:0">它能给出什么样的结果？</h2>
+    <details class="example">
+      <summary>展开看一段示例纪要（<span class="sample-badge">示例数据</span>，非真实任务）</summary>
+      <div class="example-body">
+        <p style="margin:8px 0"><span class="sample-badge">示例数据</span> 摘要：本周例会确认了新版发布时间与分工，讨论了客服反馈的两个高频问题，并约定下周三前完成回归测试。</p>
+        <p style="margin:8px 0">关键词：<span class="chip plain">发布时间</span><span class="chip plain">分工</span><span class="chip plain">回归测试</span></p>
+        <p style="margin:8px 0">待办：① 张三 · 输出回归测试清单（本周五前）；② 李四 · 回复客服高频问题（下周三前）。</p>
+        <p class="hint" style="margin:8px 0 0">以上为静态示例，展示结果形态；真实结果以你的任务为准。</p>
+      </div>
+    </details>
+    <div class="inline-copy">
+      <button type="button" class="btn-secondary" id="copySampleBtn">复制示例文本去真跑</button>
+      <span class="hint" id="copySampleHint">把示例文本复制到剪贴板，粘贴成纯文本任务即可真跑一次。</span>
+    </div>
+  </div>
 </main>
+<footer class="site-footer">
+  <span class="version-tag">v0.1.0</span>
+  <a href="https://github.com/plus-Liang/meeting-notes" rel="noopener">GitHub</a>
+  <span>以 MIT 许可证开源发布</span>
+</footer>
 <script src="auth.js"></script>
 <script src="app.js"></script>
 <script>
@@ -124,6 +176,52 @@
     }
   });
   fileInput.addEventListener('change', function () { mirror = null; renderFileList(); });
+
+  /* ===== T4.15：最近 3 条任务（失败/空 → 整块静默隐藏，不弹错） ===== */
+  getJson('api/v1/tasks?limit=3').then(function (data) {
+    if (data.__httpStatus !== 200 || !Array.isArray(data.items) || !data.items.length) return;
+    var card = document.getElementById('recentCard');
+    var list = document.getElementById('recentList');
+    list.innerHTML = data.items.map(function (item) {
+      var name = item.original_name || ('任务 ' + item.id);
+      return '<div class="task-row">' +
+        '<span class="task-name"><span class="task-title">' + escapeHtmlIndex(name) + '</span>' +
+        '<span class="task-meta">' + fmtDuration(item.duration_sec) + ' · ' + fmtDate(item.created_at) + '</span></span>' +
+        '<span class="task-side">' + badgeHtmlIndex(item.status) + ' ' +
+        '<a href="task.html?id=' + item.id + '">详情</a></span></div>';
+    }).join('');
+    card.hidden = false;
+  }, function () { /* 静默隐藏 */ });
+
+  function escapeHtmlIndex(s) {
+    return String(s === undefined || s === null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+  function badgeHtmlIndex(status) {
+    var text = statusText(status);
+    var cls = status === 'DONE' ? 'done' : (status === 'DEAD' ? 'dead' : 'busy');
+    return '<span class="badge ' + cls + '">' + text + '</span>';
+  }
+
+  /* ===== T4.15：示例文本复制入口（仅 remaining_tasks ≥ 1 可用；0 任务配额时禁用+提示） ===== */
+  var SAMPLE_TEXT = '本周例会纪要：一、发布计划：新版定于下周四发布，发布前完成回归测试。二、问题跟进：客服反馈的导出乱码与列表加载慢两个问题，由李四在本周五前给出修复方案。三、分工：张三负责回归测试清单，本周五前输出初稿；王五负责发布说明文档。请各位在本周三前确认自己的分工。';
+  getJson('api/v1/settings').then(function (data) {
+    var btn = document.getElementById('copySampleBtn');
+    var hint = document.getElementById('copySampleHint');
+    var remain = (data && data.__httpStatus === 200 && data.quota) ? data.quota.remaining_tasks : null;
+    if (remain !== null && remain < 1) {
+      btn.disabled = true;
+      hint.textContent = '今日任务额度已用尽，明天日切后再试。';
+    }
+  });
+  document.getElementById('copySampleBtn').addEventListener('click', function () {
+    var hint = document.getElementById('copySampleHint');
+    mnCopyText(SAMPLE_TEXT, function () {
+      hint.textContent = '已复制示例文本，粘贴即可提交一个纯文本任务（消耗 1 个任务额度）。';
+    }, function () {
+      hint.textContent = '复制失败，请手动选择文本复制。';
+    });
+  });
 
   function renderBatch(data) {
     var summary = data.summary || {};

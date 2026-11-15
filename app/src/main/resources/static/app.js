@@ -117,3 +117,117 @@ function pollUntil(url, onUpdate, isDone) {
   tick();
   return { stop: function () { stopped = true; if (timer) clearTimeout(timer); } };
 }
+
+/* ===== T4.15 新增共享助手（只增不改既有函数；API 调用方式与字段口径不变） ===== */
+
+/* 通用 JSON 请求（PATCH/DELETE 用；与 getJson/postJson 同一套 apiFetch/错误口径） */
+function sendJson(url, method, body) {
+  var opts = { method: method, headers: { 'Content-Type': 'application/json' } };
+  if (body !== undefined && body !== null) opts.body = JSON.stringify(body);
+  return apiFetch(url, opts).then(function (resp) {
+    return resp.json().then(function (data) {
+      data.__httpStatus = resp.status;
+      return data;
+    });
+  }, function () {
+    return { __httpStatus: 0 };
+  });
+}
+
+/* 复制文本：navigator.clipboard 优先，textarea 兜底（file:// 或旧浏览器） */
+function mnCopyText(text, onOk, onFail) {
+  function fallback() {
+    try {
+      var ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      var ok = document.execCommand('copy');
+      ta.remove();
+      if (ok) { onOk && onOk(); } else { onFail && onFail(); }
+    } catch (e) {
+      onFail && onFail();
+    }
+  }
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(function () { onOk && onOk(); }, fallback);
+  } else {
+    fallback();
+  }
+}
+
+/* ===== 待办依据定位（与 ai/TodoGrounding.java 同口径，浏览器内重算，只读不改存储） =====
+ * 归一化：去空白/标点（PUNCTUATION 同表）+ 小写；二元组 = 归一化后去重保序字符对；
+ * 命中率 ≥ 0.5 视为有依据（<2 字符退化为整串包含）。文案固定「在原文中匹配到的句子」，
+ * 匹配不到必须写「未找到直接依据」，绝不声称是模型给出的依据（D-104）。 */
+var MN_PUNCTUATION = '，。！？；：、,.!?;:"\'“”‘’（）()《》〈〉【】[]…—-~· \t\r\n';
+
+function mnNormalize(text) {
+  if (text === null || text === undefined) return '';
+  var out = '';
+  for (var i = 0; i < text.length; i++) {
+    var c = text.charAt(i);
+    if (MN_PUNCTUATION.indexOf(c) >= 0) continue;
+    out += c.toLowerCase();
+  }
+  return out;
+}
+
+function mnBigrams(normalized) {
+  var seen = {}, list = [];
+  for (var i = 0; i + 1 < normalized.length; i++) {
+    var bg = normalized.substring(i, i + 2);
+    if (!seen[bg]) { seen[bg] = true; list.push(bg); }
+  }
+  return list;
+}
+
+/* 逐字稿切句（保留标点在句尾）；空句丢弃 */
+function mnSplitSentences(transcript) {
+  if (!transcript) return [];
+  var parts = transcript.split(/(?<=[。！？!?；;\n])/);
+  var sents = [];
+  for (var i = 0; i < parts.length; i++) {
+    var s = parts[i].trim();
+    if (s) sents.push(s);
+  }
+  return sents;
+}
+
+/* 找与 action 最匹配的句子：二元组命中率最高且 ≥0.5；返回 {index, sentence, rate} 或 null */
+function mnGroundSentence(action, transcript) {
+  var normAction = mnNormalize(action);
+  if (!normAction) return null;
+  var bigrams = mnBigrams(normAction);
+  var sents = mnSplitSentences(transcript);
+  var best = null;
+  for (var i = 0; i < sents.length; i++) {
+    var normSent = mnNormalize(sents[i]);
+    var rate;
+    if (!bigrams.length) {
+      rate = normSent.indexOf(normAction) >= 0 ? 1 : 0;
+    } else {
+      var hits = 0;
+      for (var j = 0; j < bigrams.length; j++) {
+        if (normSent.indexOf(bigrams[j]) >= 0) hits++;
+      }
+      rate = hits / bigrams.length;
+    }
+    if (!best || rate > best.rate) best = { index: i, sentence: sents[i], rate: rate };
+  }
+  if (best && best.rate >= 0.5) return best;
+  return null;
+}
+
+/* 关键词定位：归一化子串命中即算（关键词短，二元组口径会误伤） */
+function mnGroundKeyword(keyword, transcript) {
+  var norm = mnNormalize(keyword);
+  if (!norm) return null;
+  var sents = mnSplitSentences(transcript);
+  for (var i = 0; i < sents.length; i++) {
+    if (mnNormalize(sents[i]).indexOf(norm) >= 0) return { index: i, sentence: sents[i] };
+  }
+  return null;
+}

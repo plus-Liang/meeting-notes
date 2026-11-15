@@ -18,7 +18,11 @@
 <main>
   <div class="card">
     <h1>设置</h1>
-    <p class="hint">只读展示当前配额用量、AI 档位与术语表。</p>
+    <p class="hint">只读展示当前系统状态、配额用量、AI 档位与术语表。</p>
+
+    <h2>系统状态</h2>
+    <div id="health"><div class="skeleton skeleton-line" style="width:70%"></div></div>
+    <p class="version-tag" style="margin-top:8px">版本 <span class="num">v0.1.0</span>（静态常量，构建信息展示属 T7 范围）</p>
 
     <h2>今日配额</h2>
     <div id="quota">
@@ -34,6 +38,11 @@
     <div id="glossary"><div class="skeleton skeleton-block" style="width:100%"></div></div>
   </div>
 </main>
+<footer class="site-footer">
+  <span class="version-tag">v0.1.0</span>
+  <a href="https://github.com/plus-Liang/meeting-notes" rel="noopener">GitHub</a>
+  <span>以 MIT 许可证开源发布</span>
+</footer>
 <script src="auth.js"></script>
 <script src="app.js"></script>
 <script>
@@ -88,6 +97,26 @@
     return String(s === undefined || s === null ? '' : s)
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
+
+  /* T4.15⑦：系统状态卡——GET /actuator/health（认证豁免端点）；app=整体 status，
+     asr/postgres(minio 的 db 组件)/minio/redis 取 components；任一失败显示「未知」，不弹错 */
+  getJson('actuator/health').then(function (data) {
+    var el = document.getElementById('health');
+    var comps = (data.__httpStatus === 200 && data.components) ? data.components : null;
+    function val(s) {
+      if (!comps || !s) return '<span class="status-unknown">未知</span>';
+      if (s === 'UP') return '<span class="status-up">UP</span>';
+      return '<span class="status-down">' + escapeHtml(String(s)) + '</span>';
+    }
+    var appStatus = (data.__httpStatus === 200 && data.status) ? data.status : null;
+    el.innerHTML = '<div class="status-grid">' +
+      '<div class="status-item"><span class="status-name">app</span><span class="status-val">' + val(appStatus) + '</span></div>' +
+      '<div class="status-item"><span class="status-name">asr</span><span class="status-val">' + val(comps && comps.asr && comps.asr.status) + '</span></div>' +
+      '<div class="status-item"><span class="status-name">postgres</span><span class="status-val">' + val(comps && comps.db && comps.db.status) + '</span></div>' +
+      '<div class="status-item"><span class="status-name">minio</span><span class="status-val">' + val(comps && comps.minio && comps.minio.status) + '</span></div>' +
+      '<div class="status-item"><span class="status-name">redis</span><span class="status-val">' + val(comps && comps.redis && comps.redis.status) + '</span></div>' +
+      '</div>';
+  });
 
   getJson('api/v1/settings').then(function (data) {
     if (data.__httpStatus === 200) {

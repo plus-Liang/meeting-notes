@@ -19,10 +19,17 @@
   <div class="card">
     <h1>任务列表</h1>
     <p class="hint">按状态筛选；有进行中的任务时每 3 秒自动刷新，并可继续加载更早的任务。</p>
+    <div class="search-box">
+      <input type="search" id="searchInput" placeholder="按文件名或任务 ID 筛选" aria-label="在已加载的任务中搜索">
+      <p class="search-note" id="searchNote">在已加载的 0 条中筛选。</p>
+    </div>
     <div class="filter-bar" id="filterBar"></div>
     <div class="retry-bar" id="retryBar" style="display:none;">
       <label><input type="checkbox" id="checkAll"> 全选</label>
-      <button id="batchRetryBtn" class="btn-secondary">批量重试</button>
+      <span class="batch-actions">
+        <button id="batchRetryBtn" class="btn-secondary">批量重试</button>
+        <button id="exportBtn" class="btn-secondary">导出选中 Markdown</button>
+      </span>
       <span id="retryResult" class="hint"></span>
     </div>
     <div id="list" aria-live="polite">
@@ -35,6 +42,11 @@
     <p><button id="moreBtn" class="btn-secondary" style="display:none;">加载更多</button></p>
   </div>
 </main>
+<footer class="site-footer">
+  <span class="version-tag">v0.1.0</span>
+  <a href="https://github.com/plus-Liang/meeting-notes" rel="noopener">GitHub</a>
+  <span>以 MIT 许可证开源发布</span>
+</footer>
 <script src="auth.js"></script>
 <script src="app.js"></script>
 <script>
@@ -46,8 +58,14 @@
   var retryBtn = document.getElementById('batchRetryBtn');
   var retryResult = document.getElementById('retryResult');
   var moreBtn = document.getElementById('moreBtn');
+  var exportBtn = document.getElementById('exportBtn'); /* T4.15⑥ */
+  var searchInput = document.getElementById('searchInput'); /* T4.15④ */
   var timer = null;
   var lastRenderKey = null;
+  var state = { filter: '', cursor: null, items: [], checked: {}, checkedCount: 0, search: '' };
+  /* T4.15⑤：状态计数（游标循环拉全量、上限 200、页面可见时 30s 刷新；口径=列表接口实际返回） */
+  var COUNT_CAP = 200;
+  var countState = { total: null, active: 0, done: 0, dead: 0, capped: false };
 
   /* 筛选状态：'' 全部 / ACTIVE 进行中（前端合并三个状态，后端单值契约不变）/ DONE / DEAD */
   var FILTERS = [
@@ -56,7 +74,6 @@
     { key: 'DONE', label: '已完成' },
     { key: 'DEAD', label: '失败' }
   ];
-  var state = { filter: '', cursor: null, items: [], checked: {}, checkedCount: 0 };
 
   /* localStorage：仅作"上次提交"的名称缓存与服务不可用时的兜底展示 */
   function localName(id) {
@@ -71,10 +88,56 @@
 
   function renderFilterBar() {
     filterBar.innerHTML = FILTERS.map(function (f) {
+      var n = countFor(f.key);
       return '<button class="filter-btn' + (state.filter === f.key ? ' active' : '') +
-        '" data-status="' + f.key + '">' + f.label + '</button>';
+        '" data-status="' + f.key + '">' + f.label +
+        (n === null ? '' : '<span class="count-chip">' + n + '</span>') + '</button>';
     }).join('');
   }
+
+  /* T4.15⑤：各状态计数（超 200 显示 200+；计数口径 = 列表接口逐页实际返回） */
+  function countFor(key) {
+    if (countState.total === null) return null;
+    var n;
+    if (key === '') n = countState.total;
+    else if (key === 'ACTIVE') n = countState.active;
+    else if (key === 'DONE') n = countState.done;
+    else n = countState.dead;
+    return countState.capped ? n + '+' : String(n);
+  }
+
+  function fetchCounts() {
+    var acc = { total: 0, active: 0, done: 0, dead: 0, capped: false };
+    function page(cursor) {
+      var url = 'api/v1/tasks?limit=50' + (cursor ? '&before_id=' + cursor : '');
+      return getJson(url).then(function (data) {
+        if (data.__httpStatus !== 200) return;
+        (data.items || []).forEach(function (it) {
+          acc.total++;
+          if (it.status === 'DONE') acc.done++;
+          else if (it.status === 'DEAD') acc.dead++;
+          else acc.active++;
+        });
+        if (acc.total >= COUNT_CAP) {
+          var nx = data.next_before_id || null;
+          acc.capped = !!nx; /* 正好抓满且无更多页 → 不虚标 200+（K-50：口径如实） */
+          return;
+        }
+        var next = data.next_before_id || null;
+        if (!next) return;
+        return page(next);
+      });
+    }
+    return page(null).then(function () {
+      countState = acc;
+      renderFilterBar();
+    }, function () { /* 计数失败不打扰主列表 */ });
+  }
+
+  /* 页面可见时每 30 秒刷新计数（D-024 精神：轮询只在可见时进行） */
+  setInterval(function () {
+    if (document.visibilityState === 'visible') fetchCounts();
+  }, 30000);
 
   /* 拉一页：ACTIVE 合并三个状态（各自 limit=50 第一页，前端去重排序）；其余走单状态 + 游标 */
   function fetchPage(cursor) {
@@ -100,10 +163,8 @@
 
   function rowHtml(item) {
     var name = item.original_name || localName(item.id) || ('任务 ' + item.id);
-    var checkbox = state.filter === 'DEAD'
-      ? '<input type="checkbox" class="row-check" data-id="' + item.id + '"' +
-        (state.checked[item.id] ? ' checked' : '') + '> '
-      : '';
+    var checkbox = '<input type="checkbox" class="row-check" data-id="' + item.id + '"' +
+      (state.checked[item.id] ? ' checked' : '') + '> '; /* T4.15⑥：勾选不再限于 DEAD（导出 md 也需要）；重试仍只对 DEAD 开放 */
     /* T4.14c⑤：时长 + 提交时间（列表接口 item 六键已含 duration_sec/created_at，纯前端渲染；null → '—'） */
     var meta = '<span class="task-meta">' + fmtDuration(item.duration_sec) +
       ' · ' + fmtDate(item.created_at) + '</span>';
@@ -139,18 +200,35 @@
     return state.filter + '|' + state.items.map(function (i) { return i.id + ':' + i.status; }).join(',');
   }
 
+  /* T4.15④：按文件名/ID 即时筛选「已加载」条目（诚实标注范围，不动接口） */
+  function matchSearch(item) {
+    if (!state.search) return true;
+    var q = state.search.toLowerCase();
+    var name = (item.original_name || localName(item.id) || ('任务 ' + item.id)).toLowerCase();
+    return name.indexOf(q) >= 0 || String(item.id).indexOf(q) >= 0;
+  }
+
   function render(force) {
     var count = state.checkedCount;
-    var key = renderKey();
+    var key = renderKey() + '|' + state.search;
     if (!force && key === lastRenderKey) { scheduleRefresh(); return; }
     lastRenderKey = key;
-    retryBar.style.display = state.filter === 'DEAD' && state.items.length ? 'block' : 'none';
+    /* 操作条：DEAD 筛选（重试场景）或有勾选（导出场景）时出现 */
+    retryBar.style.display = state.items.length && (state.filter === 'DEAD' || count > 0) ? 'block' : 'none';
+    retryBtn.style.display = state.filter === 'DEAD' ? '' : 'none'; /* 重试只对 DEAD 开放（语义不变） */
     checkAllEl.checked = count > 0 && count === state.items.length;
     retryBtn.disabled = count === 0;
+    exportBtn.disabled = count === 0;
+    document.getElementById('searchNote').textContent =
+      '在已加载的 ' + state.items.length + ' 条中筛选。';
+    var shown = state.items.filter(matchSearch);
     if (!state.items.length) {
       listEl.innerHTML = emptyHtml();
+    } else if (!shown.length) {
+      listEl.innerHTML = '<div class="empty-state">' + EMPTY_ICON +
+        '<h3>没有匹配的结果</h3><p>换个关键词试试；搜索只覆盖已加载的 ' + state.items.length + ' 条。</p></div>';
     } else {
-      listEl.innerHTML = state.items.map(rowHtml).join('');
+      listEl.innerHTML = shown.map(rowHtml).join('');
     }
     moreBtn.style.display = state.cursor ? 'inline-block' : 'none';
     listEl.querySelectorAll('.row-check').forEach(function (box) {
@@ -158,7 +236,7 @@
         var id = box.getAttribute('data-id');
         if (box.checked) { state.checked[id] = true; state.checkedCount++; }
         else { delete state.checked[id]; state.checkedCount--; }
-        render(true); /* 勾选影响重试条状态，强制重绘 */
+        render(true); /* 勾选影响操作条状态，强制重绘 */
       });
     });
     scheduleRefresh();
@@ -250,8 +328,49 @@
   });
   retryBtn.addEventListener('click', doBatchRetry);
   moreBtn.addEventListener('click', loadMore);
+  searchInput.addEventListener('input', function () {
+    state.search = searchInput.value.trim();
+    render(true); /* 搜索即时过滤已加载条目 */
+  });
+
+  /* T4.15⑥：多选批量导出 md——浏览器端逐个 a.download，不做 zip（zip 属 T7.7 后端工作） */
+  exportBtn.addEventListener('click', function () {
+    var ids = Object.keys(state.checked).map(Number).sort(function (a, b) { return a - b; });
+    if (!ids.length) return;
+    exportBtn.disabled = true;
+    var ok = 0, fail = 0, i = 0;
+    retryResult.textContent = '导出中… 0/' + ids.length;
+    function next() {
+      if (i >= ids.length) {
+        exportBtn.disabled = false;
+        retryResult.textContent = '已导出 ' + ok + '/' + ids.length + ' 个 Markdown 文件' + (fail ? '（失败 ' + fail + ' 个）' : '');
+        return;
+      }
+      var id = ids[i];
+      apiFetch('api/v1/tasks/' + id + '/export?format=md').then(function (resp) {
+        if (resp.status !== 200) { fail++; return; }
+        return resp.text().then(function (text) {
+          var blob = new Blob([text], { type: 'text/markdown;charset=utf-8' });
+          var a = document.createElement('a');
+          a.href = URL.createObjectURL(blob);
+          a.download = 'meeting-notes-' + id + '.md';
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          URL.revokeObjectURL(a.href);
+          ok++;
+        });
+      }, function () { fail++; }).then(function () {
+        i++;
+        retryResult.textContent = '导出中… ' + (ok + fail) + '/' + ids.length;
+        setTimeout(next, 300); /* 逐个下载，间隔 300ms 避免浏览器拦截 */
+      });
+    }
+    next();
+  });
 
   renderFilterBar();
+  fetchCounts(); /* T4.15⑤：状态计数（上限 200，页面可见时 30s 自动刷新） */
   getJson('api/v1/tasks?limit=20').then(function (data) {
     if (data.__httpStatus === 200) { loadFirst(false); }
     else { renderFallback(); }

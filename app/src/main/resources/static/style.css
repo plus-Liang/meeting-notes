@@ -443,3 +443,83 @@ dl.meta dd { margin: 0; font-variant-numeric: tabular-nums; font-weight: var(--f
   .drop-zone { padding: var(--sp-6) var(--sp-5); }
   .mn-dialog { padding: var(--sp-5); }
 }
+
+/* ========== 5. T4.15 组件（第 0 档：把已有东西摆出来 + AI 可见度） ========== */
+/* 首页三步说明 */
+.steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--sp-4); margin: var(--sp-4) 0; }
+.step { background: var(--surface-muted); border-radius: var(--r-lg); padding: var(--sp-5); }
+.step svg { width: 24px; height: 24px; color: var(--ink); }
+.step h3 { font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: var(--fw-semibold); margin: var(--sp-3) 0 var(--sp-1); }
+.step p { color: var(--ink-2); font-size: var(--fs-sm); line-height: var(--lh-sm); margin: 0; }
+.step .step-no { color: var(--ink-3); font-size: var(--fs-xs); line-height: var(--lh-xs); font-variant-numeric: tabular-nums; }
+
+/* 示例结果折叠卡（原生 details，静态数据不发请求） */
+details.example { background: var(--surface-muted); border-radius: var(--r-lg); padding: var(--sp-4) var(--sp-5); margin-top: var(--sp-4); }
+details.example summary { cursor: pointer; font-weight: var(--fw-semibold); font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink); }
+details.example[open] summary { margin-bottom: var(--sp-3); }
+.sample-badge { display: inline-block; padding: 0 var(--sp-2); border-radius: var(--r-xs); background: var(--accent-tint); color: var(--accent-deep); font-size: var(--fs-xs); line-height: var(--lh-xs); font-weight: var(--fw-medium); }
+.example .example-body { font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink-2); }
+
+/* 搜索框 */
+.search-box { margin: var(--sp-3) 0; }
+.search-box input {
+  width: 100%; padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--border-strong); border-radius: var(--r-md);
+  font-family: var(--font-stack); font-size: var(--fs-sm); line-height: var(--lh-sm);
+  background: var(--surface); color: var(--ink);
+  transition: border-color var(--dur-color) var(--ease);
+}
+.search-box input:focus { outline: none; border-color: var(--ink); box-shadow: 0 0 0 3px rgba(26, 26, 26, .12); }
+.search-note { color: var(--ink-3); font-size: var(--fs-xs); line-height: var(--lh-xs); margin-top: var(--sp-1); }
+
+/* 状态计数（筛选胶囊内小数字） */
+.count-chip { display: inline-block; margin-left: var(--sp-1); padding: 0 var(--sp-2); border-radius: 999px; background: rgba(26, 26, 26, .08); color: inherit; font-size: var(--fs-xs); line-height: var(--lh-xs); font-variant-numeric: tabular-nums; }
+.filter-btn.active .count-chip { background: rgba(255, 255, 255, .22); }
+
+/* 批量操作条（重试/导出共用） */
+.batch-actions { display: flex; gap: var(--sp-3); align-items: center; flex-wrap: wrap; }
+
+/* 设置页系统状态卡 */
+.status-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: var(--sp-3); margin-top: var(--sp-3); }
+.status-item { background: var(--surface-muted); border-radius: var(--r-md); padding: var(--sp-3) var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-1); }
+.status-name { color: var(--ink-2); font-size: var(--fs-xs); line-height: var(--lh-xs); }
+.status-val { font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: var(--fw-semibold); font-variant-numeric: tabular-nums; }
+.status-up { color: var(--success); }
+.status-down { color: var(--danger); }
+.status-unknown { color: var(--ink-3); font-weight: var(--fw-medium); }
+.version-tag { color: var(--ink-3); font-size: var(--fs-xs); line-height: var(--lh-xs); font-variant-numeric: tabular-nums; }
+
+/* 详情页待办交互（勾选/删除/依据） */
+.todo-row { display: flex; align-items: flex-start; gap: var(--sp-3); }
+.todo-row input[type="checkbox"] { margin-top: 3px; }
+.todo-row .todo-main { flex: 1; min-width: 0; }
+.todo-main.done .todo-action-text { text-decoration: line-through; color: var(--ink-3); }
+.todo-actions { display: flex; gap: var(--sp-2); flex: none; }
+.todo-del { background: transparent; color: var(--ink-3); border-color: transparent; padding: var(--sp-1) var(--sp-2); font-size: var(--fs-xs); line-height: var(--lh-xs); font-weight: var(--fw-medium); }
+.todo-del:hover { background: var(--danger-tint); color: var(--danger); }
+.todo-ground { margin-top: var(--sp-2); color: var(--ink-3); font-size: var(--fs-xs); line-height: var(--lh-xs); }
+.ground-link { color: var(--ink-2); background: none; border: 0; padding: 0; font: inherit; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; transition: color var(--dur-color) var(--ease); }
+.ground-link:hover { color: var(--ink); }
+.ground-miss { color: var(--ink-3); }
+
+/* 逐字稿句子高亮（定位跳转用，黄 tint 短暂闪烁） */
+.sent-target { border-radius: var(--r-xs); }
+.sent-highlight { background: var(--accent-tint); transition: background-color 300ms var(--ease); }
+
+/* 复制按钮与提示 */
+.inline-copy { margin-top: var(--sp-3); display: flex; align-items: center; gap: var(--sp-3); }
+.copied-text { color: var(--success); font-size: var(--fs-xs); line-height: var(--lh-xs); }
+
+/* 关键词可点定位 */
+.chip.linkable { cursor: pointer; }
+.chip.plain { cursor: default; }
+
+/* 页脚（T4.15：版本号 + GitHub 链接 + LICENSE；纯 <a> 不加载资源） */
+.site-footer { max-width: 840px; margin: var(--sp-6) auto 0; padding: var(--sp-5) var(--sp-4) var(--sp-6); color: var(--ink-3); font-size: var(--fs-xs); line-height: var(--lh-xs); display: flex; gap: var(--sp-3); flex-wrap: wrap; }
+.site-footer a { color: var(--ink-2); text-decoration: underline; text-underline-offset: 3px; }
+.site-footer a:hover { color: var(--ink); }
+
+@media (max-width: 640px) {
+  .steps { grid-template-columns: 1fr; }
+  .status-grid { grid-template-columns: repeat(2, 1fr); }
+}

@@ -23,6 +23,11 @@
     <div class="skeleton skeleton-block" style="width:100%"></div>
   </div>
 </main>
+<footer class="site-footer">
+  <span class="version-tag">v0.1.0</span>
+  <a href="https://github.com/plus-Liang/meeting-notes" rel="noopener">GitHub</a>
+  <span>以 MIT 许可证开源发布</span>
+</footer>
 <script src="auth.js"></script>
 <script src="app.js"></script>
 <script>
@@ -37,6 +42,8 @@
   function errorTextOf(code) {
     return ERROR_TEXT[code] || ('未知错误码：' + code);
   }
+
+  var transcript = ''; /* T4.15⑧：详情逐字稿缓存（供关键词/依据定位），只读不回写 */
 
   var TEMPLATE_TEXT = {
     meeting: '会议纪要', course: '课程纪要', interview: '访谈纪要',
@@ -70,6 +77,7 @@
     return '<p class="hint">AI 未启用或本次未生成，暂无内容。</p>';
   }
 
+  /* T4.15⑧：关键词 chip 可定位（命中有依据句才可点，点它跳到逐字稿高亮；未命中保持不可点） */
   function summaryHtml(data) {
     if (!data.summary && !data.keywords) {
       return '<div class="section"><h2>摘要与关键词</h2>' + nullHint() + '</div>';
@@ -80,40 +88,42 @@
       : '<p class="hint" style="margin:0 0 8px">无摘要。</p>';
     if (data.keywords && data.keywords.length) {
       html += '<div>' + data.keywords.map(function (k) {
-        return '<span class="chip">' + escapeHtml(k) + '</span>';
-      }).join('') + '</div>';
+        var hit = transcript ? mnGroundKeyword(k, transcript) : null;
+        return '<button type="button" class="chip ' + (hit ? 'linkable' : 'plain') + '"' +
+          (hit ? ' data-keyword="' + escapeHtml(k) + '" title="定位到原文"' : ' disabled') + '>' +
+          escapeHtml(k) + '</button>';
+      }).join('') + '</div>' +
+      '<p class="hint" style="margin:4px 0 0">点关键词可跳到逐字稿中匹配到的句子。</p>';
     } else if (data.keywords) {
       html += '<p class="hint" style="margin:0">没有关键词。</p>';
     }
     return html + '</div>';
   }
 
+  /* T4.15⑨：待办可勾选（PATCH）/ 可删除（DELETE）/ 依据定位⑧；D-104 口径：匹配不到写「未找到直接依据」 */
   function todosHtml(data) {
-    var html = '<div class="section"><h2>待办</h2>';
+    var html = '<div class="section"><div class="section-head"><h2>待办</h2>' +
+      '<span class="hint" id="todoMsg" hidden></span></div><div id="todoList">';
     if (data.todos === null || data.todos === undefined) {
-      return html + nullHint() + '</div>';
+      html += nullHint();
+    } else if (!data.todos.length) {
+      html += '<p class="hint" style="margin:0">本段内容没有待办事项。</p>';
     }
-    if (!data.todos.length) {
-      return html + '<p class="hint" style="margin:0">本段内容没有待办事项。</p></div>';
-    }
-    html += data.todos.map(function (t) {
-      var meta = [];
-      meta.push('负责人：' + (t.owner || '未指定'));
-      meta.push('截止：' + (t.deadline || '未指定'));
-      return '<div class="todo-item">' +
-        '<div>' + (t.done ? '✅ ' : '') + escapeHtml(t.action || '') + '</div>' +
-        '<div class="todo-meta">' + meta.join(' · ') + '</div>' +
-        '</div>';
-    }).join('');
-    return html + '</div>';
+    return html + '</div></div>';
   }
 
+  /* T4.15⑧⑨：逐字稿按句包 span（索引与 mnSplitSentences 对齐，供依据/关键词定位高亮）；「复制全文」入口 */
   function transcriptHtml(data) {
-    var html = '<div class="section"><h2>转写</h2>';
+    var html = '<div class="section"><div class="section-head"><h2>转写</h2>' +
+      '<span class="batch-actions"><button type="button" class="btn-secondary" id="copyTranscriptBtn">复制全文</button>' +
+      '<span class="copied-text" id="copiedHint" hidden>已复制</span></span></div>';
     if (data.transcript === '') {
       html += '<p class="empty-tip">未识别到语音内容：这段音频里没有可识别的人声（可能是纯音乐、静音或无人声）。</p>';
     } else {
-      html += '<div class="transcript">' + escapeHtml(data.transcript) + '</div>';
+      var sents = mnSplitSentences(data.transcript);
+      html += '<div class="transcript">' + sents.map(function (s, i) {
+        return '<span class="sent-target" data-sent="' + i + '">' + escapeHtml(s) + '</span>';
+      }).join('\n') + '</div>';
     }
     return html + '</div>';
   }
@@ -176,6 +186,7 @@
       return false; /* 网络抖动继续轮询 */
     }
     var status = data.status;
+    transcript = data.transcript || '';
     var head = headHtml(data);
     var body = '';
     if (status === 'PENDING') {
@@ -199,8 +210,133 @@
     card.innerHTML = head + body;
     if (status === 'DONE') {
       bindExport(data);
+      initTodos(data);
+      bindKeywordChips(data);
+      bindCopyTranscript(data);
     }
     return status === 'DONE' || status === 'DEAD';
+  }
+
+  /* ===== T4.15⑧：定位高亮——滚到对应句 + 黄 tint 短暂闪烁；只读，不改任何存储 ===== */
+  function jumpToSentence(idx) {
+    var el = card.querySelector('.sent-target[data-sent="' + idx + '"]');
+    if (!el) return;
+    card.querySelectorAll('.sent-highlight').forEach(function (n) { n.classList.remove('sent-highlight'); });
+    el.classList.add('sent-highlight');
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    setTimeout(function () { el.classList.remove('sent-highlight'); }, 2000);
+  }
+
+  /* T4.15⑨：待办渲染与交互（checkbox → PATCH {done}；删除 → DELETE；乐观更新 + 失败回滚 + 行内错误） */
+  var todos = [];
+
+  function todoGroundHtml(action) {
+    var hit = mnGroundSentence(action, transcript);
+    if (hit) {
+      return '<div class="todo-ground">依据 · 在原文中匹配到的句子：<button type="button" class="ground-link" data-sent="' +
+        hit.index + '">「' + escapeHtml(hit.sentence.length > 60 ? hit.sentence.slice(0, 60) + '…' : hit.sentence) + '」</button></div>';
+    }
+    return '<div class="todo-ground">依据 · <span class="ground-miss">未找到直接依据</span></div>';
+  }
+
+  function renderTodoList() {
+    var listEl = document.getElementById('todoList');
+    if (!listEl || !todos.length) return;
+    listEl.innerHTML = todos.map(function (t, i) {
+      var meta = [];
+      meta.push('负责人：' + (t.owner || '未指定'));
+      meta.push('截止：' + (t.deadline || '未指定'));
+      return '<div class="todo-item">' +
+        '<div class="todo-row">' +
+        '<input type="checkbox" class="todo-check" data-index="' + i + '"' + (t.done ? ' checked' : '') +
+        ' aria-label="标记待办完成状态">' +
+        '<div class="todo-main' + (t.done ? ' done' : '') + '">' +
+        '<div class="todo-action-text">' + escapeHtml(t.action || '') + '</div>' +
+        '<div class="todo-meta">' + meta.join(' · ') + '</div>' +
+        todoGroundHtml(t.action) +
+        '</div>' +
+        '<div class="todo-actions"><button type="button" class="todo-del" data-index="' + i + '">删除</button></div>' +
+        '</div></div>';
+    }).join('');
+    listEl.querySelectorAll('.todo-check').forEach(function (box) {
+      box.addEventListener('change', function () {
+        var idx = Number(box.getAttribute('data-index'));
+        var prev = todos[idx].done;
+        todos[idx].done = box.checked; /* 乐观更新 */
+        renderTodoList();
+        sendJson('api/v1/tasks/' + id + '/todos/' + idx, 'PATCH', { done: box.checked }).then(function (data) {
+          if (data.__httpStatus !== 200) {
+            todos[idx] && (todos[idx].done = prev); /* 失败回滚 */
+            renderTodoList();
+            todoMsgShow('更新失败（' + (data.code || 'HTTP ' + data.__httpStatus) + '）：' + (data.message || '请稍后重试'));
+          } else {
+            todos[idx] && (todos[idx] = data.todo); /* 以服务端返回为准（幂等写，D-072 口径不动） */
+            renderTodoList();
+          }
+        });
+      });
+    });
+    listEl.querySelectorAll('.todo-del').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var idx = Number(btn.getAttribute('data-index'));
+        var removed = todos.splice(idx, 1); /* 乐观移除；DELETE 非幂等（后续 index 移位），本地数组与服务端保持同步 */
+        renderTodoList();
+        sendJson('api/v1/tasks/' + id + '/todos/' + idx, 'DELETE').then(function (data) {
+          if (data.__httpStatus !== 200) {
+            todos.splice(idx, 0, removed[0]); /* 失败回滚 */
+            renderTodoList();
+            todoMsgShow('删除失败（' + (data.code || 'HTTP ' + data.__httpStatus) + '）：' + (data.message || '请稍后重试'));
+          }
+        });
+      });
+    });
+    listEl.querySelectorAll('.ground-link').forEach(function (a) {
+      a.addEventListener('click', function () {
+        jumpToSentence(Number(a.getAttribute('data-sent')));
+      });
+    });
+  }
+
+  function todoMsgShow(text) {
+    var el = document.getElementById('todoMsg');
+    if (!el) return;
+    el.textContent = text;
+    el.hidden = false;
+  }
+
+  function initTodos(data) {
+    todos = Array.isArray(data.todos) ? data.todos.map(function (t) {
+      return { action: t.action, owner: t.owner, deadline: t.deadline, done: !!t.done };
+    }) : [];
+    renderTodoList();
+  }
+
+  /* T4.15⑧：关键词点击定位（chip 在 summaryHtml 里按命中与否设置 linkable） */
+  function bindKeywordChips() {
+    card.querySelectorAll('.chip.linkable').forEach(function (chip) {
+      chip.addEventListener('click', function () {
+        var hit = mnGroundKeyword(chip.getAttribute('data-keyword'), transcript);
+        if (hit) jumpToSentence(hit.index);
+      });
+    });
+  }
+
+  /* T4.15⑨：复制全文（clipboard + textarea 兜底 + 「已复制」提示） */
+  function bindCopyTranscript() {
+    var btn = document.getElementById('copyTranscriptBtn');
+    var hint = document.getElementById('copiedHint');
+    if (!btn) return;
+    btn.addEventListener('click', function () {
+      mnCopyText(transcript, function () {
+        hint.hidden = false;
+        hint.textContent = '已复制';
+        setTimeout(function () { hint.hidden = true; }, 2000);
+      }, function () {
+        hint.hidden = false;
+        hint.textContent = '复制失败';
+        setTimeout(function () { hint.hidden = true; }, 2000);
+      });
+    });
   }
 
   /* PENDING/RUNNING/RETRYING 每 3 秒轮询（D-024），到 DONE/DEAD 或 404 停 */
