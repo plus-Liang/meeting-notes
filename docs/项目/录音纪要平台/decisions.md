@@ -1069,6 +1069,29 @@
 
 ---
 
+### D-094 T4.6 验收通过（认证/OpenAPI/Webhook 三面落地；我自建接收端重放投递/重试/终局；`delivery_id` 派生方案采纳；认证是横切改动记 K-46）
+- **日期**：2026-11-15（T4.6 验收）｜**决策人**：本人
+- **结论**：
+  1. **T4.6 通过**（`1c2aa73`，**单 commit**，16 文件 +674/−6，基线 `6ce0b62`，待随本次 docs 一起 push；第 29 份报告 `review/2026-11-15-T4.6验收.md`）。
+     US-10 三面齐：`/api/v1/**` Bearer 认证（401 `UNAUTHORIZED` + `WWW-Authenticate`，豁免 actuator/静态页/OpenAPI）、springdoc `/v3/api-docs` + Swagger UI（bearer scheme）、
+     Webhook 终态投递（HMAC-SHA256 签名、1s/10s/60s 重试、`webhook_delivery` 记账、离线跳过）。
+  2. **我复跑**：全量 **220/220** exit 0（209 + E2E 401 用例 + filter 5 + webhook 5）、`-UnitOnly` **212/212**（排除项精确）、可维护性 **exit 0**（58 Java 文件，`WebhookDeliveryService` 285 行未越 300）。
+  3. **我独立重放 Webhook（不采信它的 True/False）**：自写 Python 接收端 → 正常投递验签通过、**HMAC 用 PowerShell 独立重算命中**、九键齐、**`delivery_id` 用 Python 独立推导命中**（行 id 2 → `871e025f-…`）；
+     **补验了它列为"未验证"的两条**：①500→**1s 后重试成功**（attempts=2/last_status=200）②**始终 500 → 4 次尝试（1s/10s/60s）→ `next_retry=NULL` 留表可观测**（attempts=4/last_status=500）。
+  4. **代码核对**：worker 在 DONE 写入**之后**才异步钩子（D-069 不破）；`UPDATE … WHERE next_retry IS NOT NULL RETURNING` 原子认领防双投；`nextBackoffSec` 档位正确；
+     `@EnableScheduling` 已在主类；H2 测试无表时降级 debug；无 secret 日志；`OFFLINE_MODE`/空 secret 均为"不投递"安全默认（fail-closed）。
+  5. **采纳的两处设计取舍**：①`delivery_id` **不加数据库列**，由 `webhook_delivery.id` 派生确定性 UUID(v3)——重试同键、接入方去重语义不变、免一次 Flyway 迁移（H2 测试绕过 Flyway 的风险面为零）；未来若加手动重投/多 webhook，再补列。②`API_TOKEN` 空串 **fail-closed**（拒绝所有），非放行；默认值 `change-me-api-token` 仍可用 → README 必须提示改默认值（T4.10）。
+  6. **已知限制（写进报告，不修）**：Swagger UI 未实际点 Try-it-out（仅 200 可达）；重启后重试续跑未实验；`task.callback_url` **只有读、无写入入口** → 文档不能承诺"单任务回调"，v1 只走全局 `WEBHOOK_URL`；
+     Webhook URL 无 SSRF 防护（当前只来自运维配置，未来开放 callback_url 输入必须复用 T4.3 基建）；`bearer` 小写被 401（逐字节比较，有单测钉死，记为取舍）；签名无时间窗（P3）、`WEBHOOK_SECRET_2`（P2）、手动重投 UI（P2）不做。
+  7. **配额**：本卡它 4 任务 + **我验收新增 4 条**（175/177/178/179，全 PASTE 0 分钟）；**68/120 分钟、36/50 任务**；任务总数 **80**、DEAD=0、`webhook_delivery` 4 行、证据行保留（D-073）。
+     它回报"32/50"与它自身动作一致（K-45 已生效），差额来自验收侧新增，不算缺陷。
+- **依据**：`review/2026-11-15-T4.6验收.md`；`D:\new\artifacts\`（`t46-*` 写码方证据 + 我新增 `lead-t46-{receiver*.py,received.log,retry-received.log,finalfail-received.log,webhook.yml,task-detail.json}`、`verify-t46-lead-{full,unitonly,apidocs}*`）；
+  DB 任务 170/171/172/173/175/177/178/179 + `webhook_delivery` 4 行 + `quota` 行；220/220 + 212/212 + 可维护性 exit 0。
+- **已排除项**：为 `delivery_id` 加 Flyway 迁移（本卡不扩 schema；派生键满足去重语义）；把 Webhook 投递做成同步（会破 D-069/D-068）；为认证加 OAuth2/JWT/多用户（D-002/D-019）；把 `callback_url` 的 API 入口在本卡补上（属新契约，须先有 SSRF 防护，排 T4.3/后续）；
+  强制 token 非默认值才能启动（会破"开箱即用"，改文档提示）；给 `bearer` 做大小写不敏感解析（与常量时间逐字节比较冲突，且有单测钉死，保持严格）。
+
+---
+
 ## 面试速查（由本文件派生，勿单独维护）
 
 | 面试问题 | 取哪条 |

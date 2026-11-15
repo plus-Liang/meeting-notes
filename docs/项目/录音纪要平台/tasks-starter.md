@@ -1762,7 +1762,7 @@ F-15 控制在 ≤30 行并集中一处；新增静态资源不引第三方库�
 
 ---
 
-## T4.6 接入面（US-10 / N17）（约 3.5h；W4 第 5 张）
+## T4.6 接入面（US-10 / N17）（约 3.5h；W4 第 5 张）✅ **已完成（`1c2aa73` 单 commit；我复跑 220/220 + -UnitOnly 212/212，自建接收端重放验签/重试/终局全过；D-094/第 29 份报告）**
 
 > **要证明的事**：**别人不开浏览器，也能把这个项目接进自己的系统**——三条 curl 走完"提交 → 查状态 → 取结果"，
 > 一个 20 行接收端能收到 Webhook 并**验签通过**，契约能被发现（`/v3/api-docs` + Swagger UI）。
@@ -1820,6 +1820,51 @@ F-15 控制在 ≤30 行并集中一处；新增静态资源不引第三方库�
 **【回报·测试三问】** 检查了哪些场景（401/豁免面/静态页/openapi/webhook 验签/反例/离线口径）｜ 实际命令 + 输出（三条 curl 原文、401 响应体、`/v3/api-docs` 路径片段、接收端 payload + 验签 True/False、`webhook_delivery` 行、E2E 用例数前后、全量 ≥210、`.env` 哈希、exit code）｜ 还有哪些没验证（**不许留空**）。
 
 **【开工方式（新会话）】** 仓库 `D:\new\projects\meeting-notes` → 读根 `AGENT.md` → `git status` 干净（HEAD 以最新一条 docs 提交为准，**别回退 T4.1/T4.2/T4.4/T4.5**）→ 读本卡 + `state.md`/`handoff.md` → 先做认证 filter + UI 适配，再做 OpenAPI，最后做 Webhook。
+
+---
+
+## T4.7 批量提交（US-8）（约 3h；W4 第 6 张）
+
+> **要证明的事**：A 类用户（本地文件囤积者）的主场景——**一次提交 10~20 个文件，全部走到终态、互不影响，失败的可单独重试**；
+> 提交后能看到**总时长 + 预计耗时**（需求确认单 D2：上限 20，不是 10）。
+> **现状**：`POST /api/v1/tasks` 只收单文件；上传页一次只能选一个；E2E 没有批量场景。已具备：列表筛选/批量重试（T4.1）、`content_hash` 幂等、
+> 模板（T3.9）、认证（T4.6——**所有请求都要带 Bearer**，这是横切改动，K-46）。
+> **配额**：2026-11-15 已用 **68/120 分钟、36/50 任务**；本卡预算 **≤10 任务 / ≤6 分钟**（2 条 1s 静音 wav + 1 个坏文件 + 1 次超限请求 + E2E 1 条）。
+> **开工前查配额，回报前最后一步再查**（K-45）。
+
+**主任务**：
+
+1. **新端点 `POST /api/v1/tasks/batch`**（multipart：`files` 可重复 + 可选 `template`；`/api/v1/**` 已由 T4.6 要求 Bearer）
+   - 校验：0 个文件 → **400 `INVALID_PARAM`**；文件数 > `BATCH_MAX_FILES`（默认 20）→ **400**；总体积超限 → **413**（引擎层或显式检查，哪种都行，但要在回报里写清是哪层）；
+   - **逐文件独立**：每个文件走**与单文件完全相同**的校验/幂等/入队路径（**复用它，不复制逻辑**，M6）；单项失败只影响该项；
+   - 响应（请求合法即 **200**，即使部分失败）：`{items:[{file_name, task_id?, status?, reused?, code?, message?}], summary:{accepted, reused, failed, total_duration_sec, estimated_sec}}`；
+     全部 snake_case（D-041）；`accepted` 含 `reused`；失败项复用统一错误码（D-057）；
+   - 语义：accepted 入 PENDING 队列（与单文件一致）、DONE 最后写（D-069 不破）、同内容幂等 `reused`、配额**逐项**扣（不足时该项 429，其余继续——口径写进回报）。
+2. **总时长 + 预计耗时**：对可探测的音频复用 `AudioDurationProbe` 取时长（**别重复实现**）；`total_duration_sec` = 各项之和；
+   `estimated_sec` = `round(total_duration_sec * BATCH_ESTIMATE_RTF + accepted * 2)`（系数默认 0.15，含 ASR+结构化的保守估计；**只是预估，不承诺**）；PASTE/字幕项无时长则跳过。
+3. **配置（不许新增死配置）**：`application.yml` + `.env.example` 加 **`BATCH_MAX_FILES`（默认 20）**、**`TASK_BATCH_MAX_SIZE_BYTES`（默认 2147483648）**、**`BATCH_ESTIMATE_RTF`（默认 0.15）**，
+   放进已有 `app.limits.*` 段并沿用命名风格；三个都必须有消费方。注意：`spring.servlet.multipart.max-request-size` 若仍用 `TASK_MAX_SIZE_BYTES`(200MB) 会卡批量 → 改用 `TASK_BATCH_MAX_SIZE_BYTES`（单文件仍受 `max-file-size` 200MB）。
+4. **前端**：`index.html` 文件选择器改 `multiple`（或加"批量"入口）→ `POST /api/v1/tasks/batch` → 展示**逐文件结果**（成功/复用/失败原因）+ "总时长 X 分，预计 Y 分"；
+   失败项给"去重试"引导（DEAD 的可走 T4.1 批量重试，本卡只展示+引导，不做页内重试队列）。**保留单文件接口与旧行为**（别打断 T4.1/T4.5/T4.6 的调用方，K-46）。
+5. **测试**
+   - 单测：0 文件 / 超 20 / 混合成功失败 / 逐项结果映射 / 时长汇总（能抽纯函数就抽；**不要**新起全上下文 SpringBootTest，避免 K-42 抢队列）；
+   - **E2E 新增场景 G**：测试内生成 2 个 **1s 静音 WAV**（44 字节头 + 零数据；空 transcript 按 D-048 仍 DONE）+ 1 个 `.mp3` 后缀的纯文本（**400 `INVALID_MEDIA`**）
+     → 断言：`items` 逐项、2 个 accepted 最终 DONE、坏文件失败**不影响**其它；再发 **21 个 1 字节文件** → **400 上限**；全程带 token；
+   - 全量 **≥221**（220 + 1）exit 0、`-UnitOnly` 相应增加、可维护性 exit 0；顺手确认 `/api/v1/tasks/batch` 在 `/v3/api-docs` 里可见。
+6. **验收证据**：batch 请求/响应原文（含 summary 数字）、逐项 taskId、坏文件隔离、超限 400、总时长/预计耗时字段、
+   `GET /api/v1/tasks?limit=50` 能查到这一批全部 id、E2E G 绿、恢复基线（209→221 的用例数、`.env` 哈希、5 healthy）。
+
+**范围声明**
+- 做：批量端点 + 逐项失败隔离 + 总时长/预计 + 上传页多选 + 3 个配置键 + 单测 + E2E G。
+- 不做：INBOX 目录监控（P2 已砍）、断点续跑（P2）、批量 JSON 提交、批量换模板重跑（F-17 仍未做）、跨项事务/全有或全无语义（逐项独立才是需求）、页内重试队列。
+- 存储纪律：证据/日志/临时文件全在 `D:\new\artifacts\`；实验配置用外部 override，不改 `.env`。
+
+**【可维护性】** 批量逻辑抽 `task/BatchTaskService`（单文件 ≤200 行），复用单文件路径；控制器不膨胀；commit 前 `check-maintainability.ps1` exit 0。
+
+**【回报·测试三问】** 检查了哪些场景（批量成功/幂等复用/坏文件隔离/超限/配额口径/前端多选/E2E G）｜ 实际命令 + 输出（batch 响应原文、summary 数字、逐项 taskId、
+坏文件 400 原文、21 文件 400 原文、总时长与预计耗时、`/v3/api-docs` 片段、全量用例数、`.env` 哈希、exit code）｜ 还有哪些没验证（**不许留空**）。
+
+**【开工方式（新会话）】** 仓库 `D:\new\projects\meeting-notes` → 读根 `AGENT.md` → `git status` 干净（HEAD `1c2aa73` + 本次 docs 提交，**别回退 T4.1/T4.2/T4.4/T4.5/T4.6**）→ 读本卡 + `state.md`/`handoff.md` → 先抽 `BatchTaskService` 复用单文件路径，再做端点，最后前端 + E2E。
 
 ---
 
