@@ -31,7 +31,7 @@
   /* 颜色：黑白排印 + 暖纸底 + 单一暖黄 accent（用量极省） */
   --ink: #1a1a1a;
   --ink-2: #52525b;
-  --ink-3: #8a8a93;
+  --ink-3: #6b6b73; /* T4.14b：#8a8a93→#6b6b73，纸底 4.89:1 / 白卡 5.29:1，过 WCAG AA 4.5:1（K-56 实测口径） */
   --bg: #f8f6ef;
   --grid-line: rgba(26, 26, 26, .038);
   --surface: #ffffff;
@@ -41,7 +41,7 @@
   --accent: #eab308;          /* 暖黄：圆点/下划线/进度条/chip */
   --accent-deep: #a16207;     /* 黄底上的可读文字 */
   --accent-tint: #fdf4d9;
-  --success: #15803d;  --success-tint: #ecf7ee;
+  --success: #166534;  --success-tint: #ecf7ee; /* T4.14b：#15803d→#166534，徽章/成功横幅文字 6.5:1 ≥5:1 */
   --danger: #d92d20;   --danger-tint: #fdeeee;
   --warn: #b45309;     --warn-tint: #fdf3e2;
   --skeleton-base: #ecebe2;
