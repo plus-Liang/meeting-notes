@@ -104,8 +104,12 @@
       ? '<input type="checkbox" class="row-check" data-id="' + item.id + '"' +
         (state.checked[item.id] ? ' checked' : '') + '> '
       : '';
+    /* T4.14c⑤：时长 + 提交时间（列表接口 item 六键已含 duration_sec/created_at，纯前端渲染；null → '—'） */
+    var meta = '<span class="task-meta">' + fmtDuration(item.duration_sec) +
+      ' · ' + fmtDate(item.created_at) + '</span>';
     return '<div class="task-row" data-id="' + item.id + '">' +
-      '<span class="task-name">' + checkbox + '#' + item.id + ' ' + escapeHtml(name) + '</span>' +
+      '<span class="task-name">' +
+      '<span class="task-title">' + checkbox + '#' + item.id + ' ' + escapeHtml(name) + '</span>' + meta + '</span>' +
       '<span class="task-side">' + badgeHtml(item.status) + ' ' +
       '<a href="task.html?id=' + item.id + '">详情</a></span></div>';
   }
@@ -199,7 +203,7 @@
     listEl.innerHTML = index.length
       ? '<p class="hint">服务暂时不可用，以下为本浏览器上次提交的缓存：</p>' +
         index.map(function (item) {
-          return '<div class="task-row"><span class="task-name">#' + item.id + ' ' + escapeHtml(item.name) + '</span>' +
+          return '<div class="task-row"><span class="task-name"><span class="task-title">#' + item.id + ' ' + escapeHtml(item.name) + '</span></span>' +
             '<span class="task-side"><a href="task.html?id=' + item.id + '">详情</a></span></div>';
         }).join('')
       : emptyOfflineHtml();

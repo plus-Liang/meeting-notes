@@ -33,7 +33,7 @@
   --ink-2: #52525b;
   --ink-3: #6b6b73; /* T4.14b：#8a8a93→#6b6b73，纸底 4.89:1 / 白卡 5.29:1，过 WCAG AA 4.5:1（K-56 实测口径） */
   --bg: #f8f6ef;
-  --grid-line: rgba(26, 26, 26, .038);
+  --grid-line: rgba(26, 26, 26, .03); /* T4.14c②：.038→.03（约 -20%），可见但不抢 */
   --surface: #ffffff;
   --surface-muted: #f4f2ea;
   --border: #e7e4da;
@@ -247,8 +247,10 @@ a.btn-secondary:active { transform: scale(.98); }
   line-height: var(--lh-sm);
   transition: background-color var(--dur-color) var(--ease);
 }
-.task-row:hover { background: var(--surface-muted); }
-.task-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.task-row:hover { background: rgba(26, 26, 26, .035); } /* T4.14c③：极淡墨色底（约 3.5%），300ms 过渡，只动 background */
+.task-name { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--sp-1); font-variant-numeric: tabular-nums; }
+.task-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-sm); line-height: var(--lh-sm); }
+.task-meta { color: var(--ink-3); font-size: var(--fs-xs); line-height: var(--lh-xs); font-variant-numeric: tabular-nums; } /* T4.14c⑤：时长+提交时间次要行 */
 .task-side { display: flex; align-items: center; gap: var(--sp-3); flex: none; }
 .task-row a { color: var(--ink-2); }
 .task-row a:hover { color: var(--ink); }
@@ -314,6 +316,7 @@ input[type="checkbox"] {
   background: var(--surface);
   cursor: pointer;
   margin: 0;
+  vertical-align: -3px; /* 行内（task-title 里）与文字基线对齐 */
   flex: none;
   transition: background-color var(--dur-color) var(--ease), border-color var(--dur-color) var(--ease);
   background-repeat: no-repeat;
@@ -432,9 +435,11 @@ dl.meta dd { margin: 0; font-variant-numeric: tabular-nums; font-weight: var(--f
   main { margin: var(--sp-5) auto; padding: 0 var(--sp-4); }
   .card { padding: var(--sp-5); border-radius: var(--r-lg); }
   h1 { font-size: var(--fs-2xl); line-height: var(--lh-2xl); letter-spacing: -.5px; }
-  .task-row { flex-wrap: wrap; padding: var(--sp-3) 0; }
-  .task-name { white-space: normal; flex: 1 1 auto; min-width: 55%; overflow: visible; }
-  .task-side { margin-left: auto; }
+  .task-row { flex-wrap: wrap; padding: 14px 0; gap: var(--sp-3); } /* T4.14c④：点按区放松 ≥44px */
+  .task-name { flex: 1 1 100%; }
+  .task-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } /* 文件名单行省略，防挤 */
+  .task-side { flex: 1 1 auto; justify-content: flex-end; }
+  .task-side a { padding: 6px 8px; } /* 扩大点按热区 */
   .drop-zone { padding: var(--sp-6) var(--sp-5); }
   .mn-dialog { padding: var(--sp-5); }
 }
