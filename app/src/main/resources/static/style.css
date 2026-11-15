@@ -39,7 +39,7 @@
   --border: #e7e4da;
   --border-strong: #d6d2c4;
   --accent: #eab308;          /* 暖黄：圆点/下划线/进度条/chip */
-  --accent-deep: #a16207;     /* 黄底上的可读文字 */
+  --accent-deep: #92400e;     /* 黄底上的可读文字（T4.15b：#a16207→#92400e，on tint 实测 6.45:1 ≥4.5 AA，K-56） */
   --accent-tint: #fdf4d9;
   --success: #166534;  --success-tint: #ecf7ee; /* T4.14b：#15803d→#166534，徽章/成功横幅文字 6.5:1 ≥5:1 */
   --danger: #d92d20;   --danger-tint: #fdeeee;
