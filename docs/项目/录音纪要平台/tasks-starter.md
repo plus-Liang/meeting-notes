@@ -1958,6 +1958,61 @@ F-15 控制在 ≤30 行并集中一处；新增静态资源不引第三方库�
 
 ---
 
+## T4.14 前端视觉重设计（约 3–4h；W4 第 10 张，插在 T4.13 之前）
+
+> **要证明的事**：4 个原生页面在**不改技术栈、不改后端契约**的前提下，从"极简能用"升级到"专业、一致、有状态感"；
+> **不是重写**，而是按设计技能做"审计 → 就地升级"，并留下**前后截图对比**。技能来源 = 用户指定的 GitHub 仓库（MIT）。
+>
+> **技能（本地已 vendor，不用联网、不用装 Node）**——**开工第一件事：完整读这两份再动手**：
+> 1. 主技能：`D:\new\artifacts\design-skills\redesign-skill\skills\redesign-existing-projects\SKILL.md`（流程：Scan → Diagnose → Fix；Fix Priority 9 级；Rules）
+> 2. 设计值：`D:\new\artifacts\design-skills\ai-design-skills\skills\landing-page-design\SKILL.md` 的 **PART B（视觉系统）+ Design values 段**（只取设计值，**不采用** PART A 的落地页转化/SEO/文案套路——我们不是营销页）
+> 3. 现状截图（我 15:50 用 Playwright 截的当前 UI）：`D:\new\artifacts\ui-preview\index.png` / `tasks.png` / `settings.png` / `tasks-mobile.png`
+>
+> **Design Values 适配版（本项目强制，覆盖技能默认值）**：
+> - **字体**：禁止外链字体/CDN（离线自托管）→ 系统中文栈 `-apple-system, "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif`；权重 ≤700；禁斜体；
+> - **字号/行高**：吸附 Tailwind 刻度 12/14/16/18/20/24/30/36px（行高 16/20/24/28/28/32/36/40）；
+> - **间距**：0/2/4/8/12/16/24/32/40/48px；**圆角**：4/6/8/12/16px（嵌套形状 inner=outer−gap，结果>2 才用）；
+> - **颜色**：**单一 accent**（沿用蓝系、饱和度收敛，不用紫色 AI 渐变）、背景**禁渐变**、卡片**不要"边框+阴影+白底"三件套**（二选一）、阴影带背景色倾向、数字用 `tabular-nums`；
+> - **交互态**：hover / active / `:focus-visible` 三态齐全；动效 base curve `cubic-bezier(.22,1,.36,1)`，移动 500ms、颜色 300ms，`prefers-reduced-motion` 降级为淡入；
+> - **状态**：骨架屏（形似真实布局）+ 空态（组合式引导，不是空白）+ 行内错误（**禁 `window.alert`**）；导航有当前页高亮；
+> - **响应式**：断点 640 / 900 / 1200；手机上是可用的一等公民（不是桌面缩放）。
+>
+> **参考站（只借鉴信息结构/交互，不抄视觉资产与文案；开工前扫一眼即可）**：
+> [Otter.ai 界面截图集](https://design.lazyweb.com/company/otter) · [Otter App 截图](https://www.screenspo.com/apps/otter-ai) · Fireflies / tl;dv / Notta / 飞书妙记 / 通义听悟。
+> 重点看：上传区（拖拽/进度）、任务列表（状态+重试入口）、详情页"转写 / 摘要 / 待办"的信息分层、配额用量、空态引导。**我们的定位是自托管文件工具，不做会议机器人/日历集成**。
+>
+> **范围（只改 `app/src/main/resources/static/`）**：
+> 1. `style.css` 重做为**设计 token + 组件样式**（CSS 变量：颜色/间距/圆角/字号/阴影/动效；保留现有 class 名兼容或同步改 JS）；
+> 2. 4 个页面视觉与状态升级：`index.html`（上传区含**拖拽**、批量逐项结果、进度/错误态）、`tasks.html`（筛选、自动刷新、加载更多、批量重试、状态徽章、骨架/空态）、
+>    `task.html`（元信息、转写、摘要/关键词/待办分节、模板/ai_tier 呈现、导出入口）、`settings.html`（配额条、档位、术语表）；
+> 3. `auth.js` 的 token 输入：把现在的 `window.prompt` 换成**页内对话框**（保留 localStorage `mn_token` 与"401 后重试一次"语义，保留 prompt 兜底或删除需在回报说明）；
+> 4. `app.js` 只在**渲染结构**需要时同步改（API 调用/字段名一律不动）。
+>
+> **功能契约（一条都不许少）**：上传（单/多文件）、批量逐项结果与 `summary`、列表筛选 + 3s 自动刷新 + 游标加载更多、批量重试（只 DEAD）、
+> 详情 12 键渲染、导出 md 链接、设置页配额/档位/术语表、token 流（`mn_token`、401 重试一次）、所有 `/api/v1/**` 带 Bearer、离线可打开（无外链资源）。
+> **不做**：不改 Java/后端/契约/错误码；不加新功能（登录/多用户/分享）；不引框架/构建链/CDN/外链字体；不做深色模式（v2）；不改 `.env`/`docs/`；不删任何现有功能。
+>
+> **流程（按技能，但不等 veto 卡住）**：先写诊断清单到 `D:\new\artifacts\T4.14\diagnosis.md`（**每条：问题 / 严重度 / 建议改法 / 是否修 + 理由**，对照技能 audit 的 Typography/Color/Layout/States/Content/Components 分类），
+> 然后按 Fix Priority 实施；**诊断清单必须进回报**（Lead 验收时逐条核对"说了不改的为什么"）。
+>
+> **验收命令（原样贴输出）**：
+> - Playwright 截图（可复制/扩展 `D:\new\artifacts\ui-preview\shot.py`）：桌面 1440 + 手机 390，覆盖 4 页 × 正常/空/加载/错误/筛选态，落盘 `D:\new\artifacts\T4.14\before|after\`；
+>   **必须同时断言：页面无 console error、无 401 泄漏、无 layout overflow（手机 390 下横向滚动条必须没有）**；
+> - 功能冒烟（配额允许时 1 任务）：用 1s 静音 wav 真上传一次 → 列表出现 → 截图；配额不够则用现成任务截图并在回报写明；
+> - `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\test.ps1` 全量 **≥235/235** + exit 0；`-UnitOnly` 225/225；`tools\check-maintainability.ps1` exit 0；
+> - 单 commit、零 `docs/`、零 `.env`、零 Java/后端改动（`git diff --name-only` 只允许 `app/src/main/resources/static/`）。
+>
+> **配额警告（必读）**：截至 2026-11-15 17:00 配额 **82/120 分钟、50/50 任务（今日归零）**→ **必须等北京时间 00:00 日切后开工**；
+> 本卡预算 **≤4 任务**（全量 3 + 上传冒烟 1），其余（截图/脚本/诊断）0 任务；开工前与收尾各查一次 `/settings`（K-45）。
+>
+> **【回报·测试三问】** 检查了哪些场景（诊断清单逐类 / 4 页前后对比 / 5 类状态 / 手机 390 / 功能冒烟 / 全量回归）｜ 实际命令 + 输出
+> （诊断清单文件、改动文件、设计 token 表、截图文件名、用例数 + exit code、commit hash）｜ 还有哪些没验证（不许留空）。
+>
+> **【开工方式（新会话）】** 仓库 `D:\new\projects\meeting-notes` → 读根 `AGENT.md` → `git status` 干净（HEAD = T4.13 卡写入后的 docs 提交，`git log -1` 核对含 `docs(T4.14)`；**别回退 T4.1~T4.12**）
+> → 读本卡 + `state.md`/`handoff.md` → **先读两份本地 skill 文件** + 看现状截图 → 写诊断清单 → 动手。
+
+---
+
 ## T4.13 真机 UI 验收（约 1h；W4 第 9 张）
 
 > **要证明的事**：**真浏览器/真手机**上"用户点得到"的路径全部走通并留证据（截图/录屏），不是静态代码审查、不是 curl。

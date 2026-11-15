@@ -1195,6 +1195,31 @@
 
 ---
 
+### D-099 前端视觉重设计（T4.14）：用 `redesign-existing-projects` 技能，技术栈/契约不动，设计值适配"离线中文自托管"
+- **日期**：2026-11-15（用户提出"用 GitHub 上的 ai-design-skills 重做前端，可参考同类网站"）｜**决策人**：本人
+- **结论**：
+  1. **选技能**：主技能 = `elayadesign/redesign-skill` 的 **`redesign-existing-projects`**（"审计现有站点 → 就地升级，不重写"），与我们的诉求（4 个原生页面、无框架、要保住功能）完全对口；
+     `elayadesign/ai-design-skills` 的 **`landing-page-design` 只取它的 Design Values（字体/间距/圆角/字号/动效规则）**，不采用它的落地页转化/SEO 部分（我们不是营销页，是工具）。
+     两者均 **MIT**；skill 本质是 markdown 规则文件 → **本地副本已 vendor**，WorkBuddy 不需要联网/Node：
+     `D:\new\artifacts\design-skills\redesign-skill\skills\redesign-existing-projects\SKILL.md` + `...\ai-design-skills\skills\landing-page-design\SKILL.md`。
+  2. **新增卡 T4.14 前端视觉重设计**（插在 T4.13 真机 UI 之前）：**技术栈不变**（vanilla HTML/CSS/JS、无框架/无构建）、**对外契约不变**（API/错误码/12 键/批量 200 语义一律不碰）、**只改 `app/src/main/resources/static/`**；
+     流程按技能要求 **Scan → Diagnose（先出诊断清单，等人 veto）→ Fix（按 Fix Priority：字体→色面→交互态→布局→动效→组件→空/加载/错态→文案→字号）**。
+  3. **Design Values 适配裁决（关键，防"照抄英文落地页"）**：技能默认字体 Geist/Manrope/Poppins 依赖外链——**本项目离线自托管，禁止外链字体/CDN**；
+     改为**系统中文栈**（`PingFang SC, Microsoft YaHei, Noto Sans SC, sans-serif`，标题可用系统 UI 字体加负字距），字号/行高/间距/圆角**吸附 Tailwind 刻度**（12/14/16/18/20/24/30/36px；0/2/4/8/12/16/24/32/40/48px；radius 4/6/8/12/16）；
+     **单一 accent**（沿用蓝，饱和度收敛）、平面背景（禁紫色 AI 渐变/背景渐变）、`tabular-nums` 用于数字、**hover/active/focus-visible 三态齐全**、骨架屏 + 空态 + 行内错误（禁 `alert`）、`prefers-reduced-motion`、断点 640/900/1200；
+     中文句子大小写不适用（保持现有文案风格），但要求：**具体、平静、不用感叹号**。
+  4. **参考站（只借鉴信息结构与交互，不抄视觉资产/文案）**：[Otter.ai 界面截图集](https://design.lazyweb.com/company/otter)、[Otter App 截图](https://www.screenspo.com/apps/otter-ai)、
+     Fireflies / tl;dv / Notta / 飞书妙记 / 通义听悟（同类"录音→纪要+待办"产品的列表/详情/上传模式）。重点借鉴：上传区拖拽与进度、任务状态与重试入口、详情页"转写/摘要/待办"的信息分层、配额用量呈现、空态引导。
+  5. **工期与余量**：本卡约 **+3~4h**；当前**余量 0**（D-032）→ 若超时，按砍序砍 P2（INBOX 已砍，下一顺位 RSS / 只读分享链接），**不砍测试与交付材料**；交付 12-16 不变，风险登记进 state/handoff。
+  6. **验收**：Playwright 截图对比（桌面 1440 + 手机 390，含空态/加载态/错误态/筛选态）；功能 9 条路径逐条点（T4.13 再真机复核）；**全量 235/235 + 可维护性 exit 0**（配额需 00:00 日切后：全量 3 任务 + 上传冒烟 ≤1 任务）；单 commit、零 `docs/`、零 `.env`、零后端改动。
+- **依据**：`redesign-skill` 仓库 README 与其 `SKILL.md`（Fix Priority / Rules / Design Values）；`ai-design-skills` README + `landing-page-design/SKILL.md` PART B；本地副本 `D:\new\artifacts\design-skills\`；
+  现状截图 `D:\new\artifacts\ui-preview\`（我 Playwright 截的 4 页：桌面 + 手机）。
+- **已排除项**：直接上 Tailwind/React 重写（违背"别人 clone 就能跑、无构建链"的既定取向，且 K-46 横切风险）；引外链字体/CDN（离线自托管不可用、隐私与可用性都差）；
+  照搬 landing-page-design 的转化/SEO 部分（不是营销页）；把设计改成深色/品牌化大改（v1 交付前风险大，属 v2）；让 WorkBuddy 现装 Node/skills CLI（沙箱不可控，本地 vendor 更稳）；
+  跳过"先诊断后改"直接重写（技能明确要求 report before fix，且我们要能 veto）。
+
+---
+
 ## 面试速查（由本文件派生，勿单独维护）
 
 | 面试问题 | 取哪条 |
