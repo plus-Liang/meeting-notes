@@ -1519,7 +1519,7 @@ curl.exe -s --noproxy "*" -X POST http://localhost:8080/api/v1/tasks -F "file=@D
 
 ---
 
-## T4.1 列表筛选 + 批量重试 + 设置页 + **F-15 抽取式读词表**（约 3h；W4 首卡）
+## T4.1 列表筛选 + 批量重试 + 设置页 + **F-15 抽取式读词表**（约 3h；W4 首卡）✅ **已完成（`690b644`；我复跑 204/204 + 可维护性 exit 0 + 变异红→绿；139 造 DEAD→retry→3s DONE、140 F-15 术语替换 4 处；D-090/第 25 份报告）**
 
 > **现状**：W3 全 ✅（HEAD 应为 `77b85e4`，含 T3.8 验收 docs；代码 `3b80f02`）。列表**后端**已支持 `?status=` 过滤（T2.10/TaskController），
 > 但前端没有筛选 UI、没有批量重试、没有设置页；`glossary` 有 2 条真实词条（`工作副盘→工作复盘`、`AirCoding→AI Coding`），

@@ -161,4 +161,5 @@ T1.7/T1.8 已验收通过（报告 docs/协作/review/2026-11-14-T1.7-T1.8验收
 
 1. **Docker 引擎掉线 → 直接喊 Lead，别动宿主安全设置**（K-38）：你的沙箱把 `wsl.exe` 列入 Program Blacklist，所以你自己起不来 Docker Desktop；DSH 侧一条命令就能拉起（同机不同权限）。报"`dockerDesktopLinuxEngine` 管道不存在 / 8000/8001 无监听"即可，卡点 5 分钟内解除。
 2. **每组实验一结束就存日志**（K-39）：`docker compose logs app > D:\new\artifacts\logs-<实验名>.txt`，再切配置/重建容器。T3.8 的 F-14 与超时实验就是重建时丢了 WARN，最后只能靠 DB + Lead 重放补证——不要重复这个代价。
-3. **当前进度**：W3 已收口（T3.8 验收通过，`3b80f02`；D-089）。**下一张卡（T4.x）还没写**——Lead 写完会按老流程把"粘贴块"发你；在此之前不要自己在仓库里挑活干。
+3. **当前进度**：W3 已收口（T3.8 通过）；**W4 首卡 T4.1 已通过验收**（`690b644`，D-090）。**下一张卡（T4.2 端到端自动化测试）还没写**——Lead 写完会按老流程把"粘贴块"发你；在此之前不要自己在仓库里挑活干。
+4. **配置/override 写法（K-41）**：一律用**文件工具**写，不要用 shell `printf`/`sed` 拼 YAML；改完先 `docker compose config --quiet` 预检，再 `docker inspect` 核对容器 env；**`/actuator/health` 的 200 不代表新配置生效**（旧容器也会 200）。

@@ -110,7 +110,7 @@
 
 | ID | 任务 | DoD | 验证命令 / 期望 |
 |---|---|---|---|
-| **T4.1** | 列表筛选 + 批量重试 + 设置页（术语表/配额/当前 AI 档位）+ **F-15 抽取式读词表** | 无 JS 报错；筛"失败"→ 批量重试成功 | 卡已就绪（`tasks-starter.md` T4.1，2026-11-15 写）：前端筛选/分页共存、`POST /tasks/retry`（只动 DEAD，`retried/skipped`）、`GET /glossary` + `settings.html`、F-15 ≤30 行；验收含造 DEAD→重试→DONE 实机（≤4 任务/≤10 分钟） |
+| **T4.1** | 列表筛选 + 批量重试 + 设置页（术语表/配额/当前 AI 档位）+ **F-15 抽取式读词表** | 无 JS 报错；筛"失败"→ 批量重试成功 | ✅ `690b644` + `review/2026-11-15-T4.1验收.md`（D-090）。`task/TaskRetryService`（DEAD-only，复活 SQL 与 D-049 逐字同口径 + 清死信 + 重入队 + **不扣配额**，`retried/skipped` 不整体失败，1..20 去重）+ `POST /tasks/retry` + `GET /glossary` + `web/SettingsController`（配额/档位**单一判定来源**）+ `ai/ExtractiveGlossaryApplier`（F-15：**依据校验之后**替换三字段、空表逐字节不变、只记替换数）+ 前端筛选/批量重试/`settings.html`（原生 JS）。我独立复跑 **204/204 exit 0**、可维护性 exit 0（Java 55 文件）、**我另做一处变异红→绿**；实机 **139**（造 DEAD→retry→3s DONE、`dead_letter` 清空）、**140**（F-15 `术语替换：4 处`，summary/todos 纠正、transcript 保原文）；`/settings`、`/glossary`、筛选反例、导出逐字节一致；配额 66/120 分钟、12/50 任务（retry 不重复计费）。**已知限制**：F-15 只对 EXTRACTIVE；keywords bigram 残留；"进行中"合并视图无游标续页；并发重试非原子；**浏览器真机渲染未验**（交 T4.13） |
 | **T4.2** | 端到端自动化测试（N14） | 一条命令跑通 | `mvn test -Dtest=E2ETest` → BUILD SUCCESS |
 | **T4.3** | `FETCH` 直链 + SSRF 防护（N7） | 内网地址被拒 | `{"url":"http://169.254.169.254/"}` → 400 `URL_BLOCKED` |
 | **T4.4** | **零成本验证（N15）** | 清空 key → P1 故事仍走通 | 注释全部 key 重启 → US-1 成功 |
