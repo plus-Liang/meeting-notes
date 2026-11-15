@@ -154,3 +154,11 @@ T1.7/T1.8 已验收通过（报告 docs/协作/review/2026-11-14-T1.7-T1.8验收
 - WorkBuddy 开发时：**样本 / 日志 / override / 临时 / 构建产物一律放 D 盘**（项目资料用 `D:\new\artifacts\`，缓存用 `D:\cache\`）；**不许**在 `C:\Users\ljh` 下新建大文件、下载大模型/数据集。
 - 临时实验配置（override yml 等）放 `D:\new\artifacts\`，**不进仓库**；验完恢复基础 compose。
 - 若必须用 C 盘，先在回报里说明原因。
+
+---
+
+## 10. 两条运维约定（2026-11-15 起）
+
+1. **Docker 引擎掉线 → 直接喊 Lead，别动宿主安全设置**（K-38）：你的沙箱把 `wsl.exe` 列入 Program Blacklist，所以你自己起不来 Docker Desktop；DSH 侧一条命令就能拉起（同机不同权限）。报"`dockerDesktopLinuxEngine` 管道不存在 / 8000/8001 无监听"即可，卡点 5 分钟内解除。
+2. **每组实验一结束就存日志**（K-39）：`docker compose logs app > D:\new\artifacts\logs-<实验名>.txt`，再切配置/重建容器。T3.8 的 F-14 与超时实验就是重建时丢了 WARN，最后只能靠 DB + Lead 重放补证——不要重复这个代价。
+3. **当前进度**：W3 已收口（T3.8 验收通过，`3b80f02`；D-089）。**下一张卡（T4.x）还没写**——Lead 写完会按老流程把"粘贴块"发你；在此之前不要自己在仓库里挑活干。
