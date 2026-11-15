@@ -171,9 +171,11 @@ if (Test-Path $test) {
 
 # M2 配置外置：yml 变量必须都在 .env.example（复用配置清单 §2 判据）
 if ((Test-Path $yml) -and (Test-Path $envExample)) {
+    # 注意：本清单与 docs/项目/录音纪要平台/配置清单.md §2 的 $allowed 必须一致（T4.12/K-53：两处副本会漂移）。
+    # TZ：由 compose 传给 app+postgres，且 app 的 TimezoneConsistencyCheck 直接 @Value 消费（T4.12/F-23）→ 豁免。
     $allowed = @('ASR_PORT','INBOX_HOST_DIR','POSTGRES_DB','POSTGRES_USER','POSTGRES_PASSWORD','REGISTRY_PREFIX',
         'MINIO_PORT','MINIO_CONSOLE_PORT','OLLAMA_PORT','MINIO_IMAGE','OLLAMA_IMAGE','ASR_MODEL_HOST_DIR','PIP_INDEX_URL',
-        'ASR_MODEL_NAME','ASR_LANGUAGE','ASR_COMPUTE_TYPE','ASR_BEAM_SIZE','ASR_SMOKE_AUDIO','FFPROBE_BIN')
+        'ASR_MODEL_NAME','ASR_LANGUAGE','ASR_COMPUTE_TYPE','ASR_BEAM_SIZE','ASR_SMOKE_AUDIO','FFPROBE_BIN','TZ')
     $vars = (Select-String -Path $yml -Pattern '\$\{([A-Z0-9_]+)' -AllMatches).Matches |
         ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique
     $envs = (Select-String -Path $envExample -Pattern '^([A-Z0-9_]+)=' -AllMatches).Matches |

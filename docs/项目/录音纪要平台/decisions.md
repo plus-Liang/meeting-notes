@@ -1165,6 +1165,36 @@
 
 ---
 
+### D-098 T4.12 验收通过（死配置体检：40 键 / 5 个死配置全为计划中 / 孤儿 0；F-22 空 secret 不再空烧、F-21 启动 fail-fast 可读、F-23 时区 WARN 预检；队列键评估=不改）
+- **日期**：2026-11-15（T4.12 验收）｜**决策人**：本人
+- **结论**：
+  1. **T4.12 通过**（`3c650ca`，**单 commit**，6 文件 +277/−12，父 `2ccfa15`，待随本次 docs 一起 push；第 32 份报告 `review/2026-11-15-T4.12验收.md`）。
+     我复跑 `-UnitOnly` **225/225 exit 0**（217+8）、可维护性 **exit 0**（60 Java 文件，阻塞 0 / 提示 1）；全量 **235/235** 只核落盘日志
+     （我复核时今日任务配额已 **50/50**，重跑全量必 429——如实记入报告，不做假绿）。
+  2. **配置体检结论（可判定为真）**：yml 叶子 `app.*` **40 键**；死配置 **5 个**（`app.asr.max-concurrency`、`app.asr.max-segment-sec`、`app.inbox.enabled/dir/poll-sec`）
+     **全部是 §3 已登记"计划中"（P2/D-032）**，**未登记孤儿 = 0**；3 个 `BATCH_*` 键均有消费方（非死键）。
+     **`配置清单.md §2` 快照过期**：`$appKeys` 36 → **40**（补 `app.limits.batch-max-files`/`batch-estimate-rtf`/`app.llm.ollama.max-tokens`/`timeout-sec`）；
+     `$allowed` 增加 **`TZ`**（它由 compose + 新 `TimezoneConsistencyCheck` 直接消费，不进 yml）；§3 的 `app.base-url`"计划中"行已过时（T4.6 起已消费）→ 一并更正（文档由我同步）。
+  3. **F-22 修复语义（采纳）**：`scanDue` 空 secret 短路——不投递、**不消耗 attempts**、**`next_retry` 保持原样**、WARN **只发一次**。
+     "保持原样"是正确取舍：补配 secret 重启后自动续投（与 T4.8 已验证的重启续跑语义一致）；清遗留行应是运营者显式 `UPDATE … SET next_retry=NULL`，不该是自动副作用。
+     我独立复现：行 id=8 `attempts=0`、`next_retry` 逐字符未变、本次运行 WARN 恰 1 条、`HMAC-SHA256 不可用` **0 条**（与 T4.8 修复前"空烧 4 次"形成对照）。
+  4. **F-21 修复语义（采纳）**：显式 `LLM_ENABLED=true` 且云三键缺 → 在最早的 `EnvironmentPostProcessor` **fail-fast**，点名缺失键 + 两种修法；不改 D-039 显式优先语义。
+     我独立复现：override → 容器 `ExitCode=1`、日志原文点名 `LLM_BASE_URL/LLM_API_KEY/LLM_MODEL`；还原后 5/5 healthy、`preferred=CLOUD`。
+  5. **F-23 预检严格度（裁决：WARN，不 fail-fast）**：时区错位不损坏数据（`timestamptz` 是绝对时间）、可在线 `ALTER DATABASE` 自愈、海外用户可能有意 UTC——
+     为可自愈漂移挡死自托管启动，代价大于收益。启动 INFO 判据 = `SHOW timezone` 与配置 `TZ` 一致（K-51：在消费点验证）。
+     我另起**临时空卷**验证：新装 `SHOW timezone=Asia/Shanghai`、`current_date` 与北京日一致（`t`）→ F-23 是老卷历史问题，新装不受影响；临时容器/卷已清理。
+  6. **队列键评估 = 不改**（采纳写码方结论）：`@MockBean` 是比"换独立队列键"更强的隔离——换键仍保留真实 Redis 连接，且"换的键没生效就静默抢真实队列"正是 K-42 要防的假红；
+     忠实性由 E2E（打真实容器）承担。**不产生代码改动**。
+  7. **数据与配额**：全量 E2E 新增任务 **203（PASTE）/205/206（2×1s wav）** 全 DONE；任务总数 **94**、DEAD 0、`webhook_delivery` **8 行**（id=7 写码方证据、id=8 我复现证据，D-073 保留）；
+     配额 **82/120 分钟、50/50 任务**（本卡 +3 任务/+2 分钟）。**今日任务配额归零** → T4.13 真机 UI 必须等**北京时间 00:00 日切**。
+- **依据**：`review/2026-11-15-T4.12验收.md`；`D:\new\artifacts\T4.12\`（写码方：config-audit-machine/five-way、queue-key-evaluation、override-f21、full-run1 235/235、maintainability）
+  + 我 `T4.12\lead-verify\`（-UnitOnly 225/225、F-22 行 8 复现、F-21 ExitCode=1、F-23 新卷判据）；DB 任务 94/DEAD 0/`webhook_delivery` 8、配额行 82/50。
+- **已排除项**：为跑全量去删配额行/改 `QUOTA_*`（D-073 证据纪律 + K-36：会让"429 真会拦"失去可信度）；把 F-23 做成 fail-fast（会挡死海外 UTC 自托管与可自愈漂移）；
+  F-22 空 secret 时自动清空 `next_retry`（会掩盖遗留行、破坏"补配后自动续投"语义）；改队列键（理由见 6）；把 `TZ` 塞进 yml 只为骗过 M2 提示（它是 compose/code 消费，正确做法是进 `$allowed` 并让代码显式消费）；
+  用 `@MockBean` 之外的重型隔离（超出本卡范围，E2E 已承担忠实性）。
+
+---
+
 ## 面试速查（由本文件派生，勿单独维护）
 
 | 面试问题 | 取哪条 |
