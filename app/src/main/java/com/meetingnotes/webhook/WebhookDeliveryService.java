@@ -21,21 +21,18 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 
 /**
- * Webhook 投递（T4.6 / US-10，契约 = 接入指南.md §四，不自创字段）：
- * 任务终态（DONE→task.done / DEAD→task.failed）异步推送；URL 取 task.callback_url 优先，
- * 否则全局 app.webhook.url；WEBHOOK_SECRET 为空不投递（安全默认）；OFFLINE_MODE=true 不投递（出站禁令，D-077）。
- *
- * <p>语义：worker 只做一次 {@link #onTerminal}（毫秒级：查 URL + 记账一行），HTTP 投递在独立单线程执行——
- * 不阻塞 worker、不改 DONE 时序（D-069）。每次尝试先自增 attempts 再投（原子认领），2xx=成功；
- * 失败按 WEBHOOK_MAX_RETRIES（3）指数退避 1s/10s/60s，重试扫描用 @Scheduled；最终失败 next_retry 置空
- * 留表可观测，不静默丢。delivery_id 由行 id 派生确定性 UUID（重试同键，接入方据此去重），无需改表。
- * 签名 = HMAC-SHA256(secret, 原始请求体字节)，头 X-MeetingNotes-Signature: sha256=&lt;hex&gt;。
- * 不做：手动重投 UI（P2）、WEBHOOK_SECRET_2 轮换（P2）、签名时间窗/重放防护（P3）。
+ * Webhook 投递（T4.6 / US-10，契约 = 接入指南.md §四，不自创字段）：任务终态（DONE→task.done / DEAD→task.failed）异步推送；
+ * URL 取 task.callback_url 优先，否则全局 app.webhook.url；WEBHOOK_SECRET 为空不投递（安全默认，两条入口都挡，见 {@link #scanDue} F-22）；
+ * OFFLINE_MODE=true 不投递（D-077）。worker 只做一次 {@link #onTerminal}（毫秒级记账），HTTP 投递在独立单线程执行——不阻塞 worker、不改 DONE 时序（D-069）。
+ * 每次尝试先自增 attempts 再投（原子认领），失败按 WEBHOOK_MAX_RETRIES 指数退避 1s/10s/60s，终局 next_retry 置空留表可观测；
+ * delivery_id 由行 id 派生确定性 UUID（重试同键去重）；签名 = HMAC-SHA256(secret, 原始请求体字节)。
+ * 不做：手动重投 UI（P2）、secret 轮换（P2）、签名时间窗/重放防护（P3）。
  */
 @Service
 public class WebhookDeliveryService {
@@ -44,7 +41,6 @@ public class WebhookDeliveryService {
 
     /** 指数退避（秒）：第 1/2/3 次失败后分别等 1s/10s/60s（接入指南 §4.4 固定档）。 */
     static final long[] BACKOFF_SECONDS = {1, 10, 60};
-
     private final JdbcTemplate jdbc;
     private final ObjectMapper mapper;
     private final String globalUrl;
@@ -60,6 +56,8 @@ public class WebhookDeliveryService {
         t.setDaemon(true);
         return t;
     });
+    /** F-22：空 secret 的 WARN 只发一次——配置缺失是稳态，扫描每秒一轮回没有信息量。 */
+    private final AtomicBoolean emptySecretWarned = new AtomicBoolean(false);
 
     public WebhookDeliveryService(JdbcTemplate jdbc,
                                   ObjectMapper mapper,
@@ -111,7 +109,12 @@ public class WebhookDeliveryService {
         }
     }
 
-    /** 重试扫描：到期行交投递器（attempt 内先认领，重复扫描不会双投）。 */
+    /**
+     * 重试扫描：到期行交投递器（attempt 内先认领，重复扫描不会双投）。
+     * F-22（T4.12 / K-49：调度器必须重放"入队前置条件"）：本扫描与 {@link #onTerminal} 是两条入口，空 secret 必须都挡，
+     * 否则遗留/手工到期行被空密钥签名异常按 1s/10s/60s 空烧 4 次到终局，且 {@code HMAC-SHA256 不可用} 文案误导排障（真因是配置缺失）。
+     * 空 secret：不投递、不消耗 attempts，next_retry 保持原样（补配 secret 重启后自动续投，同 T4.8 重启续跑语义）。
+     */
     @Scheduled(fixedDelay = 1000)
     public void scanDue() {
         if (offlineMode) {
@@ -120,6 +123,18 @@ public class WebhookDeliveryService {
         try {
             List<Long> due = jdbc.queryForList(
                     "SELECT id FROM webhook_delivery WHERE next_retry IS NOT NULL AND next_retry <= now()", Long.class);
+            if (due.isEmpty()) {
+                return;
+            }
+            if (secret.isEmpty()) {
+                if (emptySecretWarned.compareAndSet(false, true)) {
+                    log.warn("Webhook 重试扫描发现 {} 行到期投递，但 WEBHOOK_SECRET 未配置（配置缺失）："
+                            + "跳过投递、不消耗重试次数，补配 secret 并重启后自动续投；"
+                            + "若要清掉遗留到期行可执行 UPDATE webhook_delivery SET next_retry = NULL",
+                            due.size());
+                }
+                return;
+            }
             for (Long id : due) {
                 dispatcher.submit(() -> attempt(id));
             }

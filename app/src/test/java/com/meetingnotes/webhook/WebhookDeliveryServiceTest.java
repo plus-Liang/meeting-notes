@@ -2,16 +2,27 @@ package com.meetingnotes.webhook;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowMapper;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.timeout;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
  * T4.6：Webhook 契约的纯函数面——事件映射、HMAC-SHA256 签名（与接收端 §4.3 伪代码互证）、
@@ -77,5 +88,33 @@ class WebhookDeliveryServiceTest {
                 keys, "键名逐字对齐接入指南 §4.2");
         assertEquals("http://localhost:8080/api/v1/tasks/7", node.get("result_url").asText());
         assertEquals(2, node.get("todos_count").asInt(), "todos_count = JSONB 数组长度");
+    }
+
+    /** F-22（T4.12）：空 WEBHOOK_SECRET 时扫描不得把到期行交给投递器——不投递、不认领（attempts 不增长）、不空烧。 */
+    @Test
+    void scanDueSkipsDeliveryAndClaimWhenSecretEmpty() {
+        JdbcTemplate jdbc = mock(JdbcTemplate.class);
+        when(jdbc.queryForList(anyString(), eq(Long.class))).thenReturn(List.of(1L, 2L));
+        WebhookDeliveryService service = new WebhookDeliveryService(
+                jdbc, new ObjectMapper(), "", "", 3, 10, "http://localhost:8080", false);
+        service.scanDue();
+        service.scanDue();
+        // attempt() 的认领走 jdbc.query(UPDATE ... RETURNING)（ResultSetExtractor 重载）：空 secret 必须一次都不发生
+        verify(jdbc, never()).query(anyString(), any(org.springframework.jdbc.core.ResultSetExtractor.class), any(Object[].class));
+        verify(jdbc, never()).update(anyString(), any(Object[].class));
+    }
+
+    /** K-40 正向对照：secret 已配置时，同一份到期行必须正常进入认领流程（防止守卫写过头）。 */
+    @Test
+    void scanDueHandsDueRowsToDispatcherWhenSecretConfigured() {
+        JdbcTemplate jdbc = mock(JdbcTemplate.class);
+        when(jdbc.queryForList(anyString(), eq(Long.class))).thenReturn(List.of(1L));
+        when(jdbc.query(anyString(), any(org.springframework.jdbc.core.ResultSetExtractor.class), any(Object[].class)))
+                .thenReturn(null);
+        WebhookDeliveryService service = new WebhookDeliveryService(
+                jdbc, new ObjectMapper(), "", "t46-secret", 3, 10, "http://localhost:8080", false);
+        service.scanDue();
+        verify(jdbc, timeout(2000).atLeastOnce())
+                .query(anyString(), any(org.springframework.jdbc.core.ResultSetExtractor.class), any(Object[].class));
     }
 }
