@@ -157,13 +157,15 @@ T1.7/T1.8 已验收通过（报告 docs/协作/review/2026-11-14-T1.7-T1.8验收
 
 ---
 
-## 10. 两条运维约定（2026-11-15 起）
+## 10. 运维约定与回报纪律（2026-11-15 起）
 
 1. **Docker 引擎掉线 → 直接喊 Lead，别动宿主安全设置**（K-38）：你的沙箱把 `wsl.exe` 列入 Program Blacklist，所以你自己起不来 Docker Desktop；DSH 侧一条命令就能拉起（同机不同权限）。报"`dockerDesktopLinuxEngine` 管道不存在 / 8000/8001 无监听"即可，卡点 5 分钟内解除。
 2. **每组实验一结束就存日志**（K-39）：`docker compose logs app > D:\new\artifacts\logs-<实验名>.txt`，再切配置/重建容器。T3.8 的 F-14 与超时实验就是重建时丢了 WARN，最后只能靠 DB + Lead 重放补证——不要重复这个代价。
-3. **当前进度**：W3 已收口（T3.8 通过）；**W4：T4.1 ✅（`690b644`）、T4.2 ✅（`e9649d2`）、T4.4 ✅（无 commit，只交证据）**。
-   **下一张卡是 T4.5 离线验证（US-9/N16）**，Lead 已写进 `tasks-starter.md`，按老流程把"粘贴块"发你；在此之前不要自己在仓库里挑活干。
-   T4.5 关键差异（K-44，Lead 已实测）：断网靠 `networks.default.internal: true` 叠加，**必须 `down` 再 `up`**（只 `up -d` 会留 invalid IP）；
-   内网下宿主连不上 8080，**API 只能在容器内 `docker compose exec -T app curl`**；`enable_ip_masquerade=false` 断不了外网，别用。
+3. **当前进度**：W3 已收口（T3.8 通过）；**W4：T4.1 ✅（`690b644`）、T4.2 ✅（`e9649d2`）、T4.4 ✅（无 commit）、T4.5 ✅（无 commit）**。
+   **下一张卡是 T4.6 接入面（US-10/N17：API Token 401 + OpenAPI + Webhook 验签）**，Lead 已写进 `tasks-starter.md`，按老流程把"粘贴块"发你；在此之前不要自己在仓库里挑活干。
+   T4.6 关键差异：**这次会改主代码**（`web/ApiTokenFilter` + `static/auth.js` + springdoc + Webhook 投递器），现有 209 条测试必须全绿（T4.6 起 +1 条 401 用例）；
+   `/api/v1/**` 要 Bearer 之后**浏览器页面首次要粘一次 token**（存在 localStorage），E2E 要带 token（卡里有顺序）；Webhook 用 `host.docker.internal:host-gateway` 打到宿主接收端。
 4. **配置/override 写法（K-41）**：一律用**文件工具**写，不要用 shell `printf`/`sed` 拼 YAML；改完先 `docker compose config --quiet` 预检，再 `docker inspect` 核对容器 env；**`/actuator/health` 的 200 不代表新配置生效**（旧容器也会 200）。
 5. **证据三类都要落盘（K-43）**：①命令与退出码（`mvn … > verify-*.txt`）②行为日志（`docker compose logs`）③数据快照（DB 行/API JSON）。只存日志 = 测试结论不可复核（T4.4 的教训）。
+6. **收尾数字最后一步查（K-45）**：全量测试含 E2E，每跑一次会新增 1 条 PASTE 任务——**配额/任务数必须在你所有动作（含全量测试）都做完之后再查**，
+   然后才写回报。T4.4/T4.5 连续两次因"先查数后跑测试"差 1，被验收侧复算抓出；现在起固定为回报的最后一个动作。

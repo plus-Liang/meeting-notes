@@ -1687,7 +1687,7 @@ F-15 控制在 ≤30 行并集中一处；新增静态资源不引第三方库�
 
 ---
 
-## T4.5 离线验证（US-9 / N16）（约 1.5h；W4 第 4 张）
+## T4.5 离线验证（US-9 / N16）（约 1.5h；W4 第 4 张）✅ **已完成（无 commit；真断网 + 真 key → 门禁屏蔽、task 166 DONE/EXTRACTIVE/零出站；反例 167 级联降级实证；209/209；D-093/第 28 份报告）**
 
 > **要证明的事**：**把外网真的断掉（不是只清 key），US-1 主故事仍然能走完，且全程没有任何出站连接**。
 > 同时验证 **D-077 的离线硬门禁**：即使 `.env` 里配着真实云 key，`OFFLINE_MODE=true` 也必须把云档硬屏蔽 → 实际档位 ≠ CLOUD。
@@ -1758,7 +1758,68 @@ F-15 控制在 ≤30 行并集中一处；新增静态资源不引第三方库�
 **【回报·测试三问】** 检查了哪些场景（断网判据 / 真音频全链路 / 可选降级反例 / 恢复）｜ 实际命令 + 输出（override 原文、`/proc/net/route`、外网失败原文、settings JSON、
 日志门禁 WARN 原文、taskId + 各字段、export 摘录、恢复后 settings、`.env` 哈希、exit code）｜ 还有哪些没验证（**不许留空**；E2E 未跑要写原因）。
 
-**【开工方式（新会话）】** 仓库 `D:\new\projects\meeting-notes` → 读根 `AGENT.md` → `git status` 干净（HEAD `3e096ef` + 本次 docs 提交，**别回退 T4.1/T4.2/T4.4**）→ 读本卡 + `state.md`/`handoff.md` → 先写 override 并**先 down 再 up**。
+**【开工方式（新会话）】** 仓库 `D:\new\projects\meeting-notes` → 读根 `AGENT.md` → `git status` 干净（HEAD `909b416` + 本次 docs 提交，**别回退 T4.1/T4.2/T4.4**）→ 读本卡 + `state.md`/`handoff.md` → 先写 override 并**先 down 再 up**。
+
+---
+
+## T4.6 接入面（US-10 / N17）（约 3.5h；W4 第 5 张）
+
+> **要证明的事**：**别人不开浏览器，也能把这个项目接进自己的系统**——三条 curl 走完"提交 → 查状态 → 取结果"，
+> 一个 20 行接收端能收到 Webhook 并**验签通过**，契约能被发现（`/v3/api-docs` + Swagger UI）。
+> 这是"给别人用"（D-003R）的最后一公里：现在 `/api/v1/**` **完全匿名**，`API_TOKEN` 只是摆设（D-040 明确留到本卡）。
+> **纪律**：不改 `.env` 持久值（D-070/K-35）；实验配置用外部 override；验完恢复基线 + 哈希校验；每组实验立刻落盘日志/输出（K-39/K-43）。
+
+**配额**：2026-11-15 已用 **68/120 分钟、28/50 任务**；本卡预算 **≤4 任务 / 0 分钟**（PASTE 0 分钟；Webhook 2 条 + 鉴权 1 条 + E2E 1 条）。
+**开工前先查当日已用；回报前最后一步再查一次**（K-45）。
+
+**主任务**：
+
+1. **API Token 认证（D-040：`401 UNAUTHORIZED` + Bearer）**
+   - 新增 `web/ApiTokenFilter`（`OncePerRequestFilter`）：`/api/v1/**` 必须带 `Authorization: Bearer <API_TOKEN>`；
+     缺失/错误 → **401** + JSON `{"code":"UNAUTHORIZED","message":"…"}`（沿用全局 snake_case 与 `ErrorResponse` 结构），响应头加 `WWW-Authenticate: Bearer`；
+   - **豁免（必须逐条实测）**：`/actuator/health`、`/actuator/health/**`、静态页与资源（`/`、`/index.html`、`/tasks.html`、`/task.html`、`/settings.html`、`/app.js`、`/auth.js`、`/style.css`）、`/v3/api-docs/**`、`/swagger-ui/**`、`/swagger-ui.html`；
+   - token 从**已有配置键**读（`security.api-token` ← `API_TOKEN`），**不新增键**；比较用**常量时间**（`MessageDigest.isEqual`），别用 `String.equals`；
+   - 401 必须走统一错误口径（通用码，D-057），不能是默认 HTML 错误页。
+2. **浏览器 UI 不被认证打死**（现在 4 个页面直接 `fetch('api/v1/…')`，没有 token）
+   - 新增 `app/src/main/resources/static/auth.js`：`apiFetch(url, opts)` —— 自动带 `Authorization: Bearer`（token 存 `localStorage.mn_token`）；
+     遇 401 → `prompt()` 让用户粘一次 token → 存 → **重试一次**；仍失败展示可读错误。
+   - `index.html` / `tasks.html` / `task.html` / `settings.html` 的 fetch 调用改用 `apiFetch`，并把 `auth.js` 放在 `app.js`/内联脚本之前。
+   - 验收：匿名 curl → 401；带 token curl → 200；页面静态审查 +（T4.13 真机再点）。
+3. **OpenAPI（D-019 的第三面，几乎免费）**
+   - `pom.xml` 加 `springdoc-openapi-starter-webmvc-ui`（**2.8.x**，需与 Spring Boot 3.5 兼容）；配置 `/v3/api-docs`、`/swagger-ui.html`；
+     声明 `bearer` securityScheme（≤20 行配置即可，别给每个 controller 堆注解）。
+   - 验收：`curl /v3/api-docs` → 200 合法 JSON（`paths` 里有 `/api/v1/tasks`）；`curl /swagger-ui/index.html` → 200；**这两个端点不加 token 也能访问**（契约可发现）。
+4. **Webhook（严格按 `接入指南.md` §四 契约实现，不要自创字段）**
+   - **触发**：任务进终态时 `DONE` → `task.done`、`DEAD` → `task.failed`；目标 URL：任务 `callback_url`（`task` 表已有列）优先，否则全局 `WEBHOOK_URL`；**`WEBHOOK_SECRET` 为空 → 不投递**（安全默认）。
+   - **请求**：JSON 体 `{event, delivery_id, task_id, status, ai_tier, occurred_at, result_url, summary, todos_count}`；
+     头 `X-MeetingNotes-Event`、`X-MeetingNotes-Delivery`（UUID，去重键）、`X-MeetingNotes-Signature: sha256=<HMAC_SHA256(secret, 原始请求体字节)>`、`Content-Type: application/json`。
+   - **投递语义**：异步投递，**不阻塞 worker、不改变 DONE 时序**（D-069）；2xx = 成功；失败按 `WEBHOOK_MAX_RETRIES`（3）指数退避 **1s / 10s / 60s**；超时 `WEBHOOK_TIMEOUT_SEC`；
+     每次尝试记账 `webhook_delivery`（`attempts`/`last_status`/`next_retry`），最终失败**留表可观测、不静默丢**；重试扫描用 `@Scheduled`（不新增配置键）。
+   - **离线口径（本卡定，写进回报）**：`OFFLINE_MODE=true` 时**不投递**（Webhook 是出站），只记一行日志"离线模式跳过 Webhook"。
+   - **不做（写进回报的"没做"）**：页面手动重投 UI（P2）、`WEBHOOK_SECRET_2` 轮换（P2）、签名时间窗/重放防护（P3）。
+5. **契约回归与测试**
+   - 现有 **209** 必须全绿；`E2ETest` 改为**带 token**（顺序：`E2E_API_TOKEN` 环境变量 → 读仓库根 `.env` 的 `API_TOKEN` → 空），并**新增 1 条用例**：不带 token 调 `/api/v1/tasks` → 401 且 `code=UNAUTHORIZED`（**基线变 210，验收按 ≥210 且不减少**；你若另加单测更多更好）。
+   - `scripts/test.ps1`：全量跑前从 `.env` 取 `API_TOKEN` 并 `$env:E2E_API_TOKEN=…`（或在头注释写清手动跑法）；`-UnitOnly` 不受影响。
+   - 我核过：现在**没有 MockMvc 单测**，所以 filter 不会打挂现有单测；若你新增 MockMvc 测试，必须带 token。
+6. **验收（三条 curl + 20 行接收端 + 反例，全部要落盘输出）**
+   - 三条 curl（带 token）：`POST /api/v1/tasks`（PASTE JSON）→ `GET /api/v1/tasks/{id}` → `GET …/export?format=md`；再各跑一次**不带 token**（必须 401）。
+   - 接收端：`D:\new\artifacts\t46-receiver.ps1`（PowerShell `HttpListener` 或 Python stdlib，≤20 行有效逻辑）后台跑；
+     用 override 起 app：`WEBHOOK_URL=http://host.docker.internal:18080/hooks`、`WEBHOOK_SECRET=t46-secret`，并加 `extra_hosts: ["host.docker.internal:host-gateway"]`；
+     提交 1 条 PASTE → 接收端打印 payload、**验签 True**、`delivery_id` 与请求头一致；**反例**：secret 改成错的 → 验签 False。
+   - OpenAPI：解析 `/v3/api-docs` JSON，断言 `paths["/api/v1/tasks"]` 存在。
+   - 恢复基线：5 服务 healthy、`.env` hash `2BCC440F1C9E`、匿名/带 token 行为回到 .env 真实 token、全量 **≥210（209+新增 401 用例）** exit 0、可维护性 exit 0。
+   - 收尾：**单 commit**（代码 + 测试 + 静态页 + pom 一个 commit）、不 push、不写 `docs/`、证据行不删；**最后一步再查配额/任务数**（K-45）。
+
+**范围声明**
+- 做：认证 filter + UI token 适配 + springdoc + Webhook 投递/签名/重试/记账 + E2E 一条 401 用例 + 三条 curl/接收端/反例证据。
+- 不做：多用户/角色（D-002）、OAuth2、JWT、Webhook 管理页面、`WEBHOOK_SECRET_2`、手动重投 UI、给 OpenAPI 加全量中文注解、inbox/MCP。
+- 存储：override/接收端脚本/日志/输出全在 `D:\new\artifacts\`。
+
+**【可维护性】** 单文件 ≤200 行；认证 filter、Webhook 投递、控制器分离；`WEBHOOK_*` 四个已有键全部被消费（不许新增死配置）；commit 前 `check-maintainability.ps1` exit 0。
+
+**【回报·测试三问】** 检查了哪些场景（401/豁免面/静态页/openapi/webhook 验签/反例/离线口径）｜ 实际命令 + 输出（三条 curl 原文、401 响应体、`/v3/api-docs` 路径片段、接收端 payload + 验签 True/False、`webhook_delivery` 行、E2E 用例数前后、全量 ≥210、`.env` 哈希、exit code）｜ 还有哪些没验证（**不许留空**）。
+
+**【开工方式（新会话）】** 仓库 `D:\new\projects\meeting-notes` → 读根 `AGENT.md` → `git status` 干净（HEAD 以最新一条 docs 提交为准，**别回退 T4.1/T4.2/T4.4/T4.5**）→ 读本卡 + `state.md`/`handoff.md` → 先做认证 filter + UI 适配，再做 OpenAPI，最后做 Webhook。
 
 ---
 

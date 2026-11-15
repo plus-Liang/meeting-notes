@@ -1044,6 +1044,31 @@
 
 ---
 
+### D-093 T4.5 验收通过（断网 + 真 key 下 US-1 仍走通、零出站；级联降级在断网故障下成立；收尾数字第 2 次采样偏早→K-45）
+- **日期**：2026-11-15（T4.5 验收）｜**决策人**：本人
+- **结论**：
+  1. **T4.5 通过**（**零代码改动、无 commit**，HEAD 仍 `909b416`；第 28 份报告 `review/2026-11-15-T4.5验收.md`）。
+     证明目标达成：**把外网真断（internal 网络、无默认路由、外网 DNS 失败）** + **`.env` 真 key 在位（`cloud_configured=true`）** 的环境下，
+     `OFFLINE_MODE=true` 硬屏蔽云档（门禁 WARN 原文），**US-1 全链路仍 DONE + `ai_tier=EXTRACTIVE` + 导出三节 + 零出站**。
+  2. **断网三判据 + 门禁四证全中**：`/settings` `preferred=EXTRACTIVE/cloud_configured=true/offline_mode=true`；`/proc/net/route` 无默认路由；
+     容器内 `curl` 外网 `Could not resolve host` exit=6；WARN 原文可见。**口径关键**：`cloud_configured=true` 证明拦的是策略不是"没 key"。
+  3. **真音频 task 166**（40s UPLOAD，新 hash）：`DONE/EXTRACTIVE/template=meeting/transcript 99/summary 99/keywords 5/error_code=null/todos=[]`（D-072 语义）；
+     导出 200 三节；日志有 EXTRACTIVE 落库行、`grep CLOUD|DeepSeek|timeout|重试` 零命中（**根本没发请求**，比"发了失败"更强）。
+  4. **反例 task 167（写码方主动做了，+1 任务/0 分钟）**：同内网 `OFFLINE_MODE=false` → `preferred=CLOUD` → 云档 `UnknownHostException`（Spring AI 重试 2 次）
+     → `CLOUD 档未产出 → LOCAL 档未产出 → EXTRACTIVE` 级联 → **任务仍 DONE**、`ai_tier=EXTRACTIVE`、todos 正常。**D-075 级联在"断网"真实故障下被证实**。
+  5. **恢复**：5 healthy、`internal=false`、`preferred=CLOUD/offline_mode=false`、`.env` `2BCC440F1C9E` 守恒、**209/209 exit 0**、可维护性 exit 0、工作区干净。
+  6. **配额**：任务 166/167/168（168 是恢复后全量跑的 E2E，CLOUD），全 DONE；**68/120 分钟、28/50 任务**，总数 **72**，DEAD=0，证据行保留（D-073）。
+     写码方回报"27/50"再次**采样偏早**（跑完全量新增 168）——与 T4.4 的 22→23 同型、**同位置第 2 次** → 记 **K-45**（收尾数字必须最后一步查），
+     并写进 `交付给WorkBuddy.md` 作为固定回报项。
+  7. **独立验证边界（如实记录）**：我没有重放整卡（断网机制我上一轮已亲手验证 `t45-probe.yml`，重放需 `down` 两次且无新信息、反而增加装置风险）；
+     我独立核了 DB 联查（166/167）、证据文件原文、恢复态网络/hash/health/settings、日志 WARN 与级联原文、全量用例数与 exit 0。**证据链闭合**。
+- **依据**：`review/2026-11-15-T4.5验收.md`；`D:\new\artifacts\`（`t45-offline.yml`/`t45-offline2.yml`/`logs-t45-*`/`t45-evidence-*`/`verify-t45-*`）；
+  DB 行 166/167/168 + `quota` 行；`docker network inspect internal=false`；209/209 + 可维护性 exit 0。
+- **已排除项**：为验断网重放整卡（无新信息、装置风险）；把 Webhook 出站在断网下的行为塞进本卡（Webhook 代码在 T4.6，尚无接收端配置）；
+  用 `enable_ip_masquerade=false` 当断网手段（T4.4 已实测无效）；只清 key 冒充"离线验证"（那是 T4.4，两件事）。
+
+---
+
 ## 面试速查（由本文件派生，勿单独维护）
 
 | 面试问题 | 取哪条 |
