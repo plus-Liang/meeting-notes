@@ -107,7 +107,7 @@
     return '<div class="task-row" data-id="' + item.id + '">' +
       '<span class="task-name">' + checkbox + '#' + item.id + ' ' + escapeHtml(name) + '</span>' +
       '<span class="task-side">' + badgeHtml(item.status) + ' ' +
-      '<a href="task.html?id=' + item.id + '">详情 →</a></span></div>';
+      '<a href="task.html?id=' + item.id + '">详情</a></span></div>';
   }
 
   var EMPTY_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
@@ -200,7 +200,7 @@
       ? '<p class="hint">服务暂时不可用，以下为本浏览器上次提交的缓存：</p>' +
         index.map(function (item) {
           return '<div class="task-row"><span class="task-name">#' + item.id + ' ' + escapeHtml(item.name) + '</span>' +
-            '<span class="task-side"><a href="task.html?id=' + item.id + '">详情 →</a></span></div>';
+            '<span class="task-side"><a href="task.html?id=' + item.id + '">详情</a></span></div>';
         }).join('')
       : emptyOfflineHtml();
   }
