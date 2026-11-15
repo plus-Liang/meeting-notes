@@ -161,14 +161,16 @@ T1.7/T1.8 已验收通过（报告 docs/协作/review/2026-11-14-T1.7-T1.8验收
 
 1. **Docker 引擎掉线 → 直接喊 Lead，别动宿主安全设置**（K-38）：你的沙箱把 `wsl.exe` 列入 Program Blacklist，所以你自己起不来 Docker Desktop；DSH 侧一条命令就能拉起（同机不同权限）。报"`dockerDesktopLinuxEngine` 管道不存在 / 8000/8001 无监听"即可，卡点 5 分钟内解除。
 2. **每组实验一结束就存日志**（K-39）：`docker compose logs app > D:\new\artifacts\logs-<实验名>.txt`，再切配置/重建容器。T3.8 的 F-14 与超时实验就是重建时丢了 WARN，最后只能靠 DB + Lead 重放补证——不要重复这个代价。
-3. **当前进度**：W3 已收口（T3.8 通过）；**W4：T4.1 ✅（`690b644`）、T4.2 ✅（`e9649d2`）、T4.4 ✅（无 commit）、T4.5 ✅（无 commit）、T4.6 ✅（`1c2aa73`）**。
-   **下一张卡是 T4.7 批量提交（US-8：一次 10~20 个文件互不影响）**，Lead 已写进 `tasks-starter.md`，按老流程把"粘贴块"发你；在此之前不要自己在仓库里挑活干。
-   T4.7 关键点：新增 `POST /api/v1/tasks/batch`（多文件、逐项独立结果/失败隔离）、3 个新配置键（`BATCH_MAX_FILES` 20 / `TASK_BATCH_MAX_SIZE_BYTES` 2GB / `BATCH_ESTIMATE_RTF` 0.15，全要有消费方）、
-   上传页多选 + 总时长/预计耗时、E2E 场景 G（2 成功 + 1 坏文件隔离 + 21 个超限 400）。**现在所有 curl 都必须带 `Authorization: Bearer`**（T4.6 起）。
+3. **当前进度**：W3 已收口（T3.8 通过）；**W4：T4.1 ✅（`690b644`）、T4.2 ✅（`e9649d2`）、T4.4 ✅（无 commit）、T4.5 ✅（无 commit）、T4.6 ✅（`1c2aa73`）、T4.7 ✅（`265b534`）**。
+   **下一张卡是 T4.8 重启不丢（N20）**，Lead 已写进 `tasks-starter.md`，按老流程把"粘贴块"发你；在此之前不要自己在仓库里挑活干。
+   T4.8 是**纯验证卡（预期零代码改动）**，关键纪律：**先落盘快照/日志再 `docker compose down`（不加 `-v`）**，
+   验证"数据/导出 sha256 逐字节不变 + RUNNING 僵尸回收后仍 DONE"；**今日任务配额只剩 4**（全量 E2E 一次吃 3 个）→ 零改动时用 `-UnitOnly` 代替全量，并在回报写明。
 4. **认证是横切改动（K-46）**：T4.6 把 `/api/v1/**` 加了 Bearer 之后，浏览器 4 个页面、E2E、`test.ps1`、文档 curl 示例**全都要带 token**；
    `test.ps1` 全量跑已自动注入 `E2E_API_TOKEN`。以后再做认证/序列化/错误码这类全局改动，**先列"调用方清单"再动手，收尾跑一次全量**——只测新端点会假绿。
 5. **签名类证据（K-47）**：Webhook 的"接收端验签 True"是自证；交付时给**原始 body 与签名**，验收方会用独立工具重算（T4.6 我就是这样核的，还补了 500→重试、4 次全败留表两条实机）。
-6. **配置/override 写法（K-41）**：一律用**文件工具**写，不要用 shell `printf`/`sed` 拼 YAML；改完先 `docker compose config --quiet` 预检，再 `docker inspect` 核对容器 env；**`/actuator/health` 的 200 不代表新配置生效**（旧容器也会 200）。
-7. **证据三类都要落盘（K-43）**：①命令与退出码（`mvn … > verify-*.txt`）②行为日志（`docker compose logs`）③数据快照（DB 行/API JSON）。只存日志 = 测试结论不可复核（T4.4 的教训）。
-8. **收尾数字最后一步查（K-45）**：全量测试含 E2E，每跑一次会新增 1 条 PASTE 任务——**配额/任务数必须在你所有动作（含全量测试）都做完之后再查**，
+6. **批量接口的部分成功语义（T4.7 / K-48 / D-095）**：`POST /api/v1/tasks/batch` 请求合法即 200，**200 不代表全部成功**——逐项看 `items[].code`；
+   `summary.accepted` 含 reused、幂等项不重复扣配额、>20 个 → 400、请求总体积 >2GB → 413（引擎层）、`estimated_sec` 只是预估。以后做多资源接口照这四条口径写进契约。
+7. **配置/override 写法（K-41）**：一律用**文件工具**写，不要用 shell `printf`/`sed` 拼 YAML；改完先 `docker compose config --quiet` 预检，再 `docker inspect` 核对容器 env；**`/actuator/health` 的 200 不代表新配置生效**（旧容器也会 200）。
+8. **证据三类都要落盘（K-43）**：①命令与退出码（`mvn … > verify-*.txt`）②行为日志（`docker compose logs`）③数据快照（DB 行/API JSON）。只存日志 = 测试结论不可复核（T4.4 的教训）。
+9. **收尾数字最后一步查（K-45）**：全量测试含 E2E，每跑一次会新增 3 条任务（A PASTE + G 2 个 wav）——**配额/任务数必须在你所有动作都做完之后再查**，
    然后才写回报。T4.4/T4.5 连续两次因"先查数后跑测试"差 1，被验收侧复算抓出；现在起固定为回报的最后一个动作。

@@ -1823,7 +1823,7 @@ F-15 控制在 ≤30 行并集中一处；新增静态资源不引第三方库�
 
 ---
 
-## T4.7 批量提交（US-8）（约 3h；W4 第 6 张）
+## T4.7 批量提交（US-8）（约 3h；W4 第 6 张）✅ **已完成（`265b534` 单 commit；我复跑 227/227 + -UnitOnly 217/217，自造样本实机：逐项隔离/幂等不扣配额/超限 400/契约可见；D-095/第 30 份报告）**
 
 > **要证明的事**：A 类用户（本地文件囤积者）的主场景——**一次提交 10~20 个文件，全部走到终态、互不影响，失败的可单独重试**；
 > 提交后能看到**总时长 + 预计耗时**（需求确认单 D2：上限 20，不是 10）。
@@ -1865,6 +1865,51 @@ F-15 控制在 ≤30 行并集中一处；新增静态资源不引第三方库�
 坏文件 400 原文、21 文件 400 原文、总时长与预计耗时、`/v3/api-docs` 片段、全量用例数、`.env` 哈希、exit code）｜ 还有哪些没验证（**不许留空**）。
 
 **【开工方式（新会话）】** 仓库 `D:\new\projects\meeting-notes` → 读根 `AGENT.md` → `git status` 干净（HEAD `1c2aa73` + 本次 docs 提交，**别回退 T4.1/T4.2/T4.4/T4.5/T4.6**）→ 读本卡 + `state.md`/`handoff.md` → 先抽 `BatchTaskService` 复用单文件路径，再做端点，最后前端 + E2E。
+
+---
+
+## T4.8 重启不丢验证（N20）（约 1.5h；W4 第 7 张）
+
+> **要证明的事**：**重启（`down`/`up`，不删卷）后数据在、任务与结果均可查**；并且**"处理中被重启"的任务不会丢**——
+> `StartupRecovery`（T2.3）会把崩溃时残留的 `RUNNING` 一律回收为 `PENDING` 并重新入队，最终仍能 DONE。
+> **现状**：`StartupRecovery` 已有（单实例假设）；T2.8 已验"删卷能恢复"，本卡验的是**不删卷的日常重启**（部署升级场景）。
+> **配额警告（必读）**：今日已用 **76/120 分钟、46/50 任务——只剩 4 个任务配额**；本卡预算 **≤2 任务 / ≤4 分钟**。
+> **预期零代码改动**：本卡是纯验证卡。若发现必须改代码 → **停，报 Lead**（今日配额不够再跑一遍全量 E2E 的 3 条任务）。
+> **纪律**：所有 curl 带 `Authorization: Bearer <API_TOKEN>`（T4.6 起）；`down` 会销毁容器日志，**先落盘日志再 down**（K-39）；不改 `.env`（hash `2BCC440F1C9E` 守恒）。
+
+**主任务**：
+
+1. **基线快照（不新建任务）**
+   - 选一条**内容完整**的已有 DONE 任务（如 140 / 166 / 170 / 177），`GET /api/v1/tasks/{id}` 全文落盘、`GET …/export?format=md` 落盘并记 **sha256**；
+   - DB 计数（落盘原文）：`task` / `task_result` / `dead_letter` / `webhook_delivery` 四张表；`GET /api/v1/settings` 配额也记下。
+2. **重启**：`docker compose down`（**不加 `-v`**，卷保留）→ 记 `docker volume ls` 里数据卷仍在 → `docker compose up -d` → 等 **5 服务 healthy**。
+3. **数据不丢（逐条断言）**
+   - 同一任务 detail **逐字段**与快照一致（`transcript/summary/keywords/todos/template/ai_tier/created_at/status`）；
+   - 导出 md **sha256 逐字节相同**（内容真的没变，不是"能打开"）；
+   - 四张表计数与快照一致；配额不变（同日）；
+   - 读端点全通：详情 / 列表 / 导出 / 设置（带 token）各一次。
+4. **RUNNING 僵尸回收（唯一新建任务，1 条）**
+   - 从 `D:\datasets\meeting-notes-samples` 选一条 **≥2 分钟**的现成音频（用未用过的样本或 hash 变体，避免命中 reused）；
+   - 上传 → 轮询到 `RUNNING`（通常几秒内）→ **立刻 `docker compose restart app`**；
+   - 重启后断言：日志有 `启动恢复：回收 RUNNING 僵尸任务重新入队`（**贴原文 + recovered 数**）；任务回到 `PENDING` 并重新被消费 → 最终 **DONE**、detail 字段完整（transcript 非空）、`error_code=null`、`task_id` 不变、`attempts` 未被异常放大；
+   - 配额只扣一次（对比上传前后 `/settings`）。
+5. **可选（预算内、0 任务）**：重启后 **Webhook 重试续跑**（补 T4.6 的"重启后续跑未验"）——手工插一行 `webhook_delivery`（引用现有 DONE 任务、`next_retry=now()`），用 webhook override + 接收端起 app，`@Scheduled` 应捡起并投递；不做就在回报写原因。
+6. **收尾**
+   - 5 healthy、`.env` hash `2BCC440F1C9E`、`/settings` `preferred=CLOUD`；
+   - **零代码改动 → 不 commit、不 push**；
+   - 测试：**零代码改动时跑 `-UnitOnly`（217/217 exit 0）即可**（全量 E2E 会再吃 3 个任务，今日配额不够；**在回报里写明为什么没跑全量**）；
+   - 证据行不删（被回收的那条任务会重跑，属预期）；日志/快照落盘（K-39/K-43）。
+
+**范围声明**
+- 做：不删卷重启 + 数据/导出逐字节不丢 + RUNNING 回收 +（可选）Webhook 续跑。
+- 不做：备份/恢复（T2.8 已验）、卷损坏/跨机器（T2.8 §6 未验）、多实例集群（单实例假设，StartupRecovery javadoc 已写）、改代码。
+
+**【可维护性】** 预期零代码改动；若必须改，先报 Lead 再动（今日配额限制）。
+
+**【回报·测试三问】** 检查了哪些场景（重启前快照 / down-up / 数据逐字节 / RUNNING 回收 / 可选 Webhook 续跑）｜ 实际命令 + 输出（快照与重启后 detail/导出的 sha256、
+四张表计数、`启动恢复` 日志原文 + recovered 数、重启任务 id/状态/attempts、`-UnitOnly` 用例数与 exit code、`.env` 哈希）｜ 还有哪些没验证（**不许留空**，全量未跑要写原因）。
+
+**【开工方式（新会话）】** 仓库 `D:\new\projects\meeting-notes` → 读根 `AGENT.md` → `git status` 干净（HEAD `265b534` + 本次 docs 提交，**别回退 T4.1~T4.7**）→ 读本卡 + `state.md`/`handoff.md` → **先做快照并落盘，再 down**。
 
 ---
 
