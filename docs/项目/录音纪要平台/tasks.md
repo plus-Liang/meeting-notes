@@ -111,9 +111,9 @@
 | ID | 任务 | DoD | 验证命令 / 期望 |
 |---|---|---|---|
 | **T4.1** | 列表筛选 + 批量重试 + 设置页（术语表/配额/当前 AI 档位）+ **F-15 抽取式读词表** | 无 JS 报错；筛"失败"→ 批量重试成功 | ✅ `690b644` + `review/2026-11-15-T4.1验收.md`（D-090）。`task/TaskRetryService`（DEAD-only，复活 SQL 与 D-049 逐字同口径 + 清死信 + 重入队 + **不扣配额**，`retried/skipped` 不整体失败，1..20 去重）+ `POST /tasks/retry` + `GET /glossary` + `web/SettingsController`（配额/档位**单一判定来源**）+ `ai/ExtractiveGlossaryApplier`（F-15：**依据校验之后**替换三字段、空表逐字节不变、只记替换数）+ 前端筛选/批量重试/`settings.html`（原生 JS）。我独立复跑 **204/204 exit 0**、可维护性 exit 0（Java 55 文件）、**我另做一处变异红→绿**；实机 **139**（造 DEAD→retry→3s DONE、`dead_letter` 清空）、**140**（F-15 `术语替换：4 处`，summary/todos 纠正、transcript 保原文）；`/settings`、`/glossary`、筛选反例、导出逐字节一致；配额 66/120 分钟、12/50 任务（retry 不重复计费）。**已知限制**：F-15 只对 EXTRACTIVE；keywords bigram 残留；"进行中"合并视图无游标续页；并发重试非原子；**浏览器真机渲染未验**（交 T4.13） |
-| **T4.2** | 端到端自动化测试（N14） | 一条命令跑通 | 卡已就绪（`tasks-starter.md` T4.2，2026-11-15 写）：`E2ETest` 覆盖 提交→DONE→12 键→幂等→导出三节→retry 跳过语义→400/415，纳入全量套件（`test.ps1 -UnitOnly` 排除）；预算 ≤6 任务/0 分钟；含"停栈必红 + 主代码变异造红" |
+| **T4.2** | 端到端自动化测试（N14） | 一条命令跑通 | ✅ `e9649d2` + `review/2026-11-15-T4.2验收.md`（D-091）。`e2e/E2ETest`（180 行，`java.net.http` 零新依赖）5 场景：A 主链路（PASTE→DONE→**详情 12 键精确序列**/transcript 一致/summary 非空/ai_tier 三选一）、B 幂等 `reused`+同 id、C 导出三节顺序+`format=pdf` 400、D retry `NOT_DEAD` 跳过、E 400 逐字+415；`test.ps1 -UnitOnly` 排除 `,!E2ETest`。我独立复跑 **209/209**、`-UnitOnly` **202/202 且无 E2E 报告**、单跑 **5/5**；**停 app 反例明确红（0 skip）**；**我另做导出变异→精确红在 C→还原绿**。额外修复 `NoKeyStartupTest` **测试上下文抢真实 Redis 队列**（`@MockBean TranscriptionWorker`，K-42）；保留意见转 T4.12 评估"独立队列键"更忠实做法。配额 66/120 分钟、20/50 任务（E2E PASTE 0 分钟） |
 | **T4.3** | `FETCH` 直链 + SSRF 防护（N7） | 内网地址被拒 | `{"url":"http://169.254.169.254/"}` → 400 `URL_BLOCKED` |
-| **T4.4** | **零成本验证（N15）** | 清空 key → P1 故事仍走通 | 注释全部 key 重启 → US-1 成功 |
+| **T4.4** | **零成本验证（N15）** | 清空 key → P1 故事仍走通 | 卡已就绪（`tasks-starter.md` T4.4）：**外部 override 清空全部 key（不改 `.env`）** → 启动日志"首选 EXTRACTIVE" + `inspect` 核 env；1 条真音频全链路（DONE/EXTRACTIVE/summary 非空/kw≥5/导出三节）+ E2E 零 key 跑 + 矛盾配置反例 + 恢复校验；预算 ≤3 任务/≤3 分钟 |
 | **T4.5** | **离线验证（US-9 / N16）** | 断外网 + 无 key → US-1 成功且无出站 | 断网走完 US-1；`ai_tier≠CLOUD` |
 | **T4.6** | **接入面（US-10 / N17）** | API Token + OpenAPI + Webhook + 验签 | 三条 curl 全流程；20 行接收端验签通过 |
 | **T4.7** | **批量提交（US-8）**：一次 10 个文件互不影响 | 10 个全部终态 | 一次选 10 个 → 全部完成，失败可单独重试 |

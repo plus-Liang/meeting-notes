@@ -1581,7 +1581,7 @@ F-15 控制在 ≤30 行并集中一处；新增静态资源不引第三方库�
 
 ---
 
-## T4.2 端到端自动化测试（N14）（约 2h；W4 第 2 张）
+## T4.2 端到端自动化测试（N14）（约 2h；W4 第 2 张）✅ **已完成（`e9649d2`；我复跑 209/209 + -UnitOnly 202/202 + 单跑 5/5；停栈反例红、导出变异精确红；D-091/第 26 份报告）**
 
 > **现状**：全量 **204/204**，但两个冒烟只覆盖单点（ASR 直连、LLM 连通）；**没有一条"提交 → 处理 → 查询 → 导出 → 重试 → 错误语义"的端到端测试**。
 > N14 的 DoD 是"一条命令跑通"。本卡把它补上，并纳入全量套件。
@@ -1624,6 +1624,66 @@ F-15 控制在 ≤30 行并集中一处；新增静态资源不引第三方库�
 **【回报·测试三问】** 检查了哪些场景（A~E + 反例 + 变异）｜ 实际命令 + 输出（用例数前后、E2E taskId、轮询耗时、三节原文、400/415 原文、反例报错、变异红绿、exit code）｜ 还有哪些没验证（**不许留空**）。
 
 **【开工方式（新会话）】** 仓库 `D:\new\projects\meeting-notes` → 读根 `AGENT.md` → `git status` 干净（HEAD `49691f6`，**别回退/重写 T4.1**）→ 读本卡 + `state.md`/`handoff.md` → 先写 E2E 类与 test.ps1 排除项，再跑全量。
+
+---
+
+## T4.4 零成本验证（N15）（约 1.5h；W4 第 3 张）
+
+> **要证明的事**：**一个不填任何 API key 的人，也能把 US-1 主故事走完**（上传音频 → 转写 → 摘要 → 待办 → 导出），
+> 只是质量降级到第③档抽取式（`ai_tier=EXTRACTIVE`）。这是 D-003R/D-020/D-075 的核心承诺，之前只有单测与 PASTE 验证过，**没有真音频零 key 全链路证据**。
+> **纪律**：**不许改 `.env` 持久值**（D-070/K-35）——用外部 override 临时覆盖，验完 `docker compose up -d` 恢复 + 哈希校验。
+> **配额**：2026-11-15 已用 66 分钟 / 20 任务；本卡预算 **≤3 任务 / ≤3 分钟**（1 条真音频 + 1~2 条 E2E PASTE）。
+
+**主任务**：
+
+1. **准备零 key override**（放 `D:\new\artifacts\t44-nokey.yml`，**不进仓库**；用**文件工具**写，写完 `docker compose config --quiet` 预检，K-41）：
+   ```yaml
+   services:
+     app:
+       environment:
+         LLM_API_KEY: ""
+         LLM_BASE_URL: ""
+         LLM_MODEL: ""
+         LLM_ENABLED: "false"
+         OLLAMA_ENABLED: "false"
+         OFFLINE_MODE: "false"     # 不给云 key，也不靠离线模式兜——纯"无 key 也能跑"
+   ```
+   `docker compose -f docker-compose.yml -f D:\new\artifacts\t44-nokey.yml up -d app` → 等 healthy。
+   **生效判据（不看 `/actuator/health` 的 200，K-41）**：启动日志里首选档判定必须出现 **`首选 EXTRACTIVE`**（三条件全 false），
+   `docker inspect` 核到 4 个环境变量确实为空/false，`GET /api/v1/settings` 的 `ai_tier.preferred` = `EXTRACTIVE`。
+2. **真音频全链路（1 条，≤59s 样本）**：选一个**没用过的短样本**（或按 K-33 造 hash 变体）上传 → 轮询到 `DONE`：
+   - 断言：`ai_tier=EXTRACTIVE`、`transcript` 非空、`summary` 非空、`keywords` 数组 **≥5**（T3.4 的抽取式质量线）、
+     `todos` 数组（**≥1** 或用"确实没有待办"的样本并在回报里说明判据）、`template` 落库、`error_code=null`；
+   - `GET /tasks/{id}/export?format=md` → 200 且三节齐全（US-1 最后一步）；
+   - 日志证据：**没有 CLOUD 调用**（无 `首选档：CLOUD`、无云档 WARN/异常），有 EXTRACTIVE 落库行。
+3. **E2E 在零 key 环境下跑一遍**（0 分钟）：`mvn -B test "-Dtest=E2ETest"` → 5/5 绿（这同时补上 T4.2 验收里"E2E 未在纯 EXTRACTIVE 路径实机走过"的缺口，需断言 `ai_tier=EXTRACTIVE` 的 A 场景实际命中）。
+4. **恢复**：`docker compose up -d app`（基础配置）→ 5 服务 healthy、`.env` 哈希 `2BCC440F1C9E`、`GET /settings` 回到 `preferred=CLOUD`、
+   全量 `scripts\test.ps1` 209/209 exit 0、`check-maintainability` exit 0。
+5. **文档**：把"零成本模式下故事怎么走、质量差在哪、怎么切回云"写进 `接入指南.md`（**只写实测事实**，不写承诺）。
+
+**【范围声明】**
+- 做：override 实验 + 1 条真音频 + E2E 零 key 跑 + 恢复验证 + `接入指南` 补一段"零成本模式"（文档在验收时同步，写码方只需给事实）。
+- 不做：改 `.env`/compose 基值/主代码；不试 LOCAL 档（F-14 已定案不可用，D-089）；不做离线断网（那是 T4.5）；不删证据行。
+- 存储纪律：override/日志/样本全在 `D:\new\artifacts\`。
+
+**【验收】（反例必须进）**
+```powershell
+# ① override 生效：启动日志"首选档 EXTRACTIVE" + inspect 四键为空/false + /settings preferred=EXTRACTIVE
+# ② 真音频：taskId/DONE/ai_tier=EXTRACTIVE/transcript 非空/summary 非空/keywords>=5/todos 判据/export 三节
+# ③ 全链路日志无 CLOUD 迹象（grep 云配置/WARN），有 EXTRACTIVE 落库行
+# ④ E2E 零 key：5/5 绿，A 场景实际 ai_tier=EXTRACTIVE
+# ⑤ 反例：故意把 override 写成"空 key 但 LLM_ENABLED=true" → 启动日志/`/settings` 必须暴露矛盾（不许静默当 CLOUD）
+# ⑥ 恢复：基础 compose 5 healthy、.env hash 2BCC440F1C9E、preferred=CLOUD、全量 209/209、可维护性 exit 0
+# ⑦ 收尾：单 commit（只含 app/src 若有小改，或零代码改动时就只交证据）；不 push；证据行不删；配额 ≤3 任务/≤3 分钟
+```
+**通过标准**：零 key 下真音频走出 **DONE + EXTRACTIVE + 可用结果 + 导出可用**；有"无 CLOUD 调用"的日志证据；E2E 在零 key 下绿；
+恢复后一切回到基线；`.env` 哈希守恒；反例⑤能暴露矛盾配置。
+
+**【可维护性】** 大概率零代码改动；若需改文档只改 `接入指南.md` 一段；不新增配置键；不引依赖。
+
+**【回报·测试三问】** 检查了哪些场景（零 key 启动/真音频全链路/E2E 零 key/恢复/反例）｜ 实际命令 + 输出（override 关键行、启动日志首选档、taskId + 各字段、export 三节摘录、E2E 用例数、`.env` 哈希、exit code）｜ 还有哪些没验证（**不许留空**）。
+
+**【开工方式（新会话）】** 仓库 `D:\new\projects\meeting-notes` → 读根 `AGENT.md` → `git status` 干净（HEAD `e9649d2` + 本次 docs 提交，**别回退/重写 T4.1/T4.2**）→ 读本卡 + `state.md`/`handoff.md` → 先写 override 并验证生效判据，再跑真音频。
 
 ---
 

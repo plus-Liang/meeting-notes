@@ -997,6 +997,28 @@
 
 ---
 
+### D-091 T4.2 验收通过（E2E 纳入全量套件；测试上下文抢真实队列是结构性 flaky 源）
+- **日期**：2026-11-15（T4.2 验收）｜**决策人**：本人
+- **结论**：
+  1. **T4.2 通过**（`e9649d2`，3 文件 +195/-3，**主代码零改动**；第 26 份报告 `review/2026-11-15-T4.2验收.md`）：
+     新 `E2ETest`（180 行、JDK `java.net.http` 零新依赖）覆盖 5 场景：A 主链路（PASTE→DONE→**详情 12 键精确序列**/transcript 一致/summary 非空/ai_tier 三选一）、
+     B 幂等 `reused=true` 且同 taskId、C 导出三节固定顺序 + `format=pdf` 400、D 批量重试 `NOT_DEAD` 跳过、E 非法 template 400 逐字 + `text/plain` 415；
+     `scripts/test.ps1 -UnitOnly` 排除 `,!E2ETest`。
+  2. **我独立复跑**：全量 **209/209**、`-UnitOnly` **202/202 且 surefire 无 E2E 报告**、单跑 **5/5（7.1s）**；
+     **反例**（停 app）→ `ConnectException at requireHealthyStack` 明确红、**0 skip**；**我另做一次主导出变异**（三节顺序对调 → 重建镜像）→ **精确红在 C 场景**、还原重建后 5/5 绿（K-30 四步）。
+  3. **额外修复（认可 + 保留意见）**：`NoKeyStartupTest` 是完整 `@SpringBootTest` 上下文 → 会装配**真实 `TranscriptionWorker`** 并 `BLPOP` **真实 Redis 队列**，
+     与容器 worker 抢任务（被抢后写 H2、真实任务卡 PENDING → E2E 假红）。修法 `@MockBean TranscriptionWorker`（在 `app/src/test/**` 允许范围内）正确，
+     两个冒烟用的是 `MinimalContext`（不装配 worker），修复面无遗漏。**保留意见**：mock 后本类不再覆盖 worker 真实装配 → 交 **T4.12 死配置体检**时评估
+     "改用独立队列键（`app.worker.queue-key=test:isolated`）不 mock 任何 bean" 是否更忠实。
+  4. **数据口径**：写码方 4 条 + 我复跑 4 条 E2E PASTE 任务（141~155 中 8 条），当日 **66 分钟 / 20 任务**（PASTE 0 分钟），任务总数 **64**、**DEAD=0**；
+     证据行不删（D-073）。观察：任务 id 有空号（非法 template 的 400 在事务内 INSERT 后回滚消耗序列）——**无脏行、无配额变化**，不影响幂等/游标（游标是 `<` 比较）。
+  5. **已知限制（写进报告）**：E2E 不含音频端到端（ASR 冒烟单点，音频路径交 T4.4/T4.5）；`E2E_BASE_URL` 远程基址未实测；E2E 在纯 EXTRACTIVE 环境未实机走过；
+     全量每跑一次新建 1 条任务（配额紧时用 `-UnitOnly`）。
+- **依据**：`review/2026-11-15-T4.2验收.md`；209/209 + 202/202 + 5/5；我的停栈反例与导出变异红/绿；surefire 报告；`scripts/test.ps1` diff；DB 行 141~155 与 `quota` 行。
+- **已排除项**：为 E2E 引 RestAssured/Testcontainers（新依赖风险）；E2E 覆盖音频（卡面明确排除，改在 T4.4/T4.5 场景验证里做）；把 `NoKeyStartupTest` 的 mock 直接改成独立队列键（本卡不扩范围，转 T4.12 评估）；为让 `-UnitOnly` 通过而给 E2E 加 skip（假绿灯红线）。
+
+---
+
 ## 面试速查（由本文件派生，勿单独维护）
 
 | 面试问题 | 取哪条 |
