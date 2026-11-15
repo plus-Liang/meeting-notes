@@ -1627,7 +1627,7 @@ F-15 控制在 ≤30 行并集中一处；新增静态资源不引第三方库�
 
 ---
 
-## T4.4 零成本验证（N15）（约 1.5h；W4 第 3 张）
+## T4.4 零成本验证（N15）（约 1.5h；W4 第 3 张）✅ **已完成（无 commit，零代码改动只交证据；我重放零 key E2E 5/5 - task 162 EXTRACTIVE、重放反例启动崩、复跑 209/209；D-092/第 27 份报告）**
 
 > **要证明的事**：**一个不填任何 API key 的人，也能把 US-1 主故事走完**（上传音频 → 转写 → 摘要 → 待办 → 导出），
 > 只是质量降级到第③档抽取式（`ai_tier=EXTRACTIVE`）。这是 D-003R/D-020/D-075 的核心承诺，之前只有单测与 PASTE 验证过，**没有真音频零 key 全链路证据**。
@@ -1684,6 +1684,81 @@ F-15 控制在 ≤30 行并集中一处；新增静态资源不引第三方库�
 **【回报·测试三问】** 检查了哪些场景（零 key 启动/真音频全链路/E2E 零 key/恢复/反例）｜ 实际命令 + 输出（override 关键行、启动日志首选档、taskId + 各字段、export 三节摘录、E2E 用例数、`.env` 哈希、exit code）｜ 还有哪些没验证（**不许留空**）。
 
 **【开工方式（新会话）】** 仓库 `D:\new\projects\meeting-notes` → 读根 `AGENT.md` → `git status` 干净（HEAD `e9649d2` + 本次 docs 提交，**别回退/重写 T4.1/T4.2**）→ 读本卡 + `state.md`/`handoff.md` → 先写 override 并验证生效判据，再跑真音频。
+
+---
+
+## T4.5 离线验证（US-9 / N16）（约 1.5h；W4 第 4 张）
+
+> **要证明的事**：**把外网真的断掉（不是只清 key），US-1 主故事仍然能走完，且全程没有任何出站连接**。
+> 同时验证 **D-077 的离线硬门禁**：即使 `.env` 里配着真实云 key，`OFFLINE_MODE=true` 也必须把云档硬屏蔽 → 实际档位 ≠ CLOUD。
+> **与本卡的区别**：T4.4 证明"没 key 也能跑"（配置层）；本卡证明"没网也能跑"（网络层）——两件事，不能互相替代。
+> **纪律**：不改 `.env` 持久值（D-070/K-35）；override 叠加 + 验完恢复 + 哈希校验；**每组实验结束立刻落盘日志**（K-39，尤其 `down` 会销毁容器日志）。
+
+**配额**：2026-11-15 已用 **67/120 分钟、25/50 任务**；本卡预算 **≤2 任务 / ≤2 分钟**（1 条 30s 真音频；可选反例 +1 任务）。
+
+**前置事实（Lead 已实测，照抄即可，别重复踩）**：
+- `networks.default.internal: true` 叠加后：**必须 `docker compose -f … down` 再 `up -d`**；只 `up -d` 会留下 endpoint invalid IP → app `UnknownHostException: postgres` 起不来（K-44）。
+- 内网下：5 服务仍 healthy（asr 模型是宿主目录只读挂载 + `HF_HUB_OFFLINE=1`，不需要外网）；`/proc/net/route` **无默认路由**；
+  容器内 `curl https://api.deepseek.com` → `Could not resolve host`；**宿主访问 8080 = 000**（内部网络不发布端口）→ **API 一律在容器内 `docker compose exec -T app curl …`**（app 镜像自带 curl）。
+- **别用** `com.docker.network.bridge.enable_ip_masquerade=false`：实测仍能出网（不是断网）。
+
+**主任务**：
+
+1. **写 override**（`D:\new\artifacts\t45-offline.yml`，**不进仓库**，用**文件工具**写，写完 `docker compose config --quiet` 预检，K-41）：
+   ```yaml
+   networks:
+     default:
+       internal: true
+   services:
+     app:
+       environment:
+         OFFLINE_MODE: "true"
+   ```
+   **`LLM_*` 三件套保持 `.env` 真值不动**——这样 `/settings` 里 `cloud_configured=true`，才能证明是门禁在拦，而不是"没 key 所以没云"。
+2. **切换并等健康**：`docker compose -f docker-compose.yml -f D:\new\artifacts\t45-offline.yml down`（**不加 `-v`**，卷保留）→ 同一组 `-f … up -d` → 等 **5 服务 healthy**。
+3. **生效判据（三条都要，不许只看 health）**：
+   - `docker compose exec -T app curl -s http://localhost:8080/api/v1/settings` → **`preferred=EXTRACTIVE` + `cloud_configured=true` + `offline_mode=true`**；
+   - 启动日志有 D-077 的**离线门禁 WARN**（贴原文，别只写"有 WARN"）；
+   - `docker compose exec -T app cat /proc/net/route` **无默认路由** + `docker compose exec -T app curl -sS --max-time 5 -o /dev/null https://api.deepseek.com` **必须失败**（贴原文与 exit code）。
+4. **US-1 全链路（全部在容器内）**：
+   - 造一条 ≤59s 的**新样本**（未用过，或按 K-33 造 hash 变体）：容器内 PyAV 截取（镜像里没有 ffmpeg 可执行，T4.4 已验证可行），或宿主样本 `docker cp` 进容器；
+   - `docker cp <样本> meeting-notes-app-1:/tmp/t45-offline.wav` →
+     `docker compose exec -T app sh -c 'curl -s -H "Authorization: Bearer $API_TOKEN" -F "file=@/tmp/t45-offline.wav" http://localhost:8080/api/v1/tasks'` → 拿 `task_id`；
+   - 轮询 detail 到 `DONE`（≤90s），断言：**`ai_tier≠CLOUD`（应为 EXTRACTIVE）**、transcript 非空、summary 非空、keywords ≥5、`error_code=null`、`template` 落库；
+   - `GET /tasks/{id}/export?format=md` 容器内 → **200** 且摘要/关键词/待办三节齐全；
+   - 日志：有 `结构化首选档：EXTRACTIVE` + 离线门禁 WARN + 落库行；**没有任何云档调用/超时重试**。
+5. **（可选，预算允许就做）反例**：在**同一 internal 网络**里把 `OFFLINE_MODE` 改回 `false` → 首选档会判 CLOUD，但外网不可达 → 云档调用失败 → **自动降级 EXTRACTIVE 且任务仍 DONE**（证明"断网时云档失败会降级，不是卡死"）。
+   代价 +1 任务；若不做，必须在回报"没验证"里写明原因。
+6. **恢复基线**：先把日志落盘（K-39）→ `docker compose -f … down`（**不加 `-v`**）→ `docker compose up -d`（基础配置）→
+   5 服务 healthy、`/settings` 回到 `preferred=CLOUD` + `offline_mode=false`、`.env` SHA256 前 12 = `2BCC440F1C9E`、
+   全量 `powershell -ExecutionPolicy Bypass -File scripts\test.ps1` **209/209 exit 0**、`tools\check-maintainability.ps1` **exit 0**。
+7. **收尾**：单 commit（大概率零代码改动，按 T4.4 先例**不为提交而改代码**，只交证据）；不 push；证据行不删。
+
+**【范围声明】**
+- 做：断网 override 实验 + 1 条真音频 US-1 全链路 + 无出站三证 + 可选降级反例 + 恢复验证。
+- 不做：改 `.env`/compose 基值/主代码；不测 LOCAL 档（F-14 已定案不可用）；不测 T4.4 已证的"零 key"（本卡刻意保留真 key）；
+  **内网下不跑 E2E**（宿主到 8080 不通，属环境约束不是漏测——在回报里写清）；不删证据行。
+- 存储纪律：override/样本/日志全在 `D:\new\artifacts\`。
+
+**【验收】**
+```powershell
+# ① 断网生效：无默认路由 + 容器内 curl 外网失败 + settings(cloud_configured=true / offline_mode=true / preferred=EXTRACTIVE)
+# ② 5 服务 healthy（内网下）
+# ③ 真音频：taskId / DONE / ai_tier≠CLOUD / transcript 非空 / summary 非空 / keywords≥5 / error_code=null / export 三节 200
+# ④ 日志：离线门禁 WARN + 首选 EXTRACTIVE + 落库行；零云档调用
+# ⑤（可选）OFFLINE_MODE=false + 断网 → 云档失败 → 降级 EXTRACTIVE 且 DONE
+# ⑥ 恢复：基础 compose 5 healthy、offline_mode=false、preferred=CLOUD、.env hash 2BCC440F1C9E、全量 209/209、可维护性 exit 0
+# ⑦ 收尾：单 commit（或零提交）、不 push、证据行不删、配额 ≤2(+1) 任务 / ≤2 分钟
+```
+**通过标准**：断网 + 有 key 的环境下 US-1 仍 **DONE + 可导出**，`ai_tier≠CLOUD`；有"无出站"的硬证据（无默认路由 + 外网请求失败）；
+离线门禁 WARN 可见；恢复后一切回基线、`.env` 哈希守恒。
+
+**【可维护性】** 零代码改动（只交证据 + 文档）；不新增配置键；不引依赖。
+
+**【回报·测试三问】** 检查了哪些场景（断网判据 / 真音频全链路 / 可选降级反例 / 恢复）｜ 实际命令 + 输出（override 原文、`/proc/net/route`、外网失败原文、settings JSON、
+日志门禁 WARN 原文、taskId + 各字段、export 摘录、恢复后 settings、`.env` 哈希、exit code）｜ 还有哪些没验证（**不许留空**；E2E 未跑要写原因）。
+
+**【开工方式（新会话）】** 仓库 `D:\new\projects\meeting-notes` → 读根 `AGENT.md` → `git status` 干净（HEAD `3e096ef` + 本次 docs 提交，**别回退 T4.1/T4.2/T4.4**）→ 读本卡 + `state.md`/`handoff.md` → 先写 override 并**先 down 再 up**。
 
 ---
 

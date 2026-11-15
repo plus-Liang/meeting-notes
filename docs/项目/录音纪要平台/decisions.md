@@ -1019,6 +1019,31 @@
 
 ---
 
+### D-092 T4.4 验收通过（零 key 真音频全链路走通；F-21 矛盾配置启动崩记已知限制；T4.5 断网路径实测可行）
+- **日期**：2026-11-15（T4.4 验收）｜**决策人**：本人
+- **结论**：
+  1. **T4.4 通过**（**零代码改动、无 commit**，HEAD 仍 `3e096ef`；第 27 份报告 `review/2026-11-15-T4.4验收.md`）。核心承诺已被独立证实：
+     **不填任何 API key，US-1 主故事（上传→转写→摘要→待办→导出）完整走通**，`ai_tier=EXTRACTIVE`，全链路**零 CLOUD 调用**。
+  2. **我独立重放三项生效判据**：外部 override 清空四键 → 启动日志 `首选 EXTRACTIVE` + `docker inspect` 四键空/false + `GET /settings` `preferred=EXTRACTIVE`（不看 health 200，K-41）。
+  3. **我独立重放零 key E2E**：`-Dtest=E2ETest` **5/5 exit 0**，新建 **task 162**（`DONE/EXTRACTIVE/93 字/5 关键词`）；写码方那次是 158（EXTRACTIVE），恢复后全量跑是 160/164（CLOUD）→
+     **同一条 E2E 随 key 环境改变档位**，T4.2 的"E2E 未在纯 EXTRACTIVE 实机走过"缺口已关闭。
+  4. **我独立重放反例**：`LLM_ENABLED=true` + 空 key → 日志先判 `首选 CLOUD` 随后 `openAiApi` 的 `OpenAI base URL must be set` → `Application run failed`、容器 exited、`/settings` HTTP 000。
+     **矛盾被暴露、没有静默降成 CLOUD**，与 D-039「显式优先」一致；但"只清 key 忘关开关 → 起不来"是真实用户坑，**记 F-21 已知限制**（v1 不改代码，文档警告；可选改进进 T4.12 评估）。
+  5. **质量线如实登记**（第③档的定义，不是缺陷）：EXTRACTIVE 的 summary 是**原句拼接**（task 157 同一句重复两次）、keywords 含分词碎词
+     （`以准/础支/些基/八考`）、`todos=[]` 按 D-072 是"确实没有待办"；模板不分化（F-18）。已写进 `接入指南.md` §八，不粉饰。
+  6. **恢复基线**：5 服务 healthy、`preferred=CLOUD`、`.env` SHA256 前 12 = `2BCC440F1C9E`（守恒）、全量 **209/209 exit 0**、可维护性 **exit 0**、工作区干净。
+  7. **配额**：本卡新增 5 条任务（157/158/160/162/164，全 DONE），**67/120 分钟、25/50 任务**，任务总数 **69**、DEAD=0；证据行保留（D-073）。
+     写码方回报的 22/50 是**采样早了一步**（它跑完全量又新增 160）——数字以 settings/DB 为准（K-20/D-074）。
+  8. **T4.5 断网路径我已实测（前置去风险，零任务消耗）**：`networks.default.internal: true` + **先 `down` 再 `up`** → 5 healthy、`/proc/net/route` 无默认路由、
+     容器内 `curl` 外网 `Could not resolve host`、宿主访问 8080=000（内网不发布端口，**API 只能在容器内 curl**，app 镜像自带 curl）；
+     `enable_ip_masquerade=false` **不能**断外网（实测仍拿到 401 响应）；只 `up -d` 改网络属性会留 endpoint invalid IP → app `UnknownHostException`。
+- **依据**：`review/2026-11-15-T4.4验收.md`；`D:\new\artifacts\`（`t44-nokey.yml`/`t44-contradiction.yml`/`logs-t44-*`/`verify-t44-e2e-nokey.txt`/`verify-t44-full.txt`/`t44-export-157.md`/`t45-probe.yml`）；
+  DB 行 157/158/160/162/164 + `quota` 行；`docker inspect` env；`/api/v1/settings`（EXTRACTIVE→CLOUD 两侧）；209/209 + 可维护性 exit 0。
+- **已排除项**：为"零成本"新增第二个 key 校验开关（改主代码改契约，且 D-039 已定案显式优先）；把矛盾配置改成"自动降级 EXTRACTIVE"（会让"填了 key 却没生效"更难查，方向相反）；
+  本卡就断网做实验（属 T4.5，已单独铺路）；用 `--force-recreate` 之外的方式改网络属性（实测会留 invalid IP）；把 F-17（换模板重跑）塞进本卡（未实现，仍记 v1 已知限制，另议）。
+
+---
+
 ## 面试速查（由本文件派生，勿单独维护）
 
 | 面试问题 | 取哪条 |
