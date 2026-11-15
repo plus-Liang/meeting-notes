@@ -19,9 +19,10 @@
     <h1>提交转写任务</h1>
     <p class="hint">
       支持常见音/视频格式（按文件头识别，不看扩展名）。
-      单文件上限 <b>200 MB</b>、时长上限 <b>60 分钟</b>（可由服务端配置调整）。
+      单文件上限 <b>200 MB</b>、时长上限 <b>60 分钟</b>（可由服务端配置调整）；
+      支持一次选择多个文件批量提交（上限 <b>20</b> 个，逐文件独立处理）。
     </p>
-    <p><input type="file" id="file" style="margin-top:8px"></p>
+    <p><input type="file" id="file" multiple style="margin-top:8px"></p>
     <p><button id="submit">上传并开始转写</button></p>
     <p id="msg" class="hint" hidden></p>
     <div id="result" hidden>
@@ -31,6 +32,11 @@
         （同内容重复上传不会重复处理，直接返回原任务）
       </p>
     </div>
+    <div id="batch-result" hidden>
+      <p class="ok-text" id="batch-summary-line"></p>
+      <ul id="batch-items" class="hint" style="padding-left:18px"></ul>
+      <p class="hint">失败的文件可修改后重新提交；进入 <a href="tasks.html">任务列表</a> 可对失败（DEAD）任务批量重试。</p>
+    </div>
   </div>
 </main>
 <script src="auth.js"></script>
@@ -38,10 +44,12 @@
 <script>
 (function () {
   var MAX_UPLOAD_BYTES = 200 * 1024 * 1024; /* 与服务端 TASK_MAX_SIZE_BYTES 默认一致，仅前端提示，服务端仍是权威 */
+  var MAX_BATCH_FILES = 20; /* 与服务端 BATCH_MAX_FILES 默认一致，仅前端提示，服务端仍是权威 */
   var btn = document.getElementById('submit');
   var fileInput = document.getElementById('file');
   var msg = document.getElementById('msg');
   var result = document.getElementById('result');
+  var batchResult = document.getElementById('batch-result');
 
   function show(kind, text) {
     msg.hidden = false;
@@ -49,34 +57,87 @@
     msg.textContent = text;
   }
 
+  function renderBatch(data) {
+    var summary = data.summary || {};
+    var items = data.items || [];
+    document.getElementById('batch-summary-line').textContent =
+      '批量结果：受理 ' + (summary.accepted || 0) + '（其中复用 ' + (summary.reused || 0) +
+      '）、失败 ' + (summary.failed || 0) +
+      '；总时长 ' + fmtDuration(summary.total_duration_sec) +
+      '，预计 ' + fmtDuration(summary.estimated_sec) + '（仅预估，不承诺）';
+    var list = document.getElementById('batch-items');
+    list.textContent = '';
+    items.forEach(function (item) {
+      var li = document.createElement('li');
+      if (item.task_id) {
+        li.textContent = '✓ ' + item.file_name + ' → 任务 #' + item.task_id +
+          '（' + statusText(item.status) + (item.reused ? '，命中已有任务' : '') + '）';
+        rememberTask(item.task_id, item.file_name);
+      } else {
+        li.textContent = '✗ ' + item.file_name + '：[' + (item.code || 'UNKNOWN') + '] ' + (item.message || '');
+      }
+      list.appendChild(li);
+    });
+    batchResult.hidden = false;
+  }
+
   btn.addEventListener('click', function () {
-    var file = fileInput.files && fileInput.files[0];
-    if (!file) { show('error', '请先选择一个音/视频文件'); return; }
-    if (file.size > MAX_UPLOAD_BYTES) {
-      show('error', '文件 ' + fmtBytes(file.size) + ' 超过 200 MB 上限，请切分后再试');
-      return;
+    var files = (fileInput.files && fileInput.files.length) ? Array.prototype.slice.call(fileInput.files) : [];
+    if (!files.length) { show('error', '请先选择一个或多个音/视频文件'); return; }
+    for (var i = 0; i < files.length; i++) {
+      if (files[i].size > MAX_UPLOAD_BYTES) {
+        show('error', '文件 ' + files[i].name + '（' + fmtBytes(files[i].size) + '）超过 200 MB 上限，请切分后再试');
+        return;
+      }
     }
     btn.disabled = true;
     result.hidden = true;
-    show('info', '上传中…（大文件可能需要一些时间）');
+    batchResult.hidden = true;
 
-    var form = new FormData();
-    form.append('file', file);
-    apiFetch('api/v1/tasks', { method: 'POST', body: form }).then(function (resp) {
+    /* 单文件走原 /api/v1/tasks（旧行为一字不改）；多个文件走批量端点 */
+    if (files.length === 1) {
+      var form = new FormData();
+      form.append('file', files[0]);
+      apiFetch('api/v1/tasks', { method: 'POST', body: form }).then(function (resp) {
+        return resp.json().then(function (data) { data.__httpStatus = resp.status; return data; });
+      }).then(function (data) {
+        btn.disabled = false;
+        if (data.__httpStatus === 201) {
+          rememberTask(data.task_id, files[0].name);
+          document.getElementById('ok-line').textContent =
+            '已受理：任务 #' + data.task_id + '（' + statusText(data.status) +
+            '，时长 ' + fmtDuration(data.duration_sec) + '）' +
+            (data.reused ? ' · 命中已有任务，未重复处理' : '');
+          document.getElementById('detail-link').href = 'task.html?id=' + data.task_id;
+          result.hidden = false;
+          show('info', '');
+        } else {
+          show('error', '提交失败（' + (data.code || data.__httpStatus) + '）：' + (data.message || '未知错误'));
+        }
+      }, function () {
+        btn.disabled = false;
+        show('error', '服务暂时不可用，请稍后重试');
+      });
+      return;
+    }
+
+    if (files.length > MAX_BATCH_FILES) {
+      btn.disabled = false;
+      show('error', '一次最多提交 ' + MAX_BATCH_FILES + ' 个文件（当前选了 ' + files.length + ' 个），请分批提交');
+      return;
+    }
+    show('info', '批量上传中…（共 ' + files.length + ' 个文件，大文件可能需要一些时间）');
+    var batchForm = new FormData();
+    files.forEach(function (f) { batchForm.append('files', f); });
+    apiFetch('api/v1/tasks/batch', { method: 'POST', body: batchForm }).then(function (resp) {
       return resp.json().then(function (data) { data.__httpStatus = resp.status; return data; });
     }).then(function (data) {
       btn.disabled = false;
-      if (data.__httpStatus === 201) {
-        rememberTask(data.task_id, file.name);
-        document.getElementById('ok-line').textContent =
-          '已受理：任务 #' + data.task_id + '（' + statusText(data.status) +
-          '，时长 ' + fmtDuration(data.duration_sec) + '）' +
-          (data.reused ? ' · 命中已有任务，未重复处理' : '');
-        document.getElementById('detail-link').href = 'task.html?id=' + data.task_id;
-        result.hidden = false;
+      if (data.__httpStatus === 200) {
+        renderBatch(data);
         show('info', '');
       } else {
-        show('error', '提交失败（' + (data.code || data.__httpStatus) + '）：' + (data.message || '未知错误'));
+        show('error', '批量提交失败（' + (data.code || data.__httpStatus) + '）：' + (data.message || '未知错误'));
       }
     }, function () {
       btn.disabled = false;

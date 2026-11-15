@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
 
+import java.io.ByteArrayOutputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -246,5 +247,178 @@ class E2ETest {
         // 401 不得打挂豁免面：actuator 与契约发现端点匿名可达
         assertEquals(200, sendWithoutToken("GET", "/actuator/health", null, null).statusCode());
         assertEquals(200, sendWithoutToken("GET", "/v3/api-docs", null, null).statusCode());
+    }
+
+    // ==================== T4.7 批量提交（场景 G） ====================
+
+    private static final String BOUNDARY = "mn-e2e-batch-7f3a9c";
+
+    /** multipart/form-data 请求体：同名 part（files）重复携带多个文件。 */
+    private static byte[] multipartBody(List<String> filenames, List<byte[]> contents) {
+        try (ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            for (int i = 0; i < filenames.size(); i++) {
+                out.writeBytes(("--" + BOUNDARY + "\r\n"
+                        + "Content-Disposition: form-data; name=\"files\"; filename=\"" + filenames.get(i) + "\"\r\n"
+                        + "Content-Type: application/octet-stream\r\n\r\n").getBytes(StandardCharsets.UTF_8));
+                out.writeBytes(contents.get(i));
+                out.writeBytes("\r\n".getBytes(StandardCharsets.UTF_8));
+            }
+            out.writeBytes(("--" + BOUNDARY + "--\r\n").getBytes(StandardCharsets.UTF_8));
+            return out.toByteArray();
+        } catch (Exception e) {
+            throw new IllegalStateException("构造 multipart 失败", e);
+        }
+    }
+
+    private static HttpResponse<String> sendBatch(List<String> filenames, List<byte[]> contents) throws Exception {
+        HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(base() + "/api/v1/tasks/batch"))
+                .timeout(Duration.ofSeconds(60))
+                .header("Content-Type", "multipart/form-data; boundary=" + BOUNDARY)
+                .POST(HttpRequest.BodyPublishers.ofByteArray(multipartBody(filenames, contents)));
+        String t = token();
+        if (!t.isEmpty()) {
+            builder.header("Authorization", "Bearer " + t);
+        }
+        return HTTP.send(builder.build(), HttpResponse.BodyHandlers.ofString());
+    }
+
+    /**
+     * 1s 静音 WAV（44 字节头 + 16KB 零数据，8kHz/16bit/mono），合法头过 MediaMagic；
+     * 数据段烧入唯一标记（uuid 各异）保证每次运行都是新内容、不命中旧任务的幂等。
+     */
+    private static byte[] silenceWav(UUID marker) {
+        int sampleRate = 8000;
+        int dataLen = sampleRate * 2; // 1s * 16bit * mono
+        byte[] wav = new byte[44 + dataLen];
+        java.nio.ByteBuffer buf = java.nio.ByteBuffer.wrap(wav).order(java.nio.ByteOrder.LITTLE_ENDIAN);
+        buf.put("RIFF".getBytes(StandardCharsets.US_ASCII));
+        buf.putInt(36 + dataLen);
+        buf.put("WAVE".getBytes(StandardCharsets.US_ASCII));
+        buf.put("fmt ".getBytes(StandardCharsets.US_ASCII));
+        buf.putInt(16);
+        buf.putShort((short) 1);            // PCM
+        buf.putShort((short) 1);            // mono
+        buf.putInt(sampleRate);
+        buf.putInt(sampleRate * 2);         // byte rate
+        buf.putShort((short) 2);            // block align
+        buf.putShort((short) 16);           // bits per sample
+        buf.put("data".getBytes(StandardCharsets.US_ASCII));
+        buf.putInt(dataLen);
+        long msb = marker.getMostSignificantBits();
+        for (int i = 0; i < 8; i++) {
+            wav[44 + i] = (byte) (msb >>> (8 * i)); // 静音数据里烧 8 字节标记（听不见，内容各异）
+        }
+        return wav;
+    }
+
+    /** 轮询任务到终态（复用场景 A 的等待口径，60s 上限）。 */
+    private JsonNode waitTerminal(long id) throws Exception {
+        JsonNode detail = null;
+        String last = "";
+        long deadline = System.currentTimeMillis() + 60_000;
+        while (System.currentTimeMillis() < deadline) {
+            detail = M.readTree(send("GET", "/api/v1/tasks/" + id, null, null).body());
+            last = detail.toString();
+            String status = detail.get("status").asText();
+            if ("DONE".equals(status) || "DEAD".equals(status)) {
+                break;
+            }
+            Thread.sleep(500);
+        }
+        assertEquals("DONE", detail.get("status").asText(), "60s 未 DONE，最后状态：" + abbreviate(last));
+        return detail;
+    }
+
+    /**
+     * T4.7 场景 G：批量混合提交——2 个 1s 静音 WAV（合法头、内容各异）+ 1 个 .mp3 后缀纯文本
+     * （魔数拒绝 → 逐项 400 INVALID_MEDIA，不影响其它）。断言逐项结果、summary、
+     * 2 个 accepted 最终 DONE（空 transcript 按 D-048 仍 DONE）、列表可查、
+     * 原样重发全量命中幂等（reused=true，不新建任务）。
+     */
+    @Test
+    @Order(7)
+    void g_batchMixedFilesIsolateFailureAndReachDone() throws Exception {
+        byte[] wav1 = silenceWav(UUID.randomUUID());
+        byte[] wav2 = silenceWav(UUID.randomUUID());
+        byte[] badMp3 = "this is plain text pretending to be an mp3 — batch e2e".getBytes(StandardCharsets.UTF_8);
+
+        HttpResponse<String> resp = sendBatch(
+                List.of("batch-e2e-a.wav", "bad-e2e.mp3", "batch-e2e-b.wav"),
+                List.of(wav1, badMp3, wav2));
+        assertEquals(200, resp.statusCode(), "请求合法（含部分失败）即 200：" + abbreviate(resp.body()));
+        JsonNode out = M.readTree(resp.body());
+        assertEquals(3, out.get("items").size(), "逐项结果与文件一一对应");
+        JsonNode itemA = out.get("items").get(0);
+        JsonNode itemBad = out.get("items").get(1);
+        JsonNode itemB = out.get("items").get(2);
+        assertEquals("batch-e2e-a.wav", itemA.get("file_name").asText());
+        assertTrue(itemA.get("task_id").asLong() > 0, "成功项有 task_id：" + itemA);
+        assertEquals("PENDING", itemA.get("status").asText());
+        assertFalse(itemA.get("reused").asBoolean());
+        assertEquals("bad-e2e.mp3", itemBad.get("file_name").asText());
+        assertEquals("INVALID_MEDIA", itemBad.get("code").asText(), "坏文件逐项 400 码：" + itemBad);
+        assertTrue(itemBad.get("task_id") == null || itemBad.get("task_id").isNull(),
+                "失败项没有 task_id");
+        assertFalse(itemBad.get("message").asText().isBlank());
+        assertEquals("batch-e2e-b.wav", itemB.get("file_name").asText());
+        assertTrue(itemB.get("task_id").asLong() > 0, "坏文件不影响其它项：" + itemB);
+
+        JsonNode summary = out.get("summary");
+        assertEquals(2, summary.get("accepted").asInt(), "accepted 含 reused（本例 0）：" + summary);
+        assertEquals(0, summary.get("reused").asInt());
+        assertEquals(1, summary.get("failed").asInt());
+        assertEquals(2, summary.get("total_duration_sec").asInt(),
+                "两个 1s WAV 时长之和（ffprobe 实测）：" + summary);
+        long accepted = summary.get("accepted").asInt();
+        assertEquals(Math.round(2 * 0.15 + accepted * 2.0), summary.get("estimated_sec").asInt(),
+                "预估公式 round(total*0.15 + accepted*2)（默认系数）：" + summary);
+
+        long idA = itemA.get("task_id").asLong();
+        long idB = itemB.get("task_id").asLong();
+        JsonNode doneA = waitTerminal(idA);
+        JsonNode doneB = waitTerminal(idB);
+        assertEquals("", doneA.get("transcript").asText(), "1s 静音 → 空转录仍 DONE（D-048）");
+        assertEquals("", doneB.get("transcript").asText());
+
+        // 列表可查到这一批全部 id（验收证据项）
+        JsonNode list = M.readTree(send("GET", "/api/v1/tasks?limit=50", null, null).body());
+        List<Long> listed = new ArrayList<>();
+        list.get("items").forEach(n -> listed.add(n.get("id").asLong()));
+        assertTrue(listed.contains(idA) && listed.contains(idB), "列表必须含批量任务 id：" + idA + "/" + idB);
+
+        // 原样重发：同内容幂等 reused=true，返回同一 task_id，不新建
+        HttpResponse<String> again = sendBatch(
+                List.of("batch-e2e-a.wav", "bad-e2e.mp3", "batch-e2e-b.wav"),
+                List.of(wav1, badMp3, wav2));
+        assertEquals(200, again.statusCode());
+        JsonNode out2 = M.readTree(again.body());
+        assertEquals(idA, out2.get("items").get(0).get("task_id").asLong(), "幂等命中同一任务");
+        assertEquals(idB, out2.get("items").get(2).get("task_id").asLong());
+        assertTrue(out2.get("items").get(0).get("reused").asBoolean(), "同内容 reused=true");
+        assertTrue(out2.get("items").get(2).get("reused").asBoolean());
+        assertEquals(2, out2.get("summary").get("reused").asInt(), "summary.reused 命中数");
+        assertEquals("INVALID_MEDIA", out2.get("items").get(1).get("code").asText(), "坏文件依然逐项拒绝");
+    }
+
+    /** T4.7 场景 G（超限）：21 个文件 > BATCH_MAX_FILES(20) → 400 INVALID_PARAM；契约可发现。 */
+    @Test
+    @Order(8)
+    void g_batchOverLimitRejectedAndContractDiscoverable() throws Exception {
+        List<String> names = new ArrayList<>();
+        List<byte[]> contents = new ArrayList<>();
+        for (int i = 1; i <= 21; i++) {
+            names.add(String.format("tiny-%02d.dat", i));
+            contents.add(new byte[]{'x'}); // 1 字节：体积远不超限，只超个数
+        }
+        HttpResponse<String> resp = sendBatch(names, contents);
+        assertEquals(400, resp.statusCode(), "21 > 20 必须 400：" + abbreviate(resp.body()));
+        JsonNode err = M.readTree(resp.body());
+        assertEquals("INVALID_PARAM", err.get("code").asText());
+        assertTrue(err.get("message").asText().contains("20"), "错误信息写明上限：" + err.get("message"));
+
+        // 契约可发现（T4.6 springdoc）：/api/v1/tasks/batch 出现在 /v3/api-docs
+        JsonNode docs = M.readTree(sendWithoutToken("GET", "/v3/api-docs", null, null).body());
+        assertTrue(docs.get("paths").has("/api/v1/tasks/batch"),
+                "/api/v1/tasks/batch 必须出现在 /v3/api-docs");
     }
 }

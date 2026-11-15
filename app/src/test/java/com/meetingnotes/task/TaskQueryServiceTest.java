@@ -114,10 +114,11 @@ class TaskQueryServiceTest {
         assertEquals("INVALID_PARAM", assertThrows(ApiException.class, () -> controller.list(null, null, "not-a-number")).getCode());
     }
 
-    /** T4.1 起构造器多了 retry/glossary 两个依赖，这里统一补齐 mock。 */
+    /** T4.1 起构造器多了 retry/glossary 两个依赖，T4.7 再加 batch，这里统一补齐 mock。 */
     private com.meetingnotes.web.TaskController newController() {
         return new com.meetingnotes.web.TaskController(
                 org.mockito.Mockito.mock(com.meetingnotes.task.TaskService.class),
+                org.mockito.Mockito.mock(com.meetingnotes.task.BatchTaskService.class),
                 newService(),
                 org.mockito.Mockito.mock(com.meetingnotes.task.TaskMutationService.class),
                 org.mockito.Mockito.mock(com.meetingnotes.task.TextTaskService.class),

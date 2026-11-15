@@ -17,7 +17,9 @@ spring:
     multipart:
       # 上传大小硬闸放在 servlet 层（超限直接 413，磁盘不会被灌满），流内还有第二道复核
       max-file-size: ${TASK_MAX_SIZE_BYTES:209715200}
-      max-request-size: ${TASK_MAX_SIZE_BYTES:209715200}
+      # T4.7：请求总体积上限改用批量键（原 200MB 会卡 20 文件批量）；单文件仍受上面 max-file-size 硬闸。
+      # 超限 → MaxUploadSizeExceededException → 413 SIZE_EXCEEDED（引擎层拦截）
+      max-request-size: ${TASK_BATCH_MAX_SIZE_BYTES:2147483648}
 
   datasource:
     url: ${DB_URL:jdbc:postgresql://postgres:5432/meetingnotes}
@@ -84,6 +86,13 @@ app:
     max-duration-sec: ${TASK_MAX_DURATION_SEC:3600}
     max-size-bytes: ${TASK_MAX_SIZE_BYTES:209715200}
     max-retries: ${TASK_MAX_RETRIES:3}
+
+  limits:
+    # T4.7 批量提交（US-8 / 需求确认单 D2：上限 20）。TASK_BATCH_MAX_SIZE_BYTES 消费方在
+    # spring.servlet.multipart.max-request-size（见上）；本段只放 app 代码直接读的两键
+    batch-max-files: ${BATCH_MAX_FILES:20}
+    # 预估耗时系数（只是预估不承诺）：estimated_sec = round(total_duration_sec * rtf + accepted * 2)
+    batch-estimate-rtf: ${BATCH_ESTIMATE_RTF:0.15}
 
   media:
     # 时长探测工具（容器内 apt 装的 ffmpeg 自带 ffprobe）；换路径只改环境变量（N11）

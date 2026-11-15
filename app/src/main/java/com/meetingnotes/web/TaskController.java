@@ -5,6 +5,7 @@ import com.meetingnotes.common.TaskCreatedResponse;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.meetingnotes.task.BatchTaskService;
 import com.meetingnotes.task.GlossaryRepository;
 import com.meetingnotes.task.TaskMutationService;
 import com.meetingnotes.task.TaskQueryService;
@@ -52,6 +53,7 @@ public class TaskController {
             java.util.Set.of("PENDING", "RUNNING", "RETRYING", "DONE", "DEAD");
 
     private final TaskService taskService;
+    private final BatchTaskService batchTaskService;
     private final TaskQueryService taskQueryService;
     private final TaskMutationService taskMutationService;
     private final TextTaskService textTaskService;
@@ -62,6 +64,7 @@ public class TaskController {
     private final ObjectMapper mapper;
 
     public TaskController(TaskService taskService,
+                          BatchTaskService batchTaskService,
                           TaskQueryService taskQueryService,
                           TaskMutationService taskMutationService,
                           TextTaskService textTaskService,
@@ -70,6 +73,7 @@ public class TaskController {
                           JdbcTemplate jdbc,
                           ObjectMapper mapper) {
         this.taskService = taskService;
+        this.batchTaskService = batchTaskService;
         this.taskQueryService = taskQueryService;
         this.taskMutationService = taskMutationService;
         this.textTaskService = textTaskService;
@@ -93,6 +97,19 @@ public class TaskController {
         }
         TaskCreatedResponse resp = taskService.createUpload(file, template);
         return ResponseEntity.status(HttpStatus.CREATED).body(resp);
+    }
+
+    /**
+     * 批量提交（T4.7 / US-8）：multipart 字段 files 可重复 + 可选 template。
+     * 请求合法即 200（即使部分失败）——逐项结果与汇总见 {@link BatchTaskService}；
+     * 0 文件 / 超 {@code BATCH_MAX_FILES} → 400 INVALID_PARAM；总体积超限由 servlet 引擎层 413。
+     * 与单文件端点互不影响（K-46：原 /tasks 行为一字不改）。
+     */
+    @PostMapping(value = "/tasks/batch", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<BatchTaskService.BatchResult> uploadBatch(
+            @RequestPart(value = "files", required = false) List<MultipartFile> files,
+            @RequestPart(value = "template", required = false) String template) {
+        return ResponseEntity.ok(batchTaskService.createBatch(files, template));
     }
 
     /** PASTE 入口（T3.7 / US-2）：贴文本直接建任务，跳过 ASR（worker 按 source_type=PASTE 走无音频分支）。 */
