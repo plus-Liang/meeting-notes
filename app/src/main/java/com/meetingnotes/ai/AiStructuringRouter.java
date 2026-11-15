@@ -100,4 +100,12 @@ public class AiStructuringRouter {
     boolean isOfflineMode() {
         return offlineMode;
     }
+
+    /** 设置页展示（T4.1）：preferred 与 {@link #preferredTier()} 同一判定来源（单一口径，禁止复制逻辑）。 */
+    public record TierView(String preferred, boolean cloudConfigured, boolean offlineMode, boolean localReady) {
+    }
+
+    public TierView tierView() {
+        return new TierView(preferredTier().name(), cloudEnabled, offlineMode, ollamaReady());
+    }
 }

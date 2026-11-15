@@ -54,4 +54,22 @@ public class QuotaService {
         return new ApiException(429, "QUOTA_EXCEEDED",
                 "今日配额已用尽（" + minutesPerDay + " 分钟 / " + tasksPerDay + " 个任务），明天再试");
     }
+
+    /** 设置页展示（T4.1）：今日已用（无行 = 今日未消费，返回 0/0，与 CURRENT_DATE 口径一致）。 */
+    public record Usage(long usedMinutes, long usedTasks) {
+    }
+
+    public long minutesPerDay() {
+        return minutesPerDay;
+    }
+
+    public long tasksPerDay() {
+        return tasksPerDay;
+    }
+
+    public Usage currentUsage(long userId) {
+        return jdbc.query("""
+                SELECT used_minutes, used_tasks FROM quota WHERE user_id = ? AND day = CURRENT_DATE
+                """, rs -> rs.next() ? new Usage(rs.getLong(1), rs.getLong(2)) : new Usage(0, 0), userId);
+    }
 }

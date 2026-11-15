@@ -12,19 +12,42 @@
   <span class="brand">录音纪要平台</span>
   <a href="index.html">提交</a>
   <a href="tasks.html">任务列表</a>
+  <a href="settings.html">设置</a>
 </nav>
 <main>
   <div class="card">
     <h1>任务列表</h1>
-    <p class="hint">服务端任务列表（最近 50 条），未完成任务每 3 秒自动刷新。</p>
+    <p class="hint">按状态筛选；未完成任务每 3 秒自动刷新。"加载更多"沿游标翻页（T4.1）。</p>
+    <div class="filter-bar" id="filterBar"></div>
+    <div class="retry-bar" id="retryBar" style="display:none;">
+      <label><input type="checkbox" id="checkAll"> 全选</label>
+      <button id="batchRetryBtn">批量重试</button>
+      <span id="retryResult" class="hint"></span>
+    </div>
     <div id="list"><p class="hint">加载中…</p></div>
+    <p><button id="moreBtn" style="display:none;">加载更多</button></p>
   </div>
 </main>
 <script src="app.js"></script>
 <script>
 (function () {
   var listEl = document.getElementById('list');
+  var filterBar = document.getElementById('filterBar');
+  var retryBar = document.getElementById('retryBar');
+  var checkAllEl = document.getElementById('checkAll');
+  var retryBtn = document.getElementById('batchRetryBtn');
+  var retryResult = document.getElementById('retryResult');
+  var moreBtn = document.getElementById('moreBtn');
   var timer = null;
+
+  /* 筛选状态：'' 全部 / ACTIVE 进行中（前端合并三个状态，后端单值契约不变）/ DONE / DEAD */
+  var FILTERS = [
+    { key: '', label: '全部' },
+    { key: 'ACTIVE', label: '进行中' },
+    { key: 'DONE', label: '已完成' },
+    { key: 'DEAD', label: '失败' }
+  ];
+  var state = { filter: '', cursor: null, items: [], checked: {}, checkedCount: 0 };
 
   /* localStorage：仅作"上次提交"的名称缓存与服务不可用时的兜底展示 */
   function localName(id) {
@@ -37,10 +60,43 @@
     return '<span class="badge ' + cls + '">' + statusText(status) + '</span>';
   }
 
+  function renderFilterBar() {
+    filterBar.innerHTML = FILTERS.map(function (f) {
+      return '<button class="filter-btn' + (state.filter === f.key ? ' active' : '') +
+        '" data-status="' + f.key + '">' + f.label + '</button>';
+    }).join('');
+  }
+
+  /* 拉一页：ACTIVE 合并三个状态（各自 limit=50 第一页，前端去重排序）；其余走单状态 + 游标 */
+  function fetchPage(cursor) {
+    if (state.filter === 'ACTIVE') {
+      return Promise.all(['PENDING', 'RUNNING', 'RETRYING'].map(function (s) {
+        return getJson('api/v1/tasks?status=' + s + '&limit=50');
+      })).then(function (results) {
+        var seen = {}, merged = [];
+        results.forEach(function (r) {
+          (r.items || []).forEach(function (item) {
+            if (!seen[item.id]) { seen[item.id] = true; merged.push(item); }
+          });
+        });
+        merged.sort(function (a, b) { return b.id - a.id; });
+        return { items: merged, next_before_id: null };
+      });
+    }
+    var url = 'api/v1/tasks?limit=20' +
+      (state.filter ? '&status=' + state.filter : '') +
+      (cursor ? '&before_id=' + cursor : '');
+    return getJson(url);
+  }
+
   function rowHtml(item) {
     var name = item.original_name || localName(item.id) || ('任务 ' + item.id);
+    var checkbox = state.filter === 'DEAD'
+      ? '<input type="checkbox" class="row-check" data-id="' + item.id + '"' +
+        (state.checked[item.id] ? ' checked' : '') + '> '
+      : '';
     return '<div class="task-row" data-id="' + item.id + '">' +
-      '<span>#' + item.id + ' ' + escapeHtml(name) + '</span>' +
+      '<span>' + checkbox + '#' + item.id + ' ' + escapeHtml(name) + '</span>' +
       '<span>' + badgeHtml(item.status) + ' ' +
       '<a href="task.html?id=' + item.id + '">详情 →</a></span></div>';
   }
@@ -50,42 +106,117 @@
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
 
-  function renderServer(data) {
-    if (!data.items || !data.items.length) {
-      listEl.innerHTML = '<p class="hint">还没有任务。去 <a href="index.html">提交</a> 一个音/视频文件吧。</p>';
-      return;
+  function render() {
+    var count = state.checkedCount;
+    retryBar.style.display = state.filter === 'DEAD' && state.items.length ? 'block' : 'none';
+    checkAllEl.checked = count > 0 && count === state.items.length;
+    retryBtn.disabled = count === 0;
+    document.getElementById('checkAllLabel') && (document.getElementById('checkAllLabel').textContent = '全选（已选 ' + count + '）');
+    if (!state.items.length) {
+      listEl.innerHTML = '<p class="hint">该筛选下暂无任务。</p>';
+    } else {
+      listEl.innerHTML = state.items.map(rowHtml).join('');
     }
-    listEl.innerHTML = data.items.map(rowHtml).join('');
-    /* 未完成任务存在时每 3 秒刷新整页列表（D-024） */
-    var busy = data.items.some(function (item) {
+    moreBtn.style.display = state.cursor ? 'inline-block' : 'none';
+    listEl.querySelectorAll('.row-check').forEach(function (box) {
+      box.addEventListener('change', function () {
+        var id = box.getAttribute('data-id');
+        if (box.checked) { state.checked[id] = true; state.checkedCount++; }
+        else { delete state.checked[id]; state.checkedCount--; }
+        render();
+      });
+    });
+  }
+
+  function loadFirst() {
+    state.cursor = null;
+    fetchPage(null).then(function (data) {
+      if (data.__httpStatus !== 200) { renderFallback(); return; }
+      state.items = data.items || [];
+      state.cursor = data.next_before_id || null;
+      render();
+      scheduleRefresh();
+    });
+  }
+
+  function loadMore() {
+    if (!state.cursor) return;
+    moreBtn.disabled = true;
+    fetchPage(state.cursor).then(function (data) {
+      moreBtn.disabled = false;
+      if (data.__httpStatus !== 200) return;
+      state.items = state.items.concat(data.items || []);
+      state.cursor = data.next_before_id || null;
+      render();
+    });
+  }
+
+  /* 未完成任务存在时每 3 秒刷新（D-024）；保持当前筛选，勾选状态按 id 保留 */
+  function scheduleRefresh() {
+    var busy = state.items.some(function (item) {
       return item.status === 'PENDING' || item.status === 'RUNNING' || item.status === 'RETRYING';
     });
     if (busy && !timer) {
-      timer = setTimeout(function () { timer = null; getJson('api/v1/tasks?limit=50').then(renderServer); }, 3000);
+      timer = setTimeout(function () { timer = null; loadFirst(); }, 3000);
     }
   }
 
   function renderFallback() {
     var index = loadTaskIndex();
-    if (!index.length) {
-      listEl.innerHTML = '<p class="hint">服务暂时不可用，且本浏览器没有提交记录。</p>';
-      return;
-    }
-    listEl.innerHTML = '<p class="hint">服务暂时不可用，以下为本浏览器上次提交的缓存：</p>' +
-      index.map(function (item) {
-        return '<div class="task-row"><span>#' + item.id + ' ' + escapeHtml(item.name) + '</span>' +
-          '<span><a href="task.html?id=' + item.id + '">详情 →</a></span></div>';
-      }).join('');
+    listEl.innerHTML = index.length
+      ? '<p class="hint">服务暂时不可用，以下为本浏览器上次提交的缓存：</p>' +
+        index.map(function (item) {
+          return '<div class="task-row"><span>#' + item.id + ' ' + escapeHtml(item.name) + '</span>' +
+            '<span><a href="task.html?id=' + item.id + '">详情 →</a></span></div>';
+        }).join('')
+      : '<p class="hint">服务暂时不可用，且本浏览器没有提交记录。</p>';
   }
 
-  getJson('api/v1/tasks?limit=50').then(function (data) {
-    if (data.__httpStatus === 200) {
-      renderServer(data);
-    } else if (data.__httpStatus === 404) {
-      listEl.innerHTML = '<p class="hint">接口不存在（旧版本服务），请更新服务端。</p>';
-    } else {
-      renderFallback();
+  function doBatchRetry() {
+    var ids = Object.keys(state.checked).map(Number).sort(function (a, b) { return a - b; });
+    if (!ids.length) return;
+    retryBtn.disabled = true;
+    retryResult.textContent = '重试中…';
+    postJson('api/v1/tasks/retry', { ids: ids }).then(function (data) {
+      retryBtn.disabled = false;
+      if (data.__httpStatus === 200) {
+        var skipped = (data.skipped || []).map(function (s) {
+          return '#' + s.id + ' ' + (s.reason === 'NOT_DEAD' ? '非失败状态' : '不存在');
+        }).join('、');
+        retryResult.textContent = '已重试 ' + (data.retried || []).length + ' 个' +
+          ((data.skipped || []).length ? '；跳过：' + skipped : '');
+        state.checked = {}; state.checkedCount = 0;
+        setTimeout(loadFirst, 800);
+      } else {
+        retryResult.textContent = '失败（' + (data.message || ('HTTP ' + data.__httpStatus)) + '）';
+      }
+    });
+  }
+
+  filterBar.addEventListener('click', function (e) {
+    var btn = e.target.closest('.filter-btn');
+    if (!btn) return;
+    state.filter = btn.getAttribute('data-status');
+    state.checked = {}; state.checkedCount = 0;
+    retryResult.textContent = '';
+    renderFilterBar();
+    loadFirst();
+  });
+  checkAllEl.addEventListener('change', function () {
+    state.checked = {}; state.checkedCount = 0;
+    if (checkAllEl.checked) {
+      state.items.forEach(function (item) { state.checked[item.id] = true; });
+      state.checkedCount = state.items.length;
     }
+    render();
+  });
+  retryBtn.addEventListener('click', doBatchRetry);
+  moreBtn.addEventListener('click', loadMore);
+
+  renderFilterBar();
+  getJson('api/v1/tasks?limit=20').then(function (data) {
+    if (data.__httpStatus === 200) { loadFirst(); }
+    else { renderFallback(); }
   });
 })();
 </script>

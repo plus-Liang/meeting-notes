@@ -121,7 +121,9 @@ public class StructuringService {
             return null;
         }
         StructuringResult result = ExtractiveStructurer.extract(transcript);
-        return withGroundedTodos(result, transcript);
+        result = withGroundedTodos(result, transcript);
+        // F-15（D-089）：依据校验在前（对原文），词表确定性替换在后（right_text 不在原文，先替换会被误杀）
+        return ExtractiveGlossaryApplier.apply(result, termSource.terms());
     }
 
     /** 云档/本地档：一次调用 → 诊断 → 解析 → 依据校验。 */

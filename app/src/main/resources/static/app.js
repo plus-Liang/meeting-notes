@@ -53,6 +53,22 @@ function getJson(url) {
   });
 }
 
+/* POST 一个 JSON（T4.1 批量重试等）；响应带 __httpStatus，网络错误 { __httpStatus: 0 } */
+function postJson(url, body) {
+  return fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  }).then(function (resp) {
+    return resp.json().then(function (data) {
+      data.__httpStatus = resp.status;
+      return data;
+    });
+  }, function () {
+    return { __httpStatus: 0 };
+  });
+}
+
 function fmtBytes(n) {
   if (n === null || n === undefined) return '—';
   if (n >= 1048576) return (n / 1048576).toFixed(1) + ' MB';

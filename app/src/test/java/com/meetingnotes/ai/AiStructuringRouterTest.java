@@ -85,4 +85,21 @@ class AiStructuringRouterTest {
         assertEquals(AiTier.EXTRACTIVE, router.nextTier(AiTier.LOCAL));
         assertNull(router.nextTier(AiTier.EXTRACTIVE), "抽取式已是最后一档，降级链到此为止");
     }
+
+    @Test
+    void tierViewMatchesPreferredTierSingleSource() {
+        // T4.1 设置页：tierView 的 preferred 必须来自 preferredTier() 同一判定（禁止复制逻辑）；
+        // 三条件如实透传（离线模式 + 本地可用 → LOCAL）
+        when(probe.reachable()).thenReturn(true);
+        AiStructuringRouter router = new AiStructuringRouter(true, true, true, MODEL, probe);
+
+        AiStructuringRouter.TierView view = router.tierView();
+
+        assertEquals(router.preferredTier().name(), view.preferred());
+        assertEquals(AiTier.LOCAL, router.preferredTier());
+        assertEquals("LOCAL", view.preferred());
+        assertEquals(true, view.cloudConfigured());
+        assertEquals(true, view.offlineMode());
+        assertEquals(true, view.localReady());
+    }
 }

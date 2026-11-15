@@ -56,3 +56,15 @@ button:disabled { background: #94bfff; cursor: not-allowed; }
 dl.meta { display: grid; grid-template-columns: auto 1fr; gap: 6px 18px; font-size: 13px; }
 dl.meta dt { color: #86909c; }
 dl.meta dd { margin: 0; }
+
+/* T4.1：列表筛选 / 批量重试 / 设置页 */
+.filter-bar { margin: 10px 0; }
+.filter-btn { margin-right: 8px; background: #f2f3f5; color: #4e5969; }
+.filter-btn.active { background: #245bdb; color: #fff; }
+.retry-bar { margin: 10px 0; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.retry-bar label { font-size: 14px; color: #4e5969; }
+.quota-bar { height: 8px; background: #f2f3f5; border-radius: 4px; overflow: hidden; margin-top: 8px; }
+.quota-fill { height: 100%; background: #245bdb; }
+.glossary-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.glossary-table th, .glossary-table td { border-bottom: 1px solid #e5e6eb; padding: 8px 6px; text-align: left; word-break: break-all; }
+.glossary-table th { color: #86909c; font-weight: 500; }

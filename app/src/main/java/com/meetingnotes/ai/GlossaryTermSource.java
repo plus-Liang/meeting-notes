@@ -70,4 +70,11 @@ public class GlossaryTermSource {
         }
         return kept == 0 ? GlossaryInjection.EMPTY : new GlossaryInjection(sb.toString(), kept);
     }
+
+    /** F-15（D-089）：EXTRACTIVE 确定性替换用的词条列表——与 inject **同一查询口径**；空表 → 空列表 → 输出逐字节不变。 */
+    List<Term> terms() {
+        return jdbc.query(SELECT_SQL,
+                (rs, i) -> new Term(rs.getString("wrong_text"), rs.getString("right_text")),
+                DEFAULT_USER_ID, MAX_TERMS);
+    }
 }

@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.meetingnotes.task.GlossaryRepository;
 import com.meetingnotes.task.TaskMutationService;
 import com.meetingnotes.task.TaskQueryService;
+import com.meetingnotes.task.TaskRetryService;
 import com.meetingnotes.task.TaskService;
 import com.meetingnotes.task.TextTaskService;
 import org.springframework.http.HttpStatus;
@@ -54,6 +55,8 @@ public class TaskController {
     private final TaskQueryService taskQueryService;
     private final TaskMutationService taskMutationService;
     private final TextTaskService textTaskService;
+    private final TaskRetryService taskRetryService;
+    private final GlossaryRepository glossaryRepository;
     private final JdbcTemplate jdbc;
     /** F-10：详情解析用的单例 ObjectMapper（此前每行 new，属技术债）。 */
     private final ObjectMapper mapper;
@@ -62,12 +65,16 @@ public class TaskController {
                           TaskQueryService taskQueryService,
                           TaskMutationService taskMutationService,
                           TextTaskService textTaskService,
+                          TaskRetryService taskRetryService,
+                          GlossaryRepository glossaryRepository,
                           JdbcTemplate jdbc,
                           ObjectMapper mapper) {
         this.taskService = taskService;
         this.taskQueryService = taskQueryService;
         this.taskMutationService = taskMutationService;
         this.textTaskService = textTaskService;
+        this.taskRetryService = taskRetryService;
+        this.glossaryRepository = glossaryRepository;
         this.jdbc = jdbc;
         this.mapper = mapper;
     }
@@ -94,6 +101,24 @@ public class TaskController {
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(textTaskService.createPaste(body == null ? null : body.text(),
                         body == null ? null : body.template()));
+    }
+
+    /**
+     * 批量重试（T4.1）：只处理 DEAD（复活口径与重传复活 D-049 逐字一致，不消费配额）；
+     * 非 DEAD / 不存在 / 非本人 → 逐条 skipped（NOT_DEAD / NOT_FOUND），不整体失败。
+     */
+    @PostMapping(value = "/tasks/retry", consumes = MediaType.APPLICATION_JSON_VALUE)
+    public TaskRetryResponse retry(@RequestBody RetryRequest body) {
+        TaskRetryService.RetryOutcome outcome = taskRetryService.retry(body == null ? null : body.ids());
+        List<TaskRetryResponse.SkippedView> skipped = outcome.skipped().stream()
+                .map(s -> new TaskRetryResponse.SkippedView(s.id(), s.reason())).toList();
+        return new TaskRetryResponse(outcome.retried(), skipped);
+    }
+
+    /** 术语表只读列表（T4.1 设置页）：hits desc 取 ≤100。 */
+    @GetMapping("/glossary")
+    public List<GlossaryRepository.GlossaryRow> glossary() {
+        return glossaryRepository.listTop(DEFAULT_USER_ID, 100);
     }
 
     /** 首页 → 提交页（T1.6）。静态资源由 Spring Boot 提供，这里只做根路径转发。 */

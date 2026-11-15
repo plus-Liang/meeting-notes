@@ -477,4 +477,36 @@ class StructuringServiceTest {
         verify(jdbc).update(contains("UPDATE task_result"), anyString(), anyString(), anyString(),
                 eq("EXTRACTIVE"), eq(54L));
     }
+
+    // ---- T4.1 F-15：EXTRACTIVE 读词表（D-089） ----
+
+    @Test
+    void extractiveRouteReadsGlossaryAndCorrectsWrongTerms() {
+        // 集成：EXTRACTIVE 路径必须调 terms() 读词表；summary 来自原文句子（含错词"工作副盘"）
+        // → 词表确定性替换为"工作复盘"后落库
+        when(termSource.terms()).thenReturn(List.of(new GlossaryTermSource.Term("工作副盘", "工作复盘")));
+        // inject() 未打桩 → null → 提示词不注入（CLOUD 才注入；EXTRACTIVE 走代码层替换）
+
+        assertTrue(extractiveOnlyService().structure(60L, "我们本周要整理工作副盘并提交。"));
+
+        verify(termSource, times(1)).terms();
+        ArgumentCaptor<String> summary = ArgumentCaptor.forClass(String.class);
+        verify(jdbc).update(contains("UPDATE task_result"), summary.capture(), anyString(),
+                anyString(), eq("EXTRACTIVE"), eq(60L));
+        assertFalse(summary.getValue().contains("工作副盘"), "错词必须被词表纠正");
+        assertTrue(summary.getValue().contains("工作复盘"), "实际落库：" + summary.getValue());
+    }
+
+    @Test
+    void emptyGlossaryKeepsExtractiveOutputUnchanged() {
+        // 词表空 → 替换零发生，EXTRACTIVE 输出保留原文写法（逐字节不变的 T3.6 同款回归判据）
+        when(termSource.terms()).thenReturn(List.of());
+
+        assertTrue(extractiveOnlyService().structure(61L, "我们本周要整理工作副盘并提交。"));
+
+        ArgumentCaptor<String> summary = ArgumentCaptor.forClass(String.class);
+        verify(jdbc).update(contains("UPDATE task_result"), summary.capture(), anyString(),
+                anyString(), eq("EXTRACTIVE"), eq(61L));
+        assertTrue(summary.getValue().contains("工作副盘"), "无词表不得改变输出：" + summary.getValue());
+    }
 }

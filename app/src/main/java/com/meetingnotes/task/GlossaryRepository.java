@@ -3,6 +3,8 @@ package com.meetingnotes.task;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
+import java.util.List;
+
 /**
  * 术语表读写（T3.5 / D-037 表已存在：UNIQUE(user_id, wrong_text)）。
  *
@@ -35,5 +37,18 @@ public class GlossaryRepository {
     public Entry upsert(long userId, String wrongText, String rightText) {
         Integer hits = jdbc.queryForObject(UPSERT_SQL, Integer.class, userId, wrongText, rightText);
         return new Entry(wrongText, rightText, hits == null ? 1 : hits);
+    }
+
+    /** 设置页只读行（T4.1）：含 priority（注入排序的持久属性）。 */
+    public record GlossaryRow(String wrongText, String rightText, int hits, int priority) {
+    }
+
+    /** 设置页术语表（T4.1）：按 hits desc 取 ≤limit 条（排序口径与 T3.6 注入一致）。 */
+    public List<GlossaryRow> listTop(long userId, int limit) {
+        return jdbc.query("""
+                SELECT wrong_text, right_text, hits, priority FROM glossary WHERE user_id = ?
+                ORDER BY hits DESC, priority DESC, wrong_text ASC LIMIT ?
+                """, (rs, i) -> new GlossaryRow(rs.getString("wrong_text"), rs.getString("right_text"),
+                rs.getInt("hits"), rs.getInt("priority")), userId, limit);
     }
 }

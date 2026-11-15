@@ -106,13 +106,7 @@ class TaskQueryServiceTest {
 
     @Test
     void controllerRejectsBadParamsWith400InvalidParam() {
-        com.meetingnotes.web.TaskController controller = new com.meetingnotes.web.TaskController(
-                org.mockito.Mockito.mock(com.meetingnotes.task.TaskService.class),
-                newService(),
-                org.mockito.Mockito.mock(com.meetingnotes.task.TaskMutationService.class),
-                org.mockito.Mockito.mock(com.meetingnotes.task.TextTaskService.class),
-                jdbc,
-                new com.fasterxml.jackson.databind.ObjectMapper());
+        com.meetingnotes.web.TaskController controller = newController();
 
         assertEquals("INVALID_PARAM", assertThrows(ApiException.class, () -> controller.list(null, "51", null)).getCode());
         assertEquals(400, assertThrows(ApiException.class, () -> controller.list(null, "0", null)).getStatus());
@@ -120,14 +114,23 @@ class TaskQueryServiceTest {
         assertEquals("INVALID_PARAM", assertThrows(ApiException.class, () -> controller.list(null, null, "not-a-number")).getCode());
     }
 
+    /** T4.1 起构造器多了 retry/glossary 两个依赖，这里统一补齐 mock。 */
+    private com.meetingnotes.web.TaskController newController() {
+        return new com.meetingnotes.web.TaskController(
+                org.mockito.Mockito.mock(com.meetingnotes.task.TaskService.class),
+                newService(),
+                org.mockito.Mockito.mock(com.meetingnotes.task.TaskMutationService.class),
+                org.mockito.Mockito.mock(com.meetingnotes.task.TextTaskService.class),
+                org.mockito.Mockito.mock(com.meetingnotes.task.TaskRetryService.class),
+                org.mockito.Mockito.mock(com.meetingnotes.task.GlossaryRepository.class),
+                jdbc,
+                new com.fasterxml.jackson.databind.ObjectMapper());
+    }
+
     @Test
     void controllerValidatesStatusFilterStrictly() throws Exception {
         com.meetingnotes.task.TaskService taskService = org.mockito.Mockito.mock(com.meetingnotes.task.TaskService.class);
-        com.meetingnotes.web.TaskController controller = new com.meetingnotes.web.TaskController(
-                taskService, newService(),
-                org.mockito.Mockito.mock(com.meetingnotes.task.TaskMutationService.class),
-                org.mockito.Mockito.mock(com.meetingnotes.task.TextTaskService.class),
-                jdbc, new com.fasterxml.jackson.databind.ObjectMapper());
+        com.meetingnotes.web.TaskController controller = newController();
 
         // 非法 status → 400 INVALID_PARAM，不再静默空列表（T2.12）
         ApiException e = assertThrows(ApiException.class, () -> controller.list("BOGUS", null, null));

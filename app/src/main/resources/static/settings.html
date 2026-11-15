@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>设置 · 录音纪要平台</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Ctext y=%2713%27 font-size=%2713%27%3E%E2%9A%99%EF%B8%8F%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<nav>
+  <span class="brand">录音纪要平台</span>
+  <a href="index.html">提交</a>
+  <a href="tasks.html">任务列表</a>
+  <a href="settings.html">设置</a>
+</nav>
+<main>
+  <div class="card">
+    <h1>设置</h1>
+    <p class="hint">只读展示当前配额、AI 档位与术语表（数据来自服务端现成口径，T4.1）。</p>
+
+    <h2>今日配额</h2>
+    <div id="quota"><p class="hint">加载中…</p></div>
+
+    <h2>AI 档位</h2>
+    <div id="tier"><p class="hint">加载中…</p></div>
+
+    <h2>术语表</h2>
+    <p class="hint">改词回流沉淀的词条（按命中次数排序，最多展示 100 条），转写与摘要自动应用。</p>
+    <div id="glossary"><p class="hint">加载中…</p></div>
+  </div>
+</main>
+<script src="app.js"></script>
+<script>
+(function () {
+  function badge(text, cls) {
+    return '<span class="badge ' + cls + '">' + text + '</span>';
+  }
+
+  function renderQuota(q) {
+    var pct = q.minutes_limit > 0 ? Math.min(100, Math.round(q.used_minutes * 100 / q.minutes_limit)) : 0;
+    document.getElementById('quota').innerHTML =
+      '<div class="task-row"><span>转写时长（分钟）</span><span><b>' + q.used_minutes +
+      '</b> / ' + q.minutes_limit + '（剩 ' + q.remaining_minutes + '）</span></div>' +
+      '<div class="task-row"><span>任务数</span><span><b>' + q.used_tasks +
+      '</b> / ' + q.tasks_limit + '（剩 ' + q.remaining_tasks + '）</span></div>' +
+      '<div class="quota-bar"><div class="quota-fill" style="width:' + pct + '%"></div></div>';
+  }
+
+  function renderTier(t) {
+    var cls = t.preferred === 'CLOUD' ? 'done' : (t.preferred === 'LOCAL' ? 'busy' : 'dead');
+    function onoff(v) { return v ? '开' : '关'; }
+    document.getElementById('tier').innerHTML =
+      '<div class="task-row"><span>当前首选档</span><span>' + badge(t.preferred, cls) + '</span></div>' +
+      '<div class="task-row"><span>云 LLM 配置（key/base-url/model）</span><span>' + onoff(t.cloud_configured) + '</span></div>' +
+      '<div class="task-row"><span>离线模式（禁出站）</span><span>' + onoff(t.offline_mode) + '</span></div>' +
+      '<div class="task-row"><span>本地 Ollama 可用</span><span>' + onoff(t.local_ready) + '</span></div>' +
+      '<p class="hint">口径与启动日志"结构化首选档判定"一致：云配置开且非离线 → CLOUD；否则本地可用 → LOCAL；否则 EXTRACTIVE。</p>';
+  }
+
+  function renderGlossary(rows) {
+    if (!rows.length) {
+      document.getElementById('glossary').innerHTML = '<p class="hint">术语表为空：在详情页"修正转写"里改词后会自动沉淀到这里。</p>';
+      return;
+    }
+    document.getElementById('glossary').innerHTML =
+      '<table class="glossary-table"><thead><tr><th>原文说法</th><th>正确写法</th><th>命中</th><th>优先级</th></tr></thead><tbody>' +
+      rows.map(function (r) {
+        return '<tr><td>' + escapeHtml(r.wrong_text) + '</td><td>' + escapeHtml(r.right_text) +
+          '</td><td>' + r.hits + '</td><td>' + r.priority + '</td></tr>';
+      }).join('') + '</tbody></table>';
+  }
+
+  function escapeHtml(s) {
+    return String(s === undefined || s === null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  getJson('api/v1/settings').then(function (data) {
+    if (data.__httpStatus === 200) {
+      renderQuota(data.quota);
+      renderTier(data.ai_tier);
+    } else {
+      document.getElementById('quota').innerHTML = '<p class="error-text">配额/档位加载失败（HTTP ' + data.__httpStatus + '）。</p>';
+      document.getElementById('tier').innerHTML = '';
+    }
+  });
+  getJson('api/v1/glossary').then(function (data) {
+    renderGlossary(data.__httpStatus === 200 && Array.isArray(data) ? data : []);
+  });
+})();
+</script>
+</body>
+</html>
