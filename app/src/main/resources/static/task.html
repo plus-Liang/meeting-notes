@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="查看转写任务详情：转写全文、AI 摘要、关键词、待办与 Markdown 导出。">
 <title>任务详情 · 录音纪要平台</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Ctext y=%2713%27 font-size=%2713%27%3E%F0%9F%8E%99%3C/text%3E%3C/svg%3E">
 <link rel="stylesheet" href="style.css">
@@ -11,11 +12,16 @@
 <nav>
   <span class="brand">录音纪要平台</span>
   <a href="index.html">提交</a>
-  <a href="tasks.html">任务列表</a>
+  <a href="tasks.html" aria-current="page">任务列表</a>
   <a href="settings.html">设置</a>
 </nav>
-<main>
-  <div class="card" id="card"><p class="hint">加载中…</p></div>
+<main class="wide">
+  <div class="card" id="card">
+    <div class="skeleton skeleton-block" style="width:38%"></div>
+    <div class="skeleton skeleton-line" style="width:30%"></div>
+    <div class="skeleton skeleton-block" style="width:100%"></div>
+    <div class="skeleton skeleton-block" style="width:100%"></div>
+  </div>
 </main>
 <script src="auth.js"></script>
 <script src="app.js"></script>
@@ -32,6 +38,132 @@
     return ERROR_TEXT[code] || ('未知错误码：' + code);
   }
 
+  var TEMPLATE_TEXT = {
+    meeting: '会议纪要', course: '课程纪要', interview: '访谈纪要',
+    podcast: '播客纪要', shortvideo: '短视频纪要'
+  };
+  var TIER_TEXT = { CLOUD: '云端 AI', LOCAL: '本地 AI', EXTRACTIVE: '提取式' };
+  var TIER_CLS = { CLOUD: 'busy', LOCAL: 'done', EXTRACTIVE: '' };
+
+  function badge(text, cls) {
+    return '<span class="badge' + (cls ? ' ' + cls : '') + '">' + escapeHtml(text) + '</span>';
+  }
+
+  function headHtml(data) {
+    var badges = badge(statusText(data.status), data.status === 'DONE' ? 'done' : (data.status === 'DEAD' ? 'dead' : 'busy'));
+    if (data.template) {
+      badges += ' ' + badge(TEMPLATE_TEXT[data.template] || data.template);
+    }
+    if (data.ai_tier) {
+      badges += ' ' + badge(TIER_TEXT[data.ai_tier] || data.ai_tier, TIER_CLS[data.ai_tier] || '');
+    }
+    return '<h1>任务 <span class="num">#' + data.task_id + '</span> ' + badges + '</h1>' +
+      '<dl class="meta">' +
+      '<dt>时长</dt><dd>' + fmtDuration(data.duration_sec) + '</dd>' +
+      '<dt>大小</dt><dd>' + fmtBytes(data.size_bytes) + '</dd>' +
+      '<dt>提交时间</dt><dd>' + fmtDate(data.created_at) + '</dd>' +
+      '</dl>';
+  }
+
+  /* D-072 语义：null = AI 未启用或生成失败；[] = 确实没有内容。两者文案必须区分 */
+  function nullHint() {
+    return '<p class="hint">AI 未启用或本次未生成，暂无内容。</p>';
+  }
+
+  function summaryHtml(data) {
+    if (!data.summary && !data.keywords) {
+      return '<div class="section"><h2>摘要与关键词</h2>' + nullHint() + '</div>';
+    }
+    var html = '<div class="section"><h2>摘要与关键词</h2>';
+    html += data.summary
+      ? '<p style="margin:0 0 8px">' + escapeHtml(data.summary) + '</p>'
+      : '<p class="hint" style="margin:0 0 8px">无摘要。</p>';
+    if (data.keywords && data.keywords.length) {
+      html += '<div>' + data.keywords.map(function (k) {
+        return '<span class="chip">' + escapeHtml(k) + '</span>';
+      }).join('') + '</div>';
+    } else if (data.keywords) {
+      html += '<p class="hint" style="margin:0">没有关键词。</p>';
+    }
+    return html + '</div>';
+  }
+
+  function todosHtml(data) {
+    var html = '<div class="section"><h2>待办</h2>';
+    if (data.todos === null || data.todos === undefined) {
+      return html + nullHint() + '</div>';
+    }
+    if (!data.todos.length) {
+      return html + '<p class="hint" style="margin:0">本段内容没有待办事项。</p></div>';
+    }
+    html += data.todos.map(function (t) {
+      var meta = [];
+      meta.push('负责人：' + (t.owner || '未指定'));
+      meta.push('截止：' + (t.deadline || '未指定'));
+      return '<div class="todo-item">' +
+        '<div>' + (t.done ? '✅ ' : '') + escapeHtml(t.action || '') + '</div>' +
+        '<div class="todo-meta">' + meta.join(' · ') + '</div>' +
+        '</div>';
+    }).join('');
+    return html + '</div>';
+  }
+
+  function transcriptHtml(data) {
+    var html = '<div class="section"><h2>转写</h2>';
+    if (data.transcript === '') {
+      html += '<p class="empty-tip">未识别到语音内容：这段音频里没有可识别的人声（可能是纯音乐、静音或无人声）。</p>';
+    } else {
+      html += '<div class="transcript">' + escapeHtml(data.transcript) + '</div>';
+    }
+    return html + '</div>';
+  }
+
+  function exportHtml(data) {
+    return '<div class="section"><h2>导出</h2>' +
+      '<button type="button" class="btn-secondary" id="exportBtn">下载 Markdown</button>' +
+      '<p class="hint" id="exportMsg" style="margin-top:8px">导出内容为 Markdown 纪要文件，由浏览器直接下载。</p></div>';
+  }
+
+  function bindExport(data) {
+    var btn = document.getElementById('exportBtn');
+    if (!btn) return;
+    btn.addEventListener('click', function () {
+      var msgEl = document.getElementById('exportMsg');
+      btn.disabled = true;
+      apiFetch('api/v1/tasks/' + data.task_id + '/export?format=md').then(function (resp) {
+        if (resp.status !== 200) {
+          return resp.json().then(function (err) {
+            msgEl.textContent = '导出失败（' + (err.code || resp.status) + '）：' + (err.message || '未知错误');
+            btn.disabled = false;
+          }, function () {
+            msgEl.textContent = '导出失败（HTTP ' + resp.status + '）';
+            btn.disabled = false;
+          });
+        }
+        return resp.text().then(function (text) {
+          var blob = new Blob([text], { type: 'text/markdown;charset=utf-8' });
+          var a = document.createElement('a');
+          a.href = URL.createObjectURL(blob);
+          a.download = 'meeting-notes-' + data.task_id + '.md';
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          URL.revokeObjectURL(a.href);
+          msgEl.textContent = '已开始下载 meeting-notes-' + data.task_id + '.md。';
+          btn.disabled = false;
+        });
+      }, function () {
+        msgEl.textContent = '导出失败：服务暂时不可用，请稍后重试。';
+        btn.disabled = false;
+      });
+    });
+  }
+
+  function escapeHtml(s) {
+    return String(s === undefined || s === null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
   function render(data) {
     if (data.__httpStatus === 404) {
       card.innerHTML = '<h1>任务不存在</h1>' +
@@ -44,39 +176,31 @@
       return false; /* 网络抖动继续轮询 */
     }
     var status = data.status;
-    var head = '<h1>任务 #' + data.task_id + ' · ' + statusText(status) + '</h1>' +
-      '<dl class="meta">' +
-      '<dt>时长</dt><dd>' + fmtDuration(data.duration_sec) + '</dd>' +
-      '<dt>大小</dt><dd>' + fmtBytes(data.size_bytes) + '</dd>' +
-      '</dl>';
+    var head = headHtml(data);
     var body = '';
     if (status === 'PENDING') {
-      body = '<p class="hint">排队中，正在等待空闲的转写线程…（每 3 秒自动刷新）</p>';
+      body = '<div class="section"><p class="hint">排队中，正在等待空闲的转写线程…（每 3 秒自动刷新）</p>' +
+        '<div class="skeleton skeleton-block" style="width:100%"></div></div>';
     } else if (status === 'RUNNING') {
-      body = '<p class="hint">转写中，请稍候…（每 3 秒自动刷新）</p>';
+      body = '<div class="section"><p class="hint">转写中，请稍候…（每 3 秒自动刷新）</p>' +
+        '<div class="skeleton skeleton-block" style="width:100%"></div>' +
+        '<div class="skeleton skeleton-block" style="width:92%"></div></div>';
     } else if (status === 'RETRYING') {
-      body = '<p class="error-text">转写遇到问题，正在自动重试，请稍候（每 3 秒自动刷新）。</p>' +
-        '<p class="hint">原因：' + errorTextOf(data.error_code) + '</p>';
+      body = '<div class="section"><p class="error-text">转写遇到问题，正在自动重试，请稍候（每 3 秒自动刷新）。</p>' +
+        '<p class="hint">原因：' + escapeHtml(errorTextOf(data.error_code)) + '</p></div>';
     } else if (status === 'DEAD') {
-      body = '<p class="error-text">转写失败。原因：' + errorTextOf(data.error_code) + '</p>' +
-        '<p class="hint">请检查 ASR 服务是否正常后，可通过 API 重投该任务。</p>';
+      body = '<div class="section"><p class="error-text">转写失败。原因：' + escapeHtml(errorTextOf(data.error_code)) + '</p>' +
+        '<p class="hint">请检查 ASR 服务是否正常后，可在<a href="tasks.html">任务列表</a>按"失败"筛选并批量重试。</p></div>';
     } else if (status === 'DONE') {
-      if (data.transcript === '') {
-        body = '<p class="empty-tip">未识别到语音内容：这段音频里没有可识别的人声' +
-          '（可能是纯音乐、静音或无人声）。</p>';
-      } else {
-        body = '<div class="transcript">' + escapeHtml(data.transcript) + '</div>';
-      }
+      body = summaryHtml(data) + todosHtml(data) + transcriptHtml(data) + exportHtml(data);
     } else {
       body = '<p class="hint">未知状态：' + escapeHtml(status) + '</p>';
     }
     card.innerHTML = head + body;
+    if (status === 'DONE') {
+      bindExport(data);
+    }
     return status === 'DONE' || status === 'DEAD';
-  }
-
-  function escapeHtml(s) {
-    return String(s === undefined || s === null ? '' : s)
-      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
 
   /* PENDING/RUNNING/RETRYING 每 3 秒轮询（D-024），到 DONE/DEAD 或 404 停 */

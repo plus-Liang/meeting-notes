@@ -83,6 +83,20 @@ function fmtDuration(sec) {
   return m > 0 ? (m + ' 分 ' + s + ' 秒') : (s + ' 秒');
 }
 
+/* ISO 时间 → 本地可读（详情页 created_at，T4.14 渲染新增；字段口径不动） */
+function fmtDate(iso) {
+  if (!iso) return '—';
+  try {
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return String(iso);
+    var p = function (n) { return n < 10 ? '0' + n : String(n); };
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) +
+      ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+  } catch (e) {
+    return String(iso);
+  }
+}
+
 function statusText(status) {
   return STATUS_BADGE[status] || String(status);
 }

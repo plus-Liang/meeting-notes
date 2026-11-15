@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="自托管录音转写：上传音/视频文件，自动生成结构化纪要、关键词与待办。">
 <title>提交任务 · 录音纪要平台</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Ctext y=%2713%27 font-size=%2713%27%3E%F0%9F%8E%99%3C/text%3E%3C/svg%3E">
 <link rel="stylesheet" href="style.css">
@@ -10,7 +11,7 @@
 <body>
 <nav>
   <span class="brand">录音纪要平台</span>
-  <a href="index.html">提交</a>
+  <a href="index.html" aria-current="page">提交</a>
   <a href="tasks.html">任务列表</a>
   <a href="settings.html">设置</a>
 </nav>
@@ -22,7 +23,15 @@
       单文件上限 <b>200 MB</b>、时长上限 <b>60 分钟</b>（可由服务端配置调整）；
       支持一次选择多个文件批量提交（上限 <b>20</b> 个，逐文件独立处理）。
     </p>
-    <p><input type="file" id="file" multiple style="margin-top:8px"></p>
+    <div id="dropZone" class="drop-zone" tabindex="0" role="button" aria-label="点击选择或拖入音视频文件">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M12 16V4"/><path d="M7 9l5-5 5 5"/><path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/>
+      </svg>
+      <p class="drop-title">点击选择，或把文件拖到这里</p>
+      <p class="drop-hint">支持批量，逐文件独立转写</p>
+      <input type="file" id="file" multiple style="display:none">
+    </div>
+    <ul id="fileList" class="file-list" hidden></ul>
     <p><button id="submit">上传并开始转写</button></p>
     <p id="msg" class="hint" hidden></p>
     <div id="result" hidden>
@@ -34,7 +43,7 @@
     </div>
     <div id="batch-result" hidden>
       <p class="ok-text" id="batch-summary-line"></p>
-      <ul id="batch-items" class="hint" style="padding-left:18px"></ul>
+      <ul id="batch-items" class="file-list"></ul>
       <p class="hint">失败的文件可修改后重新提交；进入 <a href="tasks.html">任务列表</a> 可对失败（DEAD）任务批量重试。</p>
     </div>
   </div>
@@ -47,15 +56,74 @@
   var MAX_BATCH_FILES = 20; /* 与服务端 BATCH_MAX_FILES 默认一致，仅前端提示，服务端仍是权威 */
   var btn = document.getElementById('submit');
   var fileInput = document.getElementById('file');
+  var dropZone = document.getElementById('dropZone');
+  var fileList = document.getElementById('fileList');
   var msg = document.getElementById('msg');
   var result = document.getElementById('result');
   var batchResult = document.getElementById('batch-result');
+  /* 拖入的文件镜像：dataTransfer.files 赋给 input.files 失败时兜底（提交逻辑仍与原先一致） */
+  var mirror = null;
 
   function show(kind, text) {
-    msg.hidden = false;
+    msg.hidden = !text;
     msg.className = kind === 'error' ? 'error-text' : 'hint';
     msg.textContent = text;
   }
+
+  function pickedFiles() {
+    if (mirror && mirror.length) return mirror;
+    return (fileInput.files && fileInput.files.length) ? Array.prototype.slice.call(fileInput.files) : [];
+  }
+
+  function renderFileList() {
+    var files = pickedFiles();
+    fileList.textContent = '';
+    if (!files.length) {
+      fileList.hidden = true;
+      dropZone.classList.remove('has-files');
+      return;
+    }
+    files.forEach(function (f) {
+      var li = document.createElement('li');
+      var name = document.createElement('span');
+      name.textContent = f.name;
+      name.style.overflow = 'hidden';
+      name.style.textOverflow = 'ellipsis';
+      var size = document.createElement('span');
+      size.textContent = fmtBytes(f.size);
+      size.className = 'num';
+      li.appendChild(name);
+      li.appendChild(size);
+      fileList.appendChild(li);
+    });
+    fileList.hidden = false;
+    dropZone.classList.add('has-files');
+  }
+
+  function takeFiles(list) {
+    mirror = Array.prototype.slice.call(list);
+    try { fileInput.files = list; } catch (e) { /* 老浏览器不支持赋值，走镜像 */ }
+    renderFileList();
+  }
+
+  dropZone.addEventListener('click', function () { fileInput.click(); });
+  dropZone.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.click(); }
+  });
+  ['dragover', 'dragenter'].forEach(function (ev) {
+    dropZone.addEventListener(ev, function (e) { e.preventDefault(); dropZone.classList.add('dragover'); });
+  });
+  ['dragleave', 'dragend'].forEach(function (ev) {
+    dropZone.addEventListener(ev, function () { dropZone.classList.remove('dragover'); });
+  });
+  dropZone.addEventListener('drop', function (e) {
+    e.preventDefault();
+    dropZone.classList.remove('dragover');
+    if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) {
+      takeFiles(e.dataTransfer.files);
+    }
+  });
+  fileInput.addEventListener('change', function () { mirror = null; renderFileList(); });
 
   function renderBatch(data) {
     var summary = data.summary || {};
@@ -82,7 +150,7 @@
   }
 
   btn.addEventListener('click', function () {
-    var files = (fileInput.files && fileInput.files.length) ? Array.prototype.slice.call(fileInput.files) : [];
+    var files = pickedFiles();
     if (!files.length) { show('error', '请先选择一个或多个音/视频文件'); return; }
     for (var i = 0; i < files.length; i++) {
       if (files[i].size > MAX_UPLOAD_BYTES) {
