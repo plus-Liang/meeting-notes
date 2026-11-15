@@ -1470,7 +1470,7 @@ curl.exe -s --noproxy "*" -X POST http://localhost:8080/api/v1/tasks -F "file=@D
 **【开工方式（新会话）】** 仓库 `D:\new\projects\meeting-notes` → 读根 `AGENT.md` → `git status` 干净（HEAD 应含 `f880b6a` T3.9 代码，**别回退/重写 T3.9**）→
 读本卡 + `docs/项目/录音纪要平台/state.md`/`handoff.md` → 先做文案 + 单测（不等配额），配额重置后再跑 2 条实机。
 
-## T3.8 第 3 周验收（W3 收口：测试补强 + 56.7min 长音频 + 真 120s 超时 + 遗留评估）（约 4h）
+## T3.8 第 3 周验收（W3 收口：测试补强 + 56.7min 长音频 + 真 120s 超时 + 遗留评估）（约 4h）✅ **已完成（`3b80f02`；我复跑 192/192 + 可维护性 exit 0 + 三向变异；134 长音频 361s/RTF0.106、135 真超时 2s、136/137 F-14、138 我重放超时；W3 门禁关闭，D-089）**
 
 > **现状**：W3 功能任务 T3.0~T3.11 已全 ✅（T3.7 导出/PASTE、T3.9 模板、T3.10 amr/opus 均已验收）；本卡是**周验收收口**：
 > 补测试缺口 → 用真实长音频跑通 → 实测 LLM 真超时降级 → 把 F-14~F-19 逐条评估落结论。
@@ -1516,6 +1516,68 @@ curl.exe -s --noproxy "*" -X POST http://localhost:8080/api/v1/tasks -F "file=@D
 **【回报·测试三问】** 检查了哪些场景（畸形 JSON 矩阵/三档降级/模板/长音频/真超时/F-14）｜ 实际命令 + 输出（taskId + 耗时 + ai_tier + transcript 摘录 + WARN 原文 + 内存峰值 + 变异红绿 + exit code）｜ 还有哪些没验证（**不许留空**）。
 
 **【开工方式（新会话）】** 仓库 `D:\new\projects\meeting-notes` → 读根 `AGENT.md` → `git status` 干净（HEAD 应含 `0abbe0e` + 本轮 docs 提交）→ 读本卡 + `state.md`/`handoff.md` → 先补测试，再跑实机。
+
+---
+
+## T4.1 列表筛选 + 批量重试 + 设置页 + **F-15 抽取式读词表**（约 3h；W4 首卡）
+
+> **现状**：W3 全 ✅（HEAD 应为 `77b85e4`，含 T3.8 验收 docs；代码 `3b80f02`）。列表**后端**已支持 `?status=` 过滤（T2.10/TaskController），
+> 但前端没有筛选 UI、没有批量重试、没有设置页；`glossary` 有 2 条真实词条（`工作副盘→工作复盘`、`AirCoding→AI Coding`），
+> **EXTRACTIVE 档不读词表**（F-15，已在 D-089 批准实现，≤30 行、不改公共面）。
+> **配额**：2026-11-15 已用 65 分钟 / 10 任务；本卡实机预计 **≤4 条任务、≤10 分钟**（见【验收】，先做代码+单测，实机再花配额）。
+> ⚠️ 不改 `.env` 持久值做实验（超时/降档一类用外部 override，D-070）；**每组实验一结束立刻存日志**（K-39/D-089）。
+
+**主任务**：
+
+1. **列表筛选 UI（前端，无新后端）**：`tasks.html` + `app.js` 顶部加状态筛选（全部 / PENDING+RUNNING+RETRYING=进行中 / DONE / DEAD=失败），
+   点击即带 `?status=` 重新拉第一页；分页继续用 `next_before_id` 游标（**不许改回 OFFSET**，D-053）。筛选与"加载更多"要能共存，切换筛选要重置游标。
+2. **批量重试（后端 + 前端）**：新端点 `POST /api/v1/tasks/retry`，body `{"ids":[1,2,3]}`（1..20 个，去重）；
+   - 只处理 **DEAD**：复用现有"DEAD 重生"路径（重入队 Redis + 状态迁移与 re-upload 复活**同一口径**，先读 `TaskService`/`TaskMutationService` 再动手，**不许新造状态语义**）；
+   - 非 DEAD / 不存在 / 非本人：**跳过并在响应里列出原因**，不报错整体失败；响应 `{"retried":[ids],"skipped":[{"id":x,"reason":"NOT_DEAD"|"NOT_FOUND"}]}`（snake_case，D-041）；
+   - 非法 body（空数组 / >20 / 非数字）→ **400 `INVALID_PARAM`**；配额不重复扣（重试不消费额度，与"重传复活"一致）。
+   - 前端：列表筛选=DEAD 时出现"全选 / 批量重试"，显示 `retried/skipped` 结果。
+3. **设置页 `settings.html`**（只读展示为主，读 DB 现成数据，不新增可写配置）：
+   - **配额**：今日已用分钟/上限、已用任务数/上限、剩余（口径与 `QuotaService` 一致；读 `quota` 表 + `app.quota.*`）；
+   - **当前 AI 档位**：首选档 + 原因（复用 `AiStructuringRouter` 的判定日志口径，如 `CLOUD/LOCAL/EXTRACTIVE` + 三条件 true/false）；**不许另写一套判定逻辑**（单一来源）；
+   - **术语表**：新增只读端点 `GET /api/v1/glossary`（返回 `wrong_text/right_text/hits/priority`，按 hits desc 取 ≤100），页面表格展示；
+   - 页面无 JS 报错、无内联密钥、移动端可读。
+4. **F-15（EXTRACTIVE 读词表，≤30 行，不改公共契约）**：EXTRACTIVE 产出后，用 glossary 的 `wrong_text → right_text` 做**确定性替换**
+   （summary / keywords / todos.action 三个字段；词表为空时输出**逐字节不变**）；实现放 `StructuringService`（或紧邻的小方法），
+   **不新表、不改 API 字段、不改三档选择逻辑**；日志只记"术语替换 N 处"（不泄露词条，沿用 T3.6 口径）。
+
+**【范围声明】**
+- 做：前端筛选/批量重试/设置页 + 后端 `POST /tasks/retry` + `GET /glossary` + F-15 + 对应单测。
+- 不做：不改状态机语义/表结构/Flyway/错误码表；不动 `.env`/compose/健康检查；不碰导出/详情契约（12 键不动）；不写 `docs/`；不 push。
+- 存储纪律：样本/日志/override 一律 `D:\new\artifacts\`，不写 `C:\Users\ljh`。
+
+**【验收】（反例必须进）**
+```powershell
+# ① 单测：全量 ≥196 exit 0（现 192 + 新增 ≥4）；check-maintainability exit 0（allowlist 0，新增文件 ≤300 行）
+# ② 列表筛选（真 HTTP）：status=DEAD / status=DONE / status=ABC(400) / limit=0(400)；筛选结果与 DB 计数一致
+# ③ 批量重试实机（≤2 条任务）：
+#    a) 造 DEAD：docker compose stop asr → 上传 D:\datasets\meeting-notes-samples 里的短视频样本（≤10s）
+#       → 等终态 DEAD（记录 taskId、error_code）
+#    b) docker compose start asr（等 healthy）→ POST /api/v1/tasks/retry {"ids":[<deadId>]} → retried=[id]
+#       → 轮询到 DONE、transcript 非空；附带测：对同 id 再重试 → skipped=NOT_DEAD；对不存在 id → skipped=NOT_FOUND；
+#       混入 1 个 DONE id → 只重试 DEAD、DONE 进 skipped
+# ④ F-15 实机（1 条 PASTE，0 分钟）：override 指向静默监听容器 + LLM_TIMEOUT_SEC=2（同 T3.8 手法，override 放 artifacts）
+#    → PASTE 一段含"工作副盘"的文本 → 期望 ai_tier=EXTRACTIVE 且 summary/keywords 中**不含"工作副盘"、含"工作复盘"**
+#    → 验完 docker compose up -d app 恢复基础配置、.env 哈希 2BCC440F1C9E、5 服务 healthy
+# ⑤ 设置页：浏览器打开 /settings（或截图 + curl 三个数据源）→ 配额数字与 SQL 一致、首选档与启动日志一致、术语表 2 条
+# ⑥ 变异（至少 1 处）：把 F-15 的替换调用注释掉 → 单测红 → 还原 → touch → 绿（K-30）
+# ⑦ 收尾：git diff --name-only 只含 app/src（前端静态资源也在 app/src/main/resources/static）；单 commit；证据行不删；不 push
+```
+**通过标准**：筛选/分页共存且反例 400 正确；批量重试只动 DEAD、`retried/skipped` 语义准、重试后真的 DONE；设置页三块数据与 SQL/日志一致；
+F-15 单测 + 实机都证明"EXTRACTIVE 输出被词表纠正"且空词表逐字节不变；全量 ≥196 exit 0；可维护性 exit 0；零表结构/契约/`.env` 改动。
+
+**【可维护性】** 新端点走 `TaskController`（薄）+ 服务类；设置页数据复用 `QuotaService`/`AiStructuringRouter` 口径，**禁止复制判定逻辑**；
+F-15 控制在 ≤30 行并集中一处；新增静态资源不引第三方库（原生 JS）；commit 前 `check-maintainability.ps1` exit 0。
+
+**【回报·测试三问】** 检查了哪些场景（筛选/分页/批量重试正反例/设置页/F-15）｜ 实际命令 + 输出（HTTP 码、taskId、retried/skipped JSON、EXTRACTIVE 摘要片段、DQ 数字、变异红绿、exit code）｜
+还有哪些没验证（**不许留空**；如：移动端真机未验、并发重试同一 id 未测等要写清）。
+
+**【开工方式（新会话）】** 仓库 `D:\new\projects\meeting-notes` → 读根 `AGENT.md` → `git status` 干净（HEAD 应含 `77b85e4`，**别回退/重写 T3.8**）→
+读本卡 + `docs/项目/录音纪要平台/state.md`/`handoff.md` → 先读 `TaskService` 的 DEAD 复活路径再动重试端点 → 代码+单测先做完，再花配额跑实机。
 
 ---
 
