@@ -1923,7 +1923,8 @@ F-15 控制在 ≤30 行并集中一处；新增静态资源不引第三方库�
 > 日志原文 `Webhook 投递异常：…（HMAC-SHA256 不可用），留表重试`；根因是 `onTerminal` 检查了空 secret、**`scanDue` 没检查**，`attempt→post→sign("")` 抛空密钥异常被包成"算法不可用"。
 >
 > **配额警告（必读）**：截至 2026-11-15 15:24 已用 **80/120 分钟、47/50 任务——今日只剩 3 个任务配额**，而**全量 227/227 一次吃 3 个任务**（E2E A PASTE + G 两个静音 wav）。
-> 本卡是**代码卡，必须跑全量**。**若开工时今日剩余任务配额 < 3 → 等 00:00（Asia/Shanghai）日切后再开工**；开工前查一次、收尾最后一步再查一次（K-45）。
+> 本卡是**代码卡，必须跑全量**。**若开工时今日剩余任务配额 < 3 → 等北京日切（00:00）后再开工**（日切点已由 F-23 修正为北京时间 00:00，可先 `SHOW timezone` 复核）；
+> 开工前查一次、收尾最后一步再查一次（K-45）。
 >
 > **范围（按序做）**：
 > 1. **配置体检表（只读核对，产出一张表）**：`application.yml` 的 `app.*` 键、`.env.example`、`docker-compose.yml` 环境变量、`配置清单.md` §1/§2、代码消费点五方对齐，逐键给：
@@ -1934,7 +1935,12 @@ F-15 控制在 ≤30 行并集中一处；新增静态资源不引第三方库�
 > 3. **F-21 启动预检（小改）**：`LLM_ENABLED=true` 且云档 key 全空 → 启动 **fail-fast 且文案可读**（点明缺哪个键、怎么修），替代现在的间接报错（`OpenAI base URL must be set`）。
 >    **不改**"显式优先"语义（D-039）；已有 `NoKeyStartupTest` 覆盖零 key 正常启动，别弄红（`@MockBean TranscriptionWorker` 保留，K-42）。
 > 4. **队列键独立评估（只评估，不写代码）**：`NoKeyStartupTest` 现靠 `@MockBean` 避免抢真实 Redis 队列（K-42）。评估"独立队列键 / 独立 Redis DB"是否更忠实，给结论（改/不改 + 理由 + 风险）。
-> 5. **孤儿配置**：若有"计划中"的键，逐条登记（写码方只交清单，`配置清单.md` 由 Lead 同步）。
+> 5. **时区一致性（F-23，T4.8 验收后实测发现，运维修正已由 Lead 做完）**：`TZ=Asia/Shanghai` 只对**新建数据卷的 initdb** 生效；本机老卷的 PG GUC 仍是 **UTC**（容器 `date` 显示 CST 但 `SHOW timezone`=UTC），
+>    导致配额实际在**北京时间 08:00** 重置、00:00–08:00 窗口里 `Retry-After`（JVM 本地日）与计费日打架。Lead 已执行 `ALTER DATABASE meetingnotes SET timezone TO 'Asia/Shanghai'` 并重启 app（证据 `artifacts\T4.8\tz-fix\`，
+>    现 `SHOW timezone=Asia/Shanghai`、`CURRENT_DATE` 与北京日一致）。本卡要做的：①**启动预检**：DB `TimeZone` 与配置的 `TZ` 不一致 → 明确 WARN 或 fail-fast（二选一给理由）；
+>    ②**新装/新卷验证**：临时起一个空数据卷的 postgres 验 compose 的 `TZ` 是否真写进 `postgresql.conf`（`SHOW timezone`=Asia/Shanghai；**别动现有卷**，验完 `down -v` 清掉临时卷）；
+>    ③核对 `QuotaService`（`CURRENT_DATE`）与 `ApiExceptionHandler.secondsUntilMidnight`（JVM `LocalDate.now()`）在修正后的语义是否一致（判据：`SHOW timezone` + `CURRENT_DATE = (now() AT TIME ZONE 'Asia/Shanghai')::date`）。
+> 6. **孤儿配置**：若有"计划中"的键，逐条登记（写码方只交清单，`配置清单.md` 由 Lead 同步）。
 >
 > **不做**：不改任何对外契约（详情 12 键、错误码、批量 200 部分成功语义、Webhook 九键）；不加新功能；不动 `.env` 持久值（实验一律 override）；**不删除 F-22 的证据行**（`webhook_delivery` id=6，D-073）。
 >

@@ -706,6 +706,9 @@
      **app 与 postgres 必须同时加**；保留 `${TZ:-Asia/Shanghai}` 覆盖口（海外自托管可设回 UTC）。切换瞬间"今天"的定义会挪一次，
      **趁库里只有验证数据时做**（有真实用户后再改要写迁移说明）。
 - **依据**：`review/2026-11-14-T2.9验收.md` §2 F-6（64852s 的实测值 + 两处取时源码）。
+> **2026-11-15 补正（D-097）**：本条 3 的**判据不够**——容器 `date` 显示 CST 只是 libc 时区；PG 的 `TimeZone` 来自 **initdb 写进数据卷的 `postgresql.conf`**，
+> 实测**仍为 UTC**（容器 `date` 通过、`SHOW timezone` 却是 UTC，等于配置静默未生效）。已用 `ALTER DATABASE ... SET timezone TO 'Asia/Shanghai'` 修正，
+> 并把判据改为 `SHOW timezone` + `CURRENT_DATE = (now() AT TIME ZONE 'Asia/Shanghai')::date`；T4.12 加启动预检。
 - **已排除项**：只改 app 不改 PG（两边不一致）；保留 UTC 只改文案成"UTC 零点"（对中国用户仍是早上 8 点，体验没修）；
   改成滚动 24h 配额（改动大，spec N8 的口径是"每日"）。
 
@@ -1142,6 +1145,23 @@
 - **已排除项**：把"写码方留的日志"当唯一证据（改成我自己再重启一次复现）；为零代码卡跑全量 E2E 用光当日全部任务配额；
   在本卡顺手修 F-22（违反"零代码改动卡改了要停"的界定，且修复需全量回归）；删除 synthetic 失败行（D-073 证据行不删）；
   用接收端自证验签（K-47：验收方独立重算）。
+
+---
+
+### D-097 T4.8 验收后补正：PG `TimeZone` 并未真正切到本地时区（F-23）——配额日切仍在早上 08:00，判据改为"看 GUC 不看容器 date"
+- **日期**：2026-11-15（T4.8 验收收尾，回答"全量 E2E 为什么吃 3 个任务配额 / 重置点"时发现）｜**决策人**：本人
+- **结论**：
+  1. **发现**：D-067 设了 `TZ: Asia/Shanghai`（app + postgres），容器内 `date` 确实显示 CST；但 `SHOW timezone` = **UTC**，来源 `configuration file`（`/var/lib/postgresql/data/postgresql.conf`）——
+     数据卷是更早（UTC 时期）initdb 创建的，**TZ 环境变量无法改已写死的 PG GUC**。因此 `CURRENT_DATE` 仍按 UTC → 配额仍在**北京时间 08:00** 重置，
+     而 429 的 `Retry-After` 用 JVM `LocalDate.now()`（app TZ=Asia/Shanghai）→ 在 00:00–08:00 窗口两者语义打架。
+  2. **运维修正（已执行，0 任务）**：`ALTER DATABASE meetingnotes SET timezone TO 'Asia/Shanghai';` → 新连接生效（`SHOW timezone`=Asia/Shanghai，`CURRENT_DATE` 与北京日一致），
+     重启 app 让 Hikari 连接池重连；时间戳列都是 `timestamptz`，不错乱历史；配额行（`day` 键）未变（同日）。证据 `D:\new\artifacts\T4.8\tz-fix\before.txt`/`after.txt`。
+  3. **判据改硬（D-067 补正）**：不看容器 `date`，看 **`SHOW timezone`** 与 **`CURRENT_DATE = (now() AT TIME ZONE 'Asia/Shanghai')::date`**；以后任何"环境变量改了但行为没变"都按这个思路排查（K-51）。
+  4. **遗留（并入 T4.12）**：①启动预检——DB GUC 与 `TZ` 不一致时给出可读 WARN/报错；②新装/新卷验证（compose `TZ` 在 initdb 时生效）；③文档与 `配置清单.md` 判据已同步（F-23）。
+- **依据**：`docker exec postgres psql -c "SHOW timezone"`（UTC → Asia/Shanghai 前后对照）；`pg_settings.source=configuration file`；`quota` 表 `day=2026-11-15` 行 80/47 未变；
+  `artifacts\T4.8\tz-fix\`；`review/2026-11-15-T4.8验收.md` §11。
+- **已排除项**：重建数据卷（会丢证据行，且 D-073 禁止）；只改 app 侧时区（不解决 PG `CURRENT_DATE`）；把配额日语义改成"UTC 日"并改文案（违反 D-067 已批准的本意，且中国用户体验差）；
+  在 T4.8 零代码卡里改代码（按卡界定"要改代码就停"——运维修正不算代码，但启动预检属代码，进 T4.12）；伪造/删除配额行来"腾出"今日 3 个任务（D-073 证据纪律，拒绝）。
 
 ---
 

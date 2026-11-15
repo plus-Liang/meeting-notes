@@ -1,11 +1,11 @@
-# 交接：录音纪要平台（更新 2026-11-15 15:26，给下一个会话 / 新会话 WorkBuddy）
+# 交接：录音纪要平台（更新 2026-11-15 15:32，给下一个会话 / 新会话 WorkBuddy）
 
 ## 1. 下一步
 
 1. **W3 全 ✅**（T3.8 收口，D-089）；**W4：T4.1 ✅**（`690b644`）、**T4.2 ✅**（`e9649d2`）、**T4.4 ✅**（无 commit，D-092）、**T4.5 ✅**（无 commit，D-093）、
    **T4.6 ✅**（`1c2aa73`，D-094：认证/OpenAPI/Webhook）、**T4.7 ✅**（`265b534`，D-095：批量提交）、**T4.8 ✅**（**零代码改动**，D-096：重启不丢；
-   我另外自己 down/up 一次复现数据逐字节不丢，僵尸回收 task 202 实证，Webhook 重启续跑补上；新发现 **F-22**）。
-2. **下一张卡**：**T4.12 死配置体检**（卡已写进 `tasks-starter.md`：配置五方对齐 + **F-22 修复** + **F-21 启动预检** + 3 个 BATCH_* 键 + 队列键评估），
+   我另外自己 down/up 一次复现数据逐字节不丢，僵尸回收 task 202 实证，Webhook 重启续跑补上；新发现 **F-22**；验收后又发现 **F-23**：D-067 的 `TZ` 修正未真正生效（老卷 PG GUC 仍 UTC）→ 已 `ALTER DATABASE ... SET timezone` 修正，日切回到北京 00:00，T4.12 加预检）。
+2. **下一张卡**：**T4.12 死配置体检**（卡已写进 `tasks-starter.md`：配置五方对齐 + **F-22 修复** + **F-21 启动预检** + **F-23 时区预检/新卷验证** + 3 个 BATCH_* 键 + 队列键评估），
    之后 T4.13 真机 UI（**T4.13 时一并点验 `/tasks.html` 筛选、`/settings.html`、浏览器粘 token、批量多选、Swagger Try-it-out**），再 T4.9/T4.10/T4.11 发布材料。
 3. 配额：2026-11-15 已用 **80/120 分钟、47/50 任务**——**今日任务配额只剩 3**（本地日切 00:00 重置）；**全量 E2E 每跑一次吃 3 个任务**，
    T4.12 是代码卡必须跑全量 → **剩余 <3 就等日切**；配额紧时用 `-UnitOnly` + 现成证据行（K-36）；新卡开工前先查，**回报前最后一步再查一次**（K-45）。
@@ -39,10 +39,12 @@
     自建者清 secret 前先 `UPDATE webhook_delivery SET next_retry=NULL WHERE next_retry IS NOT NULL;`。**报错文案必须区分"配置缺失"与"组件坏了"**。
 19. **证据载体自己会骗人（K-50）**：接收端字段名 `body_b64` 里存的其实是 UTF-8 文本（不是 base64）；快照文件用 `Set-Content` 再算 sha256 会因 BOM/尾换行得出不同值。
     **二进制一律 base64、字段名如实、哈希必须写清算的是哪层字节**；验签要"命中 + 错密钥不等"双向（K-47）。
+20. **配置生效要验证在消费点（K-51 / F-23）**：D-067 设了 `TZ=Asia/Shanghai`、容器 `date` 也显示 CST，但 PG 老数据卷 `postgresql.conf` 写死 UTC → `SHOW timezone` 还是 UTC，配额实际在北京 08:00 才重置。
+    判据：`SHOW timezone` + `CURRENT_DATE = (now() AT TIME ZONE 'Asia/Shanghai')::date`；老卷改法 `ALTER DATABASE ... SET timezone ...`（T4.12 加启动预检）。**别只看你设置它的地方，要看谁在消费它。**
 
 ## 3. 关键文件
 
-`00-先看这个.md` · `开工准备清单.md` · `架构一页纸.md` · `可维护性要求.md` · `踩坑与复盘-面试用.md`（K-01~K-50）· `spec.md`/`plan.md`/`tasks.md`/`tasks-starter.md`（下一张卡 **T4.12** 已写）· `decisions.md`（**97 条**，最新 D-096）· `接入指南.md`（认证/Webhook/batch 契约均已回填实测事实：§3.7 批量、§4.2/4.4 Webhook（含 **F-22 运维注意**）、§六 三条验收 ✅）· `配置清单.md`（§1.1 三个 BATCH_* 键、§1.4 F-21/F-22、§1.5 接入键已消费）· `review/2026-11-15-T4.8验收.md`（最新，31 份）· `scripts/backup.ps1`/`restore.ps1` · `rules/dev.md`（§4.1）
+`00-先看这个.md` · `开工准备清单.md` · `架构一页纸.md` · `可维护性要求.md` · `踩坑与复盘-面试用.md`（K-01~K-51）· `spec.md`/`plan.md`/`tasks.md`/`tasks-starter.md`（下一张卡 **T4.12** 已写）· `decisions.md`（**98 条**，最新 D-097）· `接入指南.md`（认证/Webhook/batch 契约均已回填实测事实：§3.7 批量、§4.2/4.4 Webhook（含 **F-22 运维注意**）、§六 三条验收 ✅）· `配置清单.md`（§1.1 三个 BATCH_* 键、§1.4 F-21/F-22、§1.5 接入键已消费）· `review/2026-11-15-T4.8验收.md`（最新，31 份）· `scripts/backup.ps1`/`restore.ps1` · `rules/dev.md`（§4.1）
 
 ## 4. 未决
 
