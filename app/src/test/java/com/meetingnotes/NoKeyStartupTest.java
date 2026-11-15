@@ -5,10 +5,13 @@ import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.context.ApplicationContext;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+
+import com.meetingnotes.worker.TranscriptionWorker;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -21,6 +24,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p>用 H2 内存库替换外部 PostgreSQL（仅测试范围），其余全部是生产配置：
  * 真实 application.yml、真实 MeetingNotesApplication、真实 Spring AI 自动配置集合。
  * 关闭 Flyway 与 JPA 建表是为了让测试不依赖外部服务，不影响被测的 LLM 开关逻辑。
+ *
+ * <p>T4.2（E2E 纳入全量后必须）：**Mock 掉 TranscriptionWorker**——本测试上下文连的是
+ * 真实 Redis（BLPOP 消费者），不加隔离会与运行中容器的 worker 抢真实队列：任务被本测试
+ * 的 worker 偷走后写进 H2，真实任务卡 PENDING（E2E 假红）。worker 的单测覆盖在
+ * TranscriptionWorkerTest（纯 Mockito）；本类只验证"无 key 可启动"，mock 掉不影响断言。
  */
 @SpringBootTest(classes = MeetingNotesApplication.class,
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
@@ -42,6 +50,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
                 "management.endpoint.health.validate-group-membership=false"
         })
 class NoKeyStartupTest {
+
+    /** T4.2：防止测试上下文的 worker BLPOP 真实队列、偷走 E2E/实机任务写进 H2（假红/卡 PENDING）。 */
+    @MockBean
+    private TranscriptionWorker transcriptionWorker;
 
     @Autowired
     private ApplicationContext context;

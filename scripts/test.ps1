@@ -1,7 +1,7 @@
 ﻿# scripts/test.ps1 —— 统一测试入口（T1.9 / 环境坑 #13 的固化）
 # 用法：
 #   powershell -NoProfile -ExecutionPolicy Bypass -File scripts\test.ps1            # 全量（含 2 个冒烟）
-#   powershell -NoProfile -ExecutionPolicy Bypass -File scripts\test.ps1 -UnitOnly  # 跳过 *SmokeTest
+#   powershell -NoProfile -ExecutionPolicy Bypass -File scripts\test.ps1 -UnitOnly  # 跳过 *SmokeTest 与 E2ETest（端到端需基础栈，T4.2）
 # 设计：
 #   1) 逐行读仓库根 .env 注入进程环境（只打印 key 名，绝不打印 value，防泄密）；
 #   2) ASR_BASE_URL 默认 http://localhost:${ASR_PORT:8001}，但外部已设置时以外部为准（反例可据此造红）；
@@ -77,8 +77,8 @@ try {
     [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
     Remove-Item (Join-Path $repo 'app\target\surefire-reports') -Recurse -Force -ErrorAction SilentlyContinue
     if ($UnitOnly) {
-        Write-Host '[test.ps1] -UnitOnly：跳过 AsrSmokeTest / LlmSmokeTest'
-        & $mvn -B test "-Dtest=!AsrSmokeTest,!LlmSmokeTest"
+        Write-Host '[test.ps1] -UnitOnly：跳过 AsrSmokeTest / LlmSmokeTest / E2ETest（端到端需要基础栈，T4.2）'
+        & $mvn -B test "-Dtest=!AsrSmokeTest,!LlmSmokeTest,!E2ETest"
     } else {
         & $mvn -B test
     }
