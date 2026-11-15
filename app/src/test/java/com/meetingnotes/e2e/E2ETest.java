@@ -13,6 +13,8 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -55,7 +57,58 @@ class E2ETest {
         return (url == null || url.isBlank()) ? "http://localhost:8080" : url.trim();
     }
 
+    /**
+     * API token（T4.6）：E2E_API_TOKEN 环境变量 → API_TOKEN 环境变量 → 仓库根 .env 的 API_TOKEN → 空。
+     * test.ps1 全量跑会自动注入；手动跑也可 $env:E2E_API_TOKEN=… 或依赖 .env 兜底。
+     */
+    private static String token() {
+        String t = System.getenv("E2E_API_TOKEN");
+        if (t == null || t.isBlank()) {
+            t = System.getenv("API_TOKEN");
+        }
+        if (t == null || t.isBlank()) {
+            t = readDotEnvToken();
+        }
+        return t == null ? "" : t.trim();
+    }
+
+    /** 逐行找 .env 的 API_TOKEN（surefire 工作目录 = app/，仓库根在其上一级）。 */
+    private static String readDotEnvToken() {
+        for (Path candidate : List.of(Path.of(System.getProperty("user.dir"), ".env"),
+                Path.of(System.getProperty("user.dir"), "..", ".env"))) {
+            try {
+                for (String line : Files.readAllLines(candidate)) {
+                    if (line.matches("\\s*API_TOKEN\\s*=\\s*.*")) {
+                        return line.substring(line.indexOf('=') + 1).trim();
+                    }
+                }
+            } catch (Exception ignored) {
+                // 找不到 .env 属正常（CI/外部基址），继续下一个候选
+            }
+        }
+        return null;
+    }
+
     private static HttpResponse<String> send(String method, String path, String body, String contentType)
+            throws Exception {
+        HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(base() + path))
+                .timeout(Duration.ofSeconds(30));
+        String t = token();
+        if (!t.isEmpty()) {
+            builder.header("Authorization", "Bearer " + t);
+        }
+        if ("GET".equals(method)) {
+            builder.GET();
+        } else {
+            builder.POST(HttpRequest.BodyPublishers.ofString(
+                    body == null ? "" : body, StandardCharsets.UTF_8));
+            builder.header("Content-Type", contentType == null ? "application/json" : contentType);
+        }
+        return HTTP.send(builder.build(), HttpResponse.BodyHandlers.ofString());
+    }
+
+    /** 不带 Authorization 的原始请求（401 反例专用）。 */
+    private static HttpResponse<String> sendWithoutToken(String method, String path, String body, String contentType)
             throws Exception {
         HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(base() + path))
                 .timeout(Duration.ofSeconds(30));
@@ -176,5 +229,22 @@ class E2ETest {
 
         HttpResponse<String> plain = send("POST", "/api/v1/tasks", "纯文本提交", "text/plain");
         assertEquals(415, plain.statusCode(), "Content-Type: text/plain → 415 UNSUPPORTED_MEDIA_TYPE");
+    }
+
+    /** T4.6：/api/v1/** 认证生效——不带 token 必须 401 + UNAUTHORIZED + WWW-Authenticate（豁免面见 ApiTokenFilterTest）。 */
+    @Test
+    @Order(6)
+    void f_missingTokenIsRejectedWithUnifiedErrorBody() throws Exception {
+        HttpResponse<String> resp = sendWithoutToken("POST", "/api/v1/tasks",
+                "{\"text\":\"匿名反例 " + UUID.randomUUID() + "\"}", "application/json");
+        assertEquals(401, resp.statusCode(), "缺 token 必须 401，实际：" + abbreviate(resp.body()));
+        assertEquals("Bearer", resp.headers().firstValue("WWW-Authenticate").orElse(""),
+                "401 必须带 WWW-Authenticate: Bearer");
+        JsonNode err = M.readTree(resp.body());
+        assertEquals("UNAUTHORIZED", err.get("code").asText(), "统一错误码：" + resp.body());
+        assertFalse(err.get("message").asText().isBlank(), "message 非空");
+        // 401 不得打挂豁免面：actuator 与契约发现端点匿名可达
+        assertEquals(200, sendWithoutToken("GET", "/actuator/health", null, null).statusCode());
+        assertEquals(200, sendWithoutToken("GET", "/v3/api-docs", null, null).statusCode());
     }
 }

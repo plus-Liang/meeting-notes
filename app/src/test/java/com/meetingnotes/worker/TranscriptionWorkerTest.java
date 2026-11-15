@@ -55,11 +55,13 @@ class TranscriptionWorkerTest {
     @Mock
     private MonoWavExtractor monoWavExtractor;
     @Mock
+    private com.meetingnotes.webhook.WebhookDeliveryService webhookService;
+    @Mock
     private ListOperations<String, String> listOps;
 
     private TranscriptionWorker newWorker() {
         return new TranscriptionWorker(redis, jdbc, s3, transcriptionModel,
-                structuringService, pasteTextReader, monoWavExtractor,
+                structuringService, webhookService, pasteTextReader, monoWavExtractor,
                 "meetingnotes:task-queue", 10, "meetingnotes", 3);
     }
 

@@ -41,9 +41,9 @@ function rememberTask(id, name) {
   saveTaskIndex(list.slice(0, 200));
 }
 
-/* GET 一个 JSON；404 返回 { __httpStatus: 404, code, message }，网络错误返回 { __httpStatus: 0 } */
+/* GET 一个 JSON（T4.6 起统一走 apiFetch 自动带 token）；404 返回 { __httpStatus: 404, code, message }，网络错误返回 { __httpStatus: 0 } */
 function getJson(url) {
-  return fetch(url).then(function (resp) {
+  return apiFetch(url).then(function (resp) {
     return resp.json().then(function (data) {
       data.__httpStatus = resp.status;
       return data;
@@ -53,9 +53,9 @@ function getJson(url) {
   });
 }
 
-/* POST 一个 JSON（T4.1 批量重试等）；响应带 __httpStatus，网络错误 { __httpStatus: 0 } */
+/* POST 一个 JSON（T4.1 批量重试等；T4.6 起统一走 apiFetch 自动带 token）；响应带 __httpStatus，网络错误 { __httpStatus: 0 } */
 function postJson(url, body) {
-  return fetch(url, {
+  return apiFetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body)

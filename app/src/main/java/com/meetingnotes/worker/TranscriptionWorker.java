@@ -37,6 +37,7 @@ public class TranscriptionWorker implements SmartLifecycle {
     private final S3Client s3;
     private final TranscriptionModel transcriptionModel;
     private final com.meetingnotes.ai.StructuringService structuringService;
+    private final com.meetingnotes.webhook.WebhookDeliveryService webhookService;
     private final PasteTextReader pasteTextReader;
     private final MonoWavExtractor monoWavExtractor;
     private final String queueKey;
@@ -52,6 +53,7 @@ public class TranscriptionWorker implements SmartLifecycle {
                                S3Client s3,
                                TranscriptionModel transcriptionModel,
                                com.meetingnotes.ai.StructuringService structuringService,
+                               com.meetingnotes.webhook.WebhookDeliveryService webhookService,
                                PasteTextReader pasteTextReader,
                                MonoWavExtractor monoWavExtractor,
                                @Value("${app.worker.queue-key}") String queueKey,
@@ -63,6 +65,7 @@ public class TranscriptionWorker implements SmartLifecycle {
         this.s3 = s3;
         this.transcriptionModel = transcriptionModel;
         this.structuringService = structuringService;
+        this.webhookService = webhookService;
         this.pasteTextReader = pasteTextReader;
         this.monoWavExtractor = monoWavExtractor;
         this.queueKey = queueKey;
@@ -202,6 +205,7 @@ public class TranscriptionWorker implements SmartLifecycle {
         runAiStep("结构化", () -> structuringService.structure(taskId, text));
         jdbc.update("UPDATE task SET status = 'DONE', updated_at = now() WHERE id = ?", taskId);
         log.info("任务已置 DONE（transcript/摘要/待办均已收口）");
+        webhookService.onTerminal(taskId, "DONE"); // T4.6：终态异步投递 Webhook（内部不抛、不阻塞）
     }
 
     /** D-048：null/空白归一化为空串落 task_result（不算失败不重试，DONE 由 finalizeResult 统一置）。 */
@@ -239,6 +243,7 @@ public class TranscriptionWorker implements SmartLifecycle {
                         code, taskId);
                 jdbc.update("INSERT INTO dead_letter (task_id, reason) VALUES (?, ?)", taskId, reason);
                 log.error("任务 {} 重试 {} 次仍失败，置 DEAD（{}）并写 dead_letter：{}", taskId, attempts, code, reason);
+                webhookService.onTerminal(taskId, "DEAD"); // T4.6：终态异步投递 Webhook（内部不抛、不阻塞）
             } else {
                 jdbc.update("UPDATE task SET status = 'RETRYING', error_code = ?, updated_at = now() WHERE id = ?",
                         code, taskId);

@@ -51,6 +51,11 @@ if (Test-Path $envFile) {
 }
 
 # ---- 3) ASR 冒烟地址：外部已设置时以外部为准（反例：故意设错端口必须红）----
+# T4.6：全量跑前把 .env 的 API_TOKEN 透传给 E2ETest（E2E_API_TOKEN；外部已设置时不覆盖）。
+if (-not $env:E2E_API_TOKEN -and $env:API_TOKEN) {
+    $env:E2E_API_TOKEN = $env:API_TOKEN
+    Write-Host '[test.ps1] E2E_API_TOKEN <- .env 的 API_TOKEN（E2ETest 带 token 请求 /api/v1）'
+}
 if (-not $UnitOnly) {
     if (-not $env:ASR_BASE_URL) {
         $asrPort = if ($env:ASR_PORT) { $env:ASR_PORT } else { '8001' }
