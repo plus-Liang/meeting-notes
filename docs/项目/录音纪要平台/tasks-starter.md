@@ -1581,6 +1581,52 @@ F-15 控制在 ≤30 行并集中一处；新增静态资源不引第三方库�
 
 ---
 
+## T4.2 端到端自动化测试（N14）（约 2h；W4 第 2 张）
+
+> **现状**：全量 **204/204**，但两个冒烟只覆盖单点（ASR 直连、LLM 连通）；**没有一条"提交 → 处理 → 查询 → 导出 → 重试 → 错误语义"的端到端测试**。
+> N14 的 DoD 是"一条命令跑通"。本卡把它补上，并纳入全量套件。
+> **配额**：2026-11-15 已用 66 分钟 / 12 任务；E2E 用 **PASTE（0 分钟）**，每跑一次全量会新建 1 条任务（唯一文本，避免幂等命中）→ 本卡预算 **≤6 任务 / 0 分钟**。
+
+**主任务**：
+
+1. **新增 `app/src/test/java/com/meetingnotes/e2e/E2ETest.java`**（≤200 行，JUnit5 + `java.net.http`，**不引新依赖**）：
+   - 基址 `E2E_BASE_URL` → 回退 `APP_BASE_URL` → 默认 `http://localhost:8080`；只拼相对路径，**不硬编码端口**（D-066 纪律）。
+   - **前置探活**：`GET /actuator/health` 非 200 → `fail("端到端需要基础栈（5 服务 healthy）…")`，**不许 skip 假装通过**（假绿灯红线）。
+   - **场景 A 主链路（PASTE）**：唯一文本（UUID 后缀）→ `POST /api/v1/tasks` → 断言 **201**、`task_id`>0、`status=PENDING`、`content_hash` 64 位、`reused=false`；
+     轮询详情（间隔 500ms、超时 60s，超时要打印最后状态）→ `DONE`；断言**详情 12 键固定集合**、`transcript` 与输入一致（trim）、`summary` 非空、
+     `keywords`/`todos` 是数组、`ai_tier ∈ {CLOUD,LOCAL,EXTRACTIVE}`、`template=meeting`、`error_code=null`。
+   - **场景 B 幂等（D-055）**：同文本再 POST → `reused=true` 且 `task_id` 与 A 相同（不新建任务）。
+   - **场景 C 导出（T3.7）**：`GET /tasks/{id}/export?format=md` → 200、`Content-Type: text/markdown`、三节顺序 `## 摘要` → `## 关键词` → `## 待办`；`format=pdf` → 400。
+   - **场景 D 批量重试语义（T4.1 回归）**：`POST /tasks/retry {"ids":[<id>]}` → `retried=[]` 且 `skipped[0].reason="NOT_DEAD"`。
+   - **场景 E 错误语义**：JSON 提交 `template=xxx` → 400 且 message 逐字；`Content-Type: text/plain` → 415。
+2. **`scripts/test.ps1`**：`-UnitOnly` 排除模式加 `,!E2ETest`（否则无栈跑单元会红）；全量模式自动纳入；文件头注释与用法同步更新。
+3. **不做**：不引 RestAssured/Testcontainers（新依赖=供应链与时间风险）；不做音频端到端（ASR 冒烟已覆盖，音频场景验证在 T4.4/T4.5）；不改主代码/契约/状态机。
+
+**【范围声明】**
+- 做：E2E 测试类 + `scripts/test.ps1` 排除项 + 注释；配额内跑实机。
+- 允许改动文件：`app/src/test/**` + `scripts/test.ps1`（**本卡唯一允许碰 scripts/ 的地方**，因为入口要加排除项）。
+- 禁：改 `.env`/compose/表结构/错误码表/主代码；删证据行（D-073）；为了绿而 skip/降低断言（红线）；写 `docs/`；push。
+- 存储纪律：日志/临时一律 `D:\new\artifacts\`。
+
+**【验收】（反例必须进）**
+```powershell
+# ① 全量：powershell -NoProfile -ExecutionPolicy Bypass -File scripts\test.ps1 → 用例数 ≥206，mvn exit 0
+# ② 纯单元：scripts\test.ps1 -UnitOnly → 不含 E2ETest、exit 0（证明排除项生效）
+# ③ 单跑：mvn -B test "-Dtest=E2ETest" → BUILD SUCCESS；输出/报告里有 taskId 与各场景断言
+# ④ 反例（必须有）：docker compose stop app → 跑 E2ETest → 明确失败（贴报错原文），不许 skip/绿
+# ⑤ 变异（主代码，验 E2E 真能抓回归）：把 TaskMarkdownExporter 三节顺序对调 → E2ETest 红 → 还原 → touch → 绿（K-30）
+# ⑥ 收尾：git diff --name-only 只含 app/src/test 与 scripts/test.ps1；单 commit；不 push；证据行不删；配额 ≤6 任务/0 分钟
+```
+**通过标准**：一条命令跑通全部 5 场景且纳入全量套件；无静默 skip；反例 ④ 与变异 ⑤ 都造过红；全量 exit 0、可维护性 exit 0；零主代码/契约/`.env` 改动。
+
+**【可维护性】** 单文件 ≤200 行；用 JDK 自带 HTTP 客户端 + Jackson（既有依赖）；断言消息带 taskId 与关键字段，失败可直接定位；commit 前 `check-maintainability.ps1` exit 0。
+
+**【回报·测试三问】** 检查了哪些场景（A~E + 反例 + 变异）｜ 实际命令 + 输出（用例数前后、E2E taskId、轮询耗时、三节原文、400/415 原文、反例报错、变异红绿、exit code）｜ 还有哪些没验证（**不许留空**）。
+
+**【开工方式（新会话）】** 仓库 `D:\new\projects\meeting-notes` → 读根 `AGENT.md` → `git status` 干净（HEAD `49691f6`，**别回退/重写 T4.1**）→ 读本卡 + `state.md`/`handoff.md` → 先写 E2E 类与 test.ps1 排除项，再跑全量。
+
+---
+
 ## 每张卡做完都要给你的回报
 
 ```text
