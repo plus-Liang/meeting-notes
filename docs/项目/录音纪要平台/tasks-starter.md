@@ -1868,7 +1868,7 @@ F-15 控制在 ≤30 行并集中一处；新增静态资源不引第三方库�
 
 ---
 
-## T4.8 重启不丢验证（N20）（约 1.5h；W4 第 7 张）
+## T4.8 重启不丢验证（N20）（约 1.5h；W4 第 7 张）✅ **已完成（零代码改动；Lead 自己又 down/up 一次复现数据逐字节不丢；僵尸回收 recovered:1 → task 202 DONE；Webhook 重启续跑实机补上 + 独立验签；F-22 新发现；D-096/第 31 份报告）**
 
 > **要证明的事**：**重启（`down`/`up`，不删卷）后数据在、任务与结果均可查**；并且**"处理中被重启"的任务不会丢**——
 > `StartupRecovery`（T2.3）会把崩溃时残留的 `RUNNING` 一律回收为 `PENDING` 并重新入队，最终仍能 DONE。
@@ -1910,6 +1910,45 @@ F-15 控制在 ≤30 行并集中一处；新增静态资源不引第三方库�
 四张表计数、`启动恢复` 日志原文 + recovered 数、重启任务 id/状态/attempts、`-UnitOnly` 用例数与 exit code、`.env` 哈希）｜ 还有哪些没验证（**不许留空**，全量未跑要写原因）。
 
 **【开工方式（新会话）】** 仓库 `D:\new\projects\meeting-notes` → 读根 `AGENT.md` → `git status` 干净（HEAD `265b534` + 本次 docs 提交，**别回退 T4.1~T4.7**）→ 读本卡 + `state.md`/`handoff.md` → **先做快照并落盘，再 down**。
+
+---
+
+## T4.12 发布前死配置体检（约 0.5–1h；W4 第 8 张）
+
+> **要证明的事**：①"配置一个不落"是**可判定**的——`app.*` 每个键都有消费方、五方（yml / `.env.example` / compose / 代码 / `配置清单.md`）一致、**孤儿配置 = 0**（或逐条登记"计划中"）；
+> ②补掉两个已实证的"空配置"缺陷：**F-22**（`WEBHOOK_SECRET` 为空时遗留到期行被调度器空烧 4 次重试、日志文案误导）与 **F-21**（`LLM_ENABLED=true` + 云 key 空 → 启动崩、报错间接）。
+>
+> **现状（别重复造）**：`配置清单.md` §2 有 `$appKeys` 快照（当前 **34 键**）+ 机器判据；`/settings` 已是配额/档位单一判定来源（T4.1）；Webhook 记账/重试已上线（T4.6）；
+> T4.7 新增 3 个 `BATCH_*` 键且**都有消费方**。**F-22 已被 Lead 独立复现**：基础栈（`WEBHOOK_SECRET=` 空）手工插一行到期 `webhook_delivery` → 1s/10s/60s 空烧 4 次到 `last_status=0`，
+> 日志原文 `Webhook 投递异常：…（HMAC-SHA256 不可用），留表重试`；根因是 `onTerminal` 检查了空 secret、**`scanDue` 没检查**，`attempt→post→sign("")` 抛空密钥异常被包成"算法不可用"。
+>
+> **配额警告（必读）**：截至 2026-11-15 15:24 已用 **80/120 分钟、47/50 任务——今日只剩 3 个任务配额**，而**全量 227/227 一次吃 3 个任务**（E2E A PASTE + G 两个静音 wav）。
+> 本卡是**代码卡，必须跑全量**。**若开工时今日剩余任务配额 < 3 → 等 00:00（Asia/Shanghai）日切后再开工**；开工前查一次、收尾最后一步再查一次（K-45）。
+>
+> **范围（按序做）**：
+> 1. **配置体检表（只读核对，产出一张表）**：`application.yml` 的 `app.*` 键、`.env.example`、`docker-compose.yml` 环境变量、`配置清单.md` §1/§2、代码消费点五方对齐，逐键给：
+>    键名 / 默认值 / 消费方（`文件:行` 或 `@Value`/`@ConfigurationProperties`/`Environment`）/ 有无测试覆盖 / 结论（保留 / 计划中 / 删除）。
+>    重点核 **3 个 BATCH_* 键**不是死键；凡"文档写了但代码没有"或"代码读但文档没有"的，逐条列出。
+> 2. **F-22 修复（必须）**：`WebhookDeliveryService.scanDue`（或 `attempt` 入口）在 `secret` 为空时**直接跳过**并给一条明确日志（语义是"配置缺失"，不能再出现 `HMAC-SHA256 不可用` 误导）。
+>    要保证遗留到期行**不再空烧重试**；对"`next_retry` 保持原样还是置空"二选一，**回报里写明选择与理由**。**必须加单测**：secret 为空时扫描不投递/不空烧。
+> 3. **F-21 启动预检（小改）**：`LLM_ENABLED=true` 且云档 key 全空 → 启动 **fail-fast 且文案可读**（点明缺哪个键、怎么修），替代现在的间接报错（`OpenAI base URL must be set`）。
+>    **不改**"显式优先"语义（D-039）；已有 `NoKeyStartupTest` 覆盖零 key 正常启动，别弄红（`@MockBean TranscriptionWorker` 保留，K-42）。
+> 4. **队列键独立评估（只评估，不写代码）**：`NoKeyStartupTest` 现靠 `@MockBean` 避免抢真实 Redis 队列（K-42）。评估"独立队列键 / 独立 Redis DB"是否更忠实，给结论（改/不改 + 理由 + 风险）。
+> 5. **孤儿配置**：若有"计划中"的键，逐条登记（写码方只交清单，`配置清单.md` 由 Lead 同步）。
+>
+> **不做**：不改任何对外契约（详情 12 键、错误码、批量 200 部分成功语义、Webhook 九键）；不加新功能；不动 `.env` 持久值（实验一律 override）；**不删除 F-22 的证据行**（`webhook_delivery` id=6，D-073）。
+>
+> **验收命令（原样贴输出）**：
+> - 全量 `powershell -NoProfile -ExecutionPolicy Bypass -File scripts\test.ps1` → **≥228/228**（新增单测）+ exit 0；`-UnitOnly` 对应条数 + exit 0；`tools\check-maintainability.ps1` exit 0；单 commit、不 push、零 `docs/`、零 `.env`。
+> - **F-22 反例**：基础栈（`WEBHOOK_SECRET=` 空）+ 手工插一行 `next_retry=now()` → 等 10s：**不再空烧**（attempts 不增长，或按实现置空并有明确日志），日志**无** `HMAC-SHA256 不可用`；该行保留作证据（不删）。
+> - **F-21 反例**：用 override 设 `LLM_ENABLED=true` + 云 key 空 → 启动**失败**且日志/退出文案可读（贴原文）；还原后 5 healthy。
+> - 收尾：5 healthy、`.env` hash `2BCC440F1C9E`、`/settings` `preferred=CLOUD`、证据行不删、配额最后一步查（K-45）。
+>
+> **【回报·测试三问】** 检查了哪些场景（配置五方对齐 / F-22 空 secret 反例 / F-21 预检反例 / 队列键评估 / 全量回归）｜ 实际命令 + 输出
+> （配置体检表、F-22 反例前后 attempts 与日志原文、F-21 启动失败原文、用例数 + exit code、commit hash）｜ 还有哪些没验证（**不许留空**）。
+>
+> **【开工方式（新会话）】** 仓库 `D:\new\projects\meeting-notes` → 读根 `AGENT.md` → `git status` 干净（HEAD = T4.8 验收的 docs 提交，`git log -1` 核对 message 含 `docs(T4.8)`；**别回退 T4.1~T4.8**）
+> → 读本卡 + `state.md`/`handoff.md` → 先读 `webhook/WebhookDeliveryService.java` 与 `配置清单.md` §1/§2，再动代码。
 
 ---
 

@@ -117,14 +117,11 @@
 | **T4.5** | **离线验证（US-9 / N16）** | 断外网 + 无 key → US-1 成功且无出站 | ✅ **无 commit（零代码改动，只交证据）** + `review/2026-11-15-T4.5验收.md`（D-093）。`networks.default.internal: true`（**先 `down` 再 `up`**，K-44）+ `OFFLINE_MODE=true` 且 **`.env` 真 key 在位** → 三判据：`/settings` `EXTRACTIVE + cloud_configured=true + offline_mode=true`、`/proc/net/route` 无默认路由、容器内 curl 外网 `Could not resolve host` exit=6；门禁 WARN 原文可见。真音频 **166**（40s：DONE/EXTRACTIVE/transcript 99/summary 99/kw 5/导出三节 200/零云档调用）；**反例 167**（`OFFLINE_MODE=false`+断网 → CLOUD `UnknownHostException` → LOCAL → EXTRACTIVE，任务仍 DONE，D-075 级联实证）。恢复：5 healthy、`internal=false`、`preferred=CLOUD`、`.env` `2BCC440F1C9E`、**209/209 exit 0**、可维护性 exit 0。配额 **68/120 分钟、28/50 任务**（任务 166/167/168，DEAD=0）；**K-45**：写码方回报数字再次采样偏早 |
 | **T4.6** | **接入面（US-10 / N17）** | API Token + OpenAPI + Webhook + 验签 | ✅ `1c2aa73` + `review/2026-11-15-T4.6验收.md`（D-094）。`web/ApiTokenFilter`（`/api/v1/**` Bearer，401 `UNAUTHORIZED` + `WWW-Authenticate`，常量时间比较，空 token fail-closed；豁免 actuator/静态页/OpenAPI）+ `static/auth.js` `apiFetch`（localStorage + 401 prompt 重试一次）+ springdoc 2.8.17（`/v3/api-docs` + Swagger UI，bearer securityScheme）+ `webhook/WebhookDeliveryService`（终态 task.done/failed、HMAC-SHA256 原始字节签名、`webhook_delivery` 记账、@Scheduled 1s/10s/60s 重试、原子认领防双投、OFFLINE_MODE 跳过、delivery_id 由行 id 派生 UUIDv3）。我复跑 **220/220 + -UnitOnly 212/212 + 可维护性 0**；**自建接收端重放**：验签通过（HMAC 独立重算命中）、九键齐、**500→1s 重试成功**（attempts=2）、**4 次全败留表**（attempts=4/last_status=500/next_retry=NULL）、delivery_id 独立推导命中。配额 **68/120 分钟、36/50 任务**（它 4 + 我 4，全 PASTE 0 分钟） |
 | **T4.7** | **批量提交（US-8）**：一次 10 个文件互不影响 | 10 个全部终态 | ✅ `265b534` + `review/2026-11-15-T4.7验收.md`（D-095）。`task/BatchTaskService`（逐项复用单文件路径、失败隔离、纯函数预估）+ `POST /api/v1/tasks/batch`（`files` 可重复 ≤20 + 可选 `template`；请求合法即 200 + 逐项结果/汇总）+ 上传页多选（1 个仍走单文件旧路径）+ 3 新配置键（`BATCH_MAX_FILES`/`TASK_BATCH_MAX_SIZE_BYTES`/`BATCH_ESTIMATE_RTF`，全有消费方）+ E2E 场景 G（2 静音 wav + 1 坏文件隔离 + 21 超限 + api-docs）。我复跑 **227/227**（E2E 8 条）+ `-UnitOnly` **217/217** + 可维护性 0；**自造样本实机**：2 好 1 坏 200 逐项隔离、原样重发 `reused` 同 id 且**配额不变**、21/0 文件 400、匿名 401、api-docs/列表齐。配额 **76/120 分钟、46/50 任务**（**今日只剩 4 个任务配额**） |
-| **T4.8** | 重启不丢验证（N20） | `down`（不删卷）→ `up` → 数据在 | 卡已就绪（`tasks-starter.md` T4.8）：`down`（无 `-v`）→ `up` → 已有 DONE 任务 detail/导出 sha256 逐字节不变 + DB 计数/配额不变；**RUNNING 僵尸回收**（长音频处理中重启 → StartupRecovery 回 PENDING 重入队 → 最终 DONE）；预算 **≤2 任务 / ≤4 分钟**（今日任务配额只剩 4），零代码改动用 `-UnitOnly` 代替全量 |
-| **T4.6** | **接入面（US-10 / N17）** | API Token + OpenAPI + Webhook + 验签 | 三条 curl 全流程；20 行接收端验签通过 |
-| **T4.7** | **批量提交（US-8）**：一次 10 个文件互不影响 | 10 个全部终态 | 一次选 10 个 → 全部完成，失败可单独重试 |
-| **T4.8** | 重启不丢验证（N20） | `down`（不删卷）→ `up` → 数据在 | 任务与结果均可查 |
+| **T4.8** | 重启不丢验证（N20） | `down`（不删卷）→ `up` → 数据在 | ✅ **无 commit（零代码改动，只交证据）** + `review/2026-11-15-T4.8验收.md`（D-096）。写码方：`down`（**无 `-v`**）→ `up` → detail 177 零差异、导出 md sha256 `2d2fe8ea…ef88` 逐字节同、四表计数 90/90/0/4 与配额 76/46 不变；**RUNNING 僵尸回收**（237s 音频 task **202**：`restart app` 后日志 `recovered:1` → 回 PENDING → DONE，attempts=0 / transcript 1413 字 / 配额只扣一次）；**Webhook 重启续跑**（插到期行 + 重启 → 投递成功 attempts=1/last_status=200）。**我**：①自己又 `down`（无 `-v`）/`up` 一次（0 任务），重新取数断言 detail 零差异、导出 sha256 一致、91/91/0/5 计数与 80/120·47/50 不变、四个读端点 200；②用 **.NET + Python 两套独立实现**重算 HMAC 命中、错密钥不等、`delivery_id` 由行 id=5 独立推导命中（K-47）；③**独立复现 F-22**（空 `WEBHOOK_SECRET` + 手工到期行 → 空烧 4 次 attempts=4/last_status=0、日志 `HMAC-SHA256 不可用` 误导，0 任务消耗）；④`-UnitOnly` 复跑两遍 **217/217 exit 0**，全量未跑（配额只剩 3，零代码卡按卡规用 `-UnitOnly`，理由已写报告）。配额 **80/120 分钟、47/50 任务**（本卡 +4 分钟/+1 任务，预算内） |
 | **T4.9** | **开源发布最小集（D-026）**：一键脚本 / 示例数据 / 3 截图 + 1 GIF / LICENSE + CONTRIBUTING + issue 模板 / CHANGELOG + `v0.1.0` tag | 陌生人照 README 30 分钟跑通 | 临时目录照做一遍（含 `git tag` 检查） |
 | **T4.10** | README（含"你不该用本项目的场景"、三档 AI 差异、四个模板示例）+ 3 分钟录屏 | 内容齐全 | 逐项目视检查 |
 | **T4.11** | 简历条目 + 面试材料定稿（**只填实测值**） | 无目标值冒充实测 | 对照 `面试材料.md` 数字台账 |
-| **T4.12** | **发布前死配置体检**（D-054）：`app.*` 每个键必须有消费方；被裁功能的配置项 + `.env` 键**连带删** | 无"填了没反应"的配置 | 孤儿配置 = 0（或逐条登记为"计划中"）；核对 `配置清单.md` §2 的 `$appKeys` 快照（当前 **34 键**）与 yml 一致；INBOX 若被裁 → `app.inbox.*` + `INBOX_*` 一起删；**另评估两项**：①T4.2 保留意见（`NoKeyStartupTest` 改独立队列键 vs `@MockBean`）②T4.4 的 F-21（`LLM_ENABLED=true` + 空 key 启动崩，是否值得加启动预检/可读报错） |
+| **T4.12** | **发布前死配置体检**（D-054）：`app.*` 每个键必须有消费方；被裁功能的配置项 + `.env` 键**连带删** | 无"填了没反应"的配置 | 孤儿配置 = 0（或逐条登记为"计划中"）；核对 `配置清单.md` §2 的 `$appKeys` 快照（当前 **34 键**）与 yml 一致；INBOX 若被裁 → `app.inbox.*` + `INBOX_*` 一起删；**另评估两项**：①T4.2 保留意见（`NoKeyStartupTest` 改独立队列键 vs `@MockBean`）②T4.4 的 F-21（`LLM_ENABLED=true` + 空 key 启动崩，是否值得加启动预检/可读报错）。**卡已写进 `tasks-starter.md`（W4 第 8 张）**，范围已扩：F-21 改**启动预检（可读文案）**、并入 **F-22 修复**（空 `WEBHOOK_SECRET` 时遗留到期行被调度器空烧 4 次重试 + 文案误导，Lead 已独立复现）+ 3 个 BATCH_* 键体检；**配额警告**：全量一次吃 3 个任务，今日只剩 3 → 建议日切（00:00）后开工 |
 | **T4.13** | **真机 UI 验收**：浏览器上传交互（文件选择器）/ 移动端上传 / 无痕窗口列表 | 三条真机点过并截图 | 手机真实上传 1 个文件 → 列表可见；上传页拖拽 + 选择器各一次 |
 
 **W4 过关**：spec §9 的 11 条 DoD 全满足 → v1 交付。
@@ -199,11 +196,11 @@ T0.1 → T0.2 → T0.4 → T1.1 → T1.2 → T1.3 → T1.4 → T1.5 → T1.6/T1.
 **回收原则（D-032，用户 2026-11-13 确认）**：**不砍交付材料**（截图/GIF/CHANGELOG/Release 属质量与证据）；
 需要腾时间时只砍**功能**，顺序见「移出 v1」一节。
 
-> ⚠️ **T4.12 是本项目最有说服力的一条验收**：用真实录音跑通，而不是 3 个漂亮小样本。
+> ⚠️ **T5.5 是本项目最有说服力的一条验收**：用真实录音跑通，而不是 3 个漂亮小样本。
 > **原 `Videos` 里的 mp3 已被本人删除**（2026-11-13 晚），据此把仍存在的真实音频归档到
 > `D:\datasets\meeting-notes-samples`（**11 文件 / 4.93 小时**，含 5 个 >30min、一对同内容 mp4/wav），
 > 详见 `测试语料-清单.md`。
-> **T4.12 定义**：用该语料批量跑完 → 全部 DONE、失败 0、记录总耗时与平均 RTF、最长 56.7min 不被拒。
+> **T5.5 定义**：用该语料批量跑完 → 全部 DONE、失败 0、记录总耗时与平均 RTF、最长 56.7min 不被拒。
 
 ---
 
