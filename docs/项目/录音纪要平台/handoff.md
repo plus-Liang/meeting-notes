@@ -1,74 +1,50 @@
-# 交接：录音纪要平台（更新 2026-11-15 18:35，给下一个会话 / 新会话 WorkBuddy）
+# 交接：录音纪要平台（更新 2026-11-16 21:40，给下一个会话 / 新会话 WorkBuddy）
 
-## 1. 下一步
+## 0. 当前位置
 
-1. **W3 全 ✅**（T3.8 收口，D-089）；**W4：T4.1 ✅**（`690b644`）、**T4.2 ✅**（`e9649d2`）、**T4.4 ✅**（无 commit，D-092）、**T4.5 ✅**（无 commit，D-093）、
-   **T4.6 ✅**（`1c2aa73`，D-094：认证/OpenAPI/Webhook）、**T4.7 ✅**（`265b534`，D-095：批量提交）、**T4.8 ✅**（零代码，D-096：重启不丢 + F-22/F-23 发现）、
-   **T4.12 ✅**（`3c650ca`，D-098：死配置体检 + **F-22 空 secret 短路** + **F-21 启动 fail-fast 预检** + **F-23 时区 WARN 预检**；40 键/死配置 5 全计划中/孤儿 0）、
-   **T4.14 ✅〔条件通过〕**（`f42dc85` 重设计 + `508de4c` oiloil 方向换皮，2 commit / 7 文件全在 `static/`，D-100：暖纸底+方格纹理/墨黑排印/单一暖黄/无边框白卡+阴影；我独立验 4 页桌面+手机 390 **0 console error / 0 横向溢出**、导出 md 真下载、token 对话框、拖拽区、单箭头、`:focus-visible`；`-UnitOnly` 225/225 + 可维护性 0/0）。
-2. **下一步**：①**今晚（0 配额，10 分钟）T4.14c 四项小打磨**（已授权 D-101：纹理再淡/hover/手机行高/列表补时长时间；⑤列表接口已自带 `duration_sec`/`created_at`，纯前端）→ 改完**重测对比度**（K-56）→ 单 commit → **把 00:10 自动化 HEAD 再绑定到最终 commit**（并回报最终 HEAD）；
-   ②**00:10 自动化**跑全量 235/235 + 上传冒烟（1 任务）+ K-45 配额 → 落 `artifacts\T4.14\post-midnight\`（**排期≠执行 K-55**；产物必须写明执行的 HEAD 且 == 最终 commit，否则按未执行处理；我明早复核后解除条件）；
-   ③之后 **T4.13 真机 UI**（人机协同 9 条路径）→ T4.10 README+录屏 → T4.9 发布最小集 → T4.11 定稿。
-3. 配额：2026-11-15 已用 **82/120 分钟、50/50 任务**——**今日任务配额已归零**（本地日切 00:00 重置）；**全量 E2E 每跑一次吃 3 个任务**；
-   配额紧时用 `-UnitOnly` + 现成证据行（K-36）；新卡开工前先查，**回报前最后一步再查一次**（K-45）。
+- 代码 HEAD **`a1cc93f`**（T4.21b），工作区干净，本地 main ahead **11**，未 push；5 服务 healthy；ASR `small`；开发期配额 **200 分钟/100 任务**；今日已用 **160 分钟 / 48 任务**（剩 40 分钟 / 52 任务）；任务总数 128（全 DONE、DEAD=0、最大 id 272）。
+- **T4.13 真机 ✅ → T4.20 ✅ → T4.19/18/17 ✅ → T4.21 ✅ → T4.21b ✅（第 44/45 份报告，D-117/D-118）** → **下一张 = 文档同步 + push** → 发布三件。**D-109/D-110 代码已全部落地，T4.21 系列已全部收口。**
+- 用户当前可看的成果：列表能看**模板徽章/关键词 chips/摘要首句**，能**删单条/多选/全选/清空失败任务**（含 MinIO 对象清理，二次确认写明"不可恢复、配额不退还"），详情页底部可删任务；之前的要点/一句一行/导出勾选/medium 提示都在。
 
-## 2. 别踩的坑
+## 1. 下一步（按顺序）
 
-1. 对外 JSON 一律 snake_case（D-041）；业务码 7 + 通用码 5；`transcript:""`=无语音仍 DONE（D-048）；`todos` null vs `[]`（D-072）；`ai_tier` 诚实（D-020/D-075）。
-2. **DONE 最后写**（D-069）；**三档级联**（D-075）；`OFFLINE_MODE=true` 云档硬门禁（D-077）；F-14 本地档 v1 不可用（D-089，别再花配额试）。
-3. **F-15 时序**（D-090）：词表替换必须在 `TodoGrounding` **之后**（`right_text` 不在原文，先替换会被依据校验误杀）；只对 EXTRACTIVE 生效。
-4. **批量重试语义**：只复活 DEAD，复活口径与"重传复活"逐字一致（`attempts=0` + 清死信 + 重入队），**不扣配额**；非 DEAD 进 `skipped` 不整体失败。
-5. **认证（T4.6 / K-46）**：`/api/v1/**` 全部要 `Authorization: Bearer <API_TOKEN>`；**豁免面** = actuator/静态页/`/v3/api-docs`/`/swagger-ui`。
-   所有 curl、E2E（`E2E_API_TOKEN`）、浏览器（`auth.js` 会 prompt 粘一次）都要带 token；`API_TOKEN` 空串时拒绝所有（fail-closed）。
-   **做横切改动（认证/序列化/错误码）先列全调用方清单**，收尾必须跑一次全量（K-46）。
-6. **不许改 `.env` 持久值做实验**：用外部 override（`D:\new\artifacts\*.yml`）+ `docker compose -f` 叠加，验完恢复基础 compose + 校验 hash `2BCC440F1C9E`。
-7. **配置/override 一律用文件工具写**，改后 `docker compose config --quiet` 预检 + `docker inspect` 核对容器 env；**别信 `/actuator/health` 的 200**（K-41）。
-8. **日志时效（K-39）+ 命令输出落盘（K-43）**：每组实验一结束就 `docker compose logs app > D:\new\artifacts\logs-*.txt`；mvn/脚本输出也重定向落盘并记 exit code。
-9. **Docker 引擎（K-38）**：WorkBuddy 沙箱把 `wsl.exe` 列黑名单、自己起不了 Docker；由 DSH 侧启动，不动宿主安全设置（桌面 `AutoStart=false`）。
-10. **断网实验（K-44）**：改 `networks.default.internal` 必须 **先 `down`（不加 `-v`）再 `up -d`**；内网下宿主 8080=000，API 只能容器内 `docker compose exec -T app curl`；
-    `enable_ip_masquerade=false` 不能断外网；`OFFLINE_MODE=true` 时云档失败会**先按 Spring AI 重试再级联降级**（约 2s，任务仍 DONE）。
-11. **收尾数字最后一步查（K-45）**：全量测试含 E2E 会新增 3 条任务——配额/任务数必须在所有动作做完之后查（T4.4 与 T4.5 连续两次吃亏）。
-12. **签名类证据验收方独立重算（K-47）**：Webhook 签名/哈希的"接收端 True/False"是自证；验收时要取原始字节用独立工具重算，并做"错密钥必须不等"的反向验证。
-13. **测试入口** `scripts\test.ps1`（全量 **235/235**（E2E 8）、`-UnitOnly` **225/225**；需 `powershell -ExecutionPolicy Bypass -File`；`mvn` 全路径 `E:\tools\apache-maven-3.9.9\bin\mvn.cmd`；PS5 无三元、`-Dtest=A,B` 要引号、改源码禁 BOM；**读文件一律 `-Encoding UTF8`**；全量会自动注入 `E2E_API_TOKEN`）。
-14. **E2E（T4.2/T4.6/T4.7）**：`E2ETest` 打运行中的容器，每次全量跑新建 3 个任务（A PASTE + G 2 个静音 wav）→ **配额紧时用 `-UnitOnly`**；栈不在必须红（不许 skip）；
-    内网（T4.5）下宿主到 8080 不通，E2E 跑不了，属环境约束。
-15. **测试别抢生产队列（K-42）**：`@SpringBootTest` 会装配真实 `TranscriptionWorker` 并 BLPOP 真实 Redis；需要全上下文的新测试必须 `@MockBean` 掉 worker 或用独立队列键。
-    T4.12 评估结论：**保持 `@MockBean`**（换键仍保留真实连接、失败模式更隐蔽）。
-16. **批量契约（T4.7 / K-48 / D-095）**：`POST /api/v1/tasks/batch` 请求合法即 **200，但 200 不代表全部成功**——逐项看 `items[].code`；
-    `summary.accepted` **含 reused**、幂等项**不重复扣配额**、数量 >20 → 400、请求总体积 >2GB → 413；`estimated_sec` 只是预估。
-17. **psql 先 `SET TIME ZONE 'Asia/Shanghai'`**；API 前缀 **`/api/v1`**；`.env` 只写纯值（K-35）；证据行不删（D-073）；单写者（D-079）；数字复算（K-20/D-074）；**变异要双向**（K-40）；**PS 里 .NET 静态文件 API 的相对路径按进程 CWD 解析**——改文档用 edit 工具或绝对路径。
-18. **异步调度器必须重放"入队前置条件"（K-49 / F-22，T4.12 已修）**：`scanDue` 空 secret 现在短路——不投递、不烧 attempts、`next_retry` 保持原样、WARN 只发一次；
-    自建者清 secret 前仍建议 `UPDATE webhook_delivery SET next_retry=NULL WHERE next_retry IS NOT NULL;`。**报错文案必须区分"配置缺失"与"组件坏了"**。
-19. **证据载体自己会骗人（K-50）**：接收端字段名 `body_b64` 里存的其实是 UTF-8 文本（不是 base64）；快照文件用 `Set-Content` 再算 sha256 会因 BOM/尾换行得出不同值。
-    **二进制一律 base64、字段名如实、哈希必须写清算的是哪层字节**；验签要"命中 + 错密钥不等"双向（K-47）。
-20. **配置生效要验证在消费点（K-51 / F-23，T4.12 已加 WARN 预检）**：`TZ` 环境变量只对新数据卷 initdb 生效，老卷 `postgresql.conf` 可能写死 UTC；
-    判据 `SHOW timezone` + `CURRENT_DATE = (now() AT TIME ZONE 'Asia/Shanghai')::date`，老卷改法 `ALTER DATABASE ... SET timezone ...`。**别只看你设置它的地方。**
-21. **启动预检要分级（K-52）**：必崩/数据会坏 → fail-fast（F-21：`LLM_ENABLED=true` + 空 key）；可自愈/可能有意配置 → WARN（F-23：时区不一致）；
-    告警对"稳态缺失"只发一次。**"必崩吗？能自愈吗？"两个问题决定严格度。**
-22. **判据快照会过期（K-53）**：`配置清单.md §2` 的 `$appKeys`/`$allowed` 是快照（T4.12 已 36→40 + 加 `TZ`）；体检前**先重跑机器判据再对齐快照**，新增配置键同 commit 更新快照。
-23. **含中文的 `.ps1` 必须带 UTF-8 BOM（K-54）**：`edit` 工具会吃掉 BOM，PowerShell 5.1 按 ANSI 读中文注释就解析崩（报错行号误导）；改完必须 `powershell.exe -File …` 真跑一遍。
-24. **"已排期"不是"已跑完"（K-55）**：自动化/定时任务的"排期对象 + HEAD guard"是计划，不是结果；验收只认**时间戳 + 命令 + exit code + 产物（含产物里的 HEAD）**。转述必须写"已排期（未执行）"或"已执行（证据在 X）"。
-25. **视觉验收要"看 + 量"（K-56）**：截图矩阵只证明布局没坏，证明不了能读；关键文字必须机器量对比度（正文 ≥4.5:1、大字 ≥3:1），低对比修 token 级。
+1. **文档同步 + push（下一张）**：跑 `tools\sync-docs-to-code.ps1` 把权威文档同步进代码仓 → `git add docs/` 单 docs commit → `git push`（本地 ahead 11 → push 后 origin 追上）；确认 docs commit 的 `git diff --name-only` **只含 `docs/`**；push 后核对 `git status` 干净、远端 HEAD 一致。
+2. **T4.13 新 UI 复看（用户本人点，0 配额，可选）**：列表三件套、删除入口、详情删除按钮、手机 390。
+3. **T4.10 README + 录屏 → T4.9 开源发布最小集 → T4.11 简历/面试定稿**（README 必写：改默认 `API_TOKEN`、批量 ≤20/2GB、Webhook 仅全局 URL、离线模式、F-22 清 secret 连带历史行、TZ 老卷 `ALTER DATABASE`、content_hash 幂等复用、ASR 模型建议、**删除不可恢复/配额不退还**）。发布前顺手清 MinIO 历史孤儿对象 74–79。
+4. 第 5 周链接导入 L1/L2/BYOF + 收尾；12-15 简历、12-16 交付；交付后按 T7.1→T7.15 做 v1.1/v1.2（D-103）。
+
+## 2. 别踩的坑（最高频；全表见 `踩坑与复盘-面试用.md` K-01~K-74）
+
+1. **DONE 最后写**（D-069）；`transcript:""`=无语音仍 DONE（D-048）；`todos/keypoints` null vs `[]`（D-072/D-111）；`transcript_punctuated` null=未生成（D-112）；`ai_tier` 诚实；三档级联 CLOUD→LOCAL→EXTRACTIVE。
+2. **认证横切（K-46）**：`/api/v1/**` 全要 `Bearer <API_TOKEN>`；豁免=actuator/静态页/api-docs/swagger；空 token fail-closed。
+3. **实验不改 `.env`**：外部 override + `docker compose -f` 叠加；改网络属性必须 `down` 再 `up`（K-44）；验完恢复并比 hash。
+4. **配置生效验在消费点**（K-51）；别只看 health 200（K-41）；新增键同步 `.env.example` + `配置清单.md`。
+5. **日志/输出落盘**（K-39/K-43）；exit code 用 `Start-Process -PassThru`（K-58）。
+6. **收尾数字最后一步查**（K-45）；全量 E2E 每次 +2~4 任务、冒烟 +1。
+7. **Lead 不写产品代码**（K-63）；验证前确认 `git status` 干净 + 服务端静态文件 sha256 == 工作区。
+8. **改契约必须跑全量，且先重建容器再跑**（K-68）；回报里写"构建时间 < 全量日志时间"（T4.21 顺序不严的教训）。
+9. **给 WorkBuddy 的卡别依赖 `cd`**（K-69）：写 `git -C <repo>` / `mvn -f <repo>\app\pom.xml`。
+10. **宿主访问容器服务用 `127.0.0.1`**（K-70）；**手写 JSON POST 必须带 `Content-Type: application/json`**（K-73，否则 415）。
+11. **删除功能验收别只看 DB**（K-72）：DB 0 行是必要不充分，MinIO 对象要单独 `ls`；三条路径已由 T4.21b 补齐清理口径（清空失败任务也清了）。
+12. **重建/替换容器前先把旧日志落盘**（**K-74**）：`docker compose up -d` 重建容器后旧容器日志即丢失，删除类操作会"审计断链"；写码方/验收回报里要写清"删过哪些任务 id"。
+13. **视觉验收"看+量"**（K-56）；半透明底先 alpha 合成（K-57）；改 token 先 grep 全部使用点（K-59）。
+14. **上传幂等**：同字节重传 `reused:true` → A/B 必须换字节（改字节副本）。**PS 细节**：含中文 `.ps1` 必须 UTF-8 BOM（K-54）；避免 `Set-Content -Encoding utf8`；`D:\new` 不是 git 仓。
+15. **证据字节保真（K-50）**：Windows 写盘 LF→CRLF，比较要归一化；PS 5.1 的 `Invoke-WebRequest.Content` 会按错误编码解码中文，比字节要用 `-OutFile` + `Get-FileHash`。
+16. **psql 前 `SET TIME ZONE 'Asia/Shanghai'`**；证据行不删（D-073）；单写者（D-079）；变异双向（K-40）。
 
 ## 3. 关键文件
 
-`00-先看这个.md` · `开工准备清单.md` · `架构一页纸.md` · `可维护性要求.md` · `踩坑与复盘-面试用.md`（K-01~K-56）· `spec.md`/`plan.md`/`tasks.md`/`tasks-starter.md`（下一张卡 **T4.14** 已写）· `decisions.md`（**102 条**，最新 D-101）· `接入指南.md`（认证/Webhook/batch 契约均已回填实测事实：§3.7 批量、§4.2/4.4 Webhook（含 **F-22 运维注意**）、§六 三条验收 ✅）· `配置清单.md`（§1.1 三个 BATCH_* 键、§1.4 F-21/F-22、§1.5 接入键已消费、**§2 快照 40 键 + `TZ` 豁免**、§3 计划中 5 键）· `review/2026-11-15-T4.12验收.md`（最新，32 份）· `scripts/backup.ps1`/`restore.ps1` · `rules/dev.md`（§4.1）
+`state.md`（权威状态）· `tasks.md`（W4 表，T4.21/T4.21b ✅）· `tasks-starter.md`（T4.17–T4.21b 卡）· `decisions.md`（**118 条**，最新 D-118）· `踩坑与复盘-面试用.md`（**K-01~K-74**）· `review\`（**45 份**，最新 `2026-11-16-T4.21b验收.md`）· `接入指南.md`（§3.6a 删除三端点）· `配置清单.md` · `scripts\test.ps1`（全量 283 / `-UnitOnly` 279）· `tools\sync-docs-to-code.ps1`。
 
 ## 4. 未决
 
-T4.14b/T4.13/T4.9-11 · **今日任务配额已归零（50/50）** · **T4.14 条件未清**（00:10 全量 + T4.13 真机；P1 已由 T4.14b 解除）· 仅 Chromium 桌面模拟，Safari/真手机触控/键盘读屏未测 · +3~4h 工期风险（余量 0，超时砍 P2 不砍测试/材料） · **浏览器真机渲染未验**（T4.13，含粘 token、批量多选、Swagger Try-it-out、手机上传、无痕 401）·
-**F-21 只验三键全空**（部分缺键单测覆盖）· **F-23 不一致 WARN 未实机造 + 非常规时区串未穷举** · **F-22 WARN 只发一次**（再次清空 secret 需重启才有新 WARN）· **F-17 换模板重跑未做** · EXTRACTIVE 质量线 ·
-**批量：413 2GB 未实测 / 批量内 429 未实测 / 批量字幕仅单测 / 预估系数未校准** · **Webhook v1：无单任务 callback_url / 无手动重投 / URL 无 SSRF 防护**（重启后续跑已由 T4.8 补验） · `bearer` 小写被拒 ·
-**僵尸回收只测单任务/单副本**（多任务并发、结构化阶段中断未覆盖）· 并发重试非原子 · "进行中"合并视图无游标续页 · 默认 120s 读超时全程未跑 ·
-amr-wb/手机私有变体未验 · 跨机器恢复/损坏备份/磁盘满未验 · **历史 `quota` 行 11-14 与任务表差 6 任务/26 分钟**（开发期痕迹，今日账逐笔吻合；发布前清库或 README 说明） · **余量 0**（再加功能必须先砍一个）。
+- T4.21b 过程发现：6 条旧 E2E 任务删除无日志可追溯（K-74，证据行 237/256 等全在，不影响验收）；MinIO 桶内 6 个**早于删除功能上线**的历史孤儿对象（74–79）待发布前清理（可选）。
+- T4.21b 残余：`FOR UPDATE` 未做并发压测；S3 抖动只 WARN 不重试（expected）。
+- T4.21 残余：无 controller 单测（T4.21b 已补 4 例）；短摘要也加省略号；批量 >100 分批只用 2 条验。
+- T4.18 残余 P3：导出切句只按 `。！？!?`（页面还含 `；;`/换行）；只勾"要点"且无要点时导出空文件；标点失败真机回退未验。
+- T4.17/T4.15 残余：LOCAL 档要点未真机抽、EXTRACTIVE 不产要点、改词回流后 keypoints 旧词不替换；待办删除无二次确认、依据整句匹配。
+- 批量 413/429、Webhook SSRF、120s 读超时全链路、amr-wb 变体、跨机器恢复未验；**v1 余量 0**（D-032）。
 
-## 5. 存储与磁盘（2026-11-15 迁移，**后续开发沿用**）
+## 5. 存储纪律（D-088）
 
-- **已做（实测：5 服务 healthy、DB 64 任务、MinIO 导出与存档逐字节一致、mvn 209/209）**：
-  1. Docker 数据 → **D:\DockerData\wsl**（26.76GB），原路径改 **junction**（Docker Desktop 设置未改）。
-  2. `C:\Users\ljh\.cache\dsh-asr` → **D:\cache\dsh-asr** + junction；Maven 仓库 → **D:\cache\m2\repository**（`~/.m2/settings.xml`）。
-  3. 清理：`docker builder prune -af`（8.9GB 可重建）、C 盘旧 pnpm/npm 缓存、TEMP。
-  4. 用户环境变量：`TEMP/TMP=D:\cache\temp`、`PIP_CACHE_DIR`、`HF_HOME`、`GRADLE_USER_HOME`。
-- **结果**：C 盘可用 **9.9GB → 41.45GB**；D 盘 347GB。
-- **纪律**：样本/日志/override/临时/缓存一律 **D 盘**（`D:\new\artifacts\`、`D:\cache\`、`D:\DockerData\`）；不在 `C:\Users\ljh` 下新建大文件，必须用先报。
-  仍占 C 的非开发项：Docker Desktop 程序本体（3.36GB）、Edge 缓存 ~1GB、用户 Videos/Downloads（未动）。
+样本/日志/override/缓存一律 **D 盘**（`D:\new\artifacts\`、`D:\cache\`、`D:\DockerData\`）；C 盘可用 ~41GB；模型在 `D:\huggingface`（medium 已补全；large-v3 仍是残片）。

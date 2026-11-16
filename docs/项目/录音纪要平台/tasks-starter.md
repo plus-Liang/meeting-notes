@@ -2017,7 +2017,8 @@ F-15 控制在 ≤30 行并集中一处；新增静态资源不引第三方库�
 > 要求：①把 `--ink-3` 加深到 **≥4.5:1**（建议 `#6b6b73`≈4.9:1，或等价 token 级改法）；②顺带把「已完成」徽章 4.56:1 再抬一点（可选）；③重拍关键截图（index/tasks/task/settings 各 1 张 + 手机 1 张）落 `artifacts\T4.14\after2\`；
 > ④`-UnitOnly` 225/225 + 可维护性 exit 0；⑤**CSS-only 单 commit**；⑥**commit 后立刻把 00:10 自动化（id 52235e59）的 HEAD 校验值更新到该 commit**，让全量绑定最终代码。不做其他风格改动（除非 Lead 另行确认）。
 
-> **【验收后追加：T4.14c 四项小打磨（已授权，约 10 分钟，0 配额，CSS/HTML/JS 但仅 static/）】**
+> **【验收后追加：T4.14c 四项小打磨（已授权，约 10 分钟，0 配额，CSS/HTML/JS 但仅 static/）】✅ 已完成并通过（`643ed90`；Lead 独立复测：hover 标题 16.24:1 / 次要行 4.93:1（alpha 合成后）、`.task-meta` 正常态 5.28:1、4 页 0 console error、手机 390 溢出 0 / 行高 107px、mock 验 null→`—`/UTC+8/DEAD 复选框/长名省略、`-UnitOnly` 225/225 exit 0、可维护性 0/0、无新增任务；D-102）**
+> 原始要求：
 > ② 方格纹理再淡 10–20%（保持可见但不抢）；③ 列表行 hover 极淡底色（桌面可点感）；④ 手机 390 行高/点按区放松（≥44px 目标）；
 > ⑤ 列表行补次要信息：**时长 + 提交时间**（`GET /api/v1/tasks` item 已含 `duration_sec`/`created_at`，**纯前端渲染，不得改后端/契约**；PASTE 无时长时间显示 `—`，数字用 `tabular-nums`，时间格式统一本地 `YYYY-MM-DD HH:mm`）。
 > 约束：**改完必须重测 `.hint`/徽章/chip 的对比度**（网格/hover 底色变化可能压文字，K-56）；正常态 0 console error、手机 390 零横向溢出；`-UnitOnly` + 可维护性；**CSS/HTML/JS-only 单 commit**；
@@ -2025,13 +2026,13 @@ F-15 控制在 ≤30 行并集中一处；新增静态资源不引第三方库�
 
 ---
 
-## T4.13 真机 UI 验收（约 1h；W4 第 9 张）
+## T4.13 真机 UI 验收（约 1h；W4 第 9 张）**✅ 已通过（2026-11-16，用户本人真机点完 9 条 + 新增 UI 速看；耗 2 任务 264/266；发现 5 个新问题 → T4.20/T4.21；第 42 份报告，D-114）**
 
 > **要证明的事**：**真浏览器/真手机**上"用户点得到"的路径全部走通并留证据（截图/录屏），不是静态代码审查、不是 curl。
 > **这是人机协同卡**：**人类**在桌面浏览器 + 手机（同局域网）上操作；**写码方**负责准备测试文件、确认栈 5/5 healthy、收集/整理截图与逐条结果、写回报。
 >
-> **配额警告（必读）**：截至 2026-11-15 16:50 配额 **82/120 分钟、50/50 任务（今日任务配额已归零）**。本卡要新建上传任务 → **必须等北京时间 00:00 日切后开工**。
-> 预算 **≤3 任务**（手机上传 1 + 批量多选 2；其余路径复用已有任务或只读端点、0 任务）。开工前与收尾各查一次 `/settings`（K-45）。
+> **配额（2026-11-16 19:50 复核，T4.17/18/19 完成后）**：今日已用 **30 任务 / 126 分钟**，**剩 70 任务 / 74 分钟**。预算 **≤3 任务**（单文件上传 1 + 手机上传 1；其余路径复用已有任务或只读端点、0 任务）。开工前与收尾各查一次 `/settings`（K-45）。
+> **人机分工**：人类负责**点**（桌面浏览器 + 手机），写码方负责**准备/核对/整理截图**；写码方不要替人类伪造"点过"的结论，没点到的路径必须如实写"未验证 + 原因"。
 >
 > **验收清单（9 条，逐条给"操作 → 实际结果 → 截图文件名"）**：
 > 1. **上传页单文件**：`/`（`index.html`）→ 文件选择器选 1 个音频 → 上传 → 列表出现新任务 → 点进详情可看（transcript/摘要/待办/模板/ai_tier）→ 导出 md 可下载；
@@ -2044,14 +2045,319 @@ F-15 控制在 ≤30 行并集中一处；新增静态资源不引第三方库�
 > 8. **手机真机**（iOS Safari / Android Chrome，同局域网访问 `http://<宿主IP>:8080`）：选文件上传 1 个 → 列表可见（P1 手机上传）；
 > 9. **无痕窗口**：未带 token 时 401 文案不泄漏内部信息；带 token 后正常。
 >
+> **操作清单（2026-11-16 19:50 刷新版，给人照着点）**：`D:\new\artifacts\T4.13\操作清单.md` —— 9 条路径 + **第 10 条"新增 UI 速看"**（用已有任务 237 看要点、256 看一句一行/导出勾选，**0 配额**）；全程用 `127.0.0.1` 不用 `localhost`（K-70）；截图落 `D:\new\artifacts\T4.13\shots\`。
+>
 > **纪律**：本卡**不改代码**——发现 UI bug 只记录（现象 + 截图 + 复现步骤）并报 Lead；**不改 `.env`**；截图/录屏一律落 `D:\new\artifacts\T4.13\`；
 > 所有手工 API/curl 带 Bearer；不改 `docs/`。
 >
 > **回报（测试三问）**：检查了哪些路径（9 条逐条）｜ 实际结果（每条：通过/失败 + 证据文件名 + 关键现象；手机型号/浏览器版本；配额消耗）｜
 > 还有哪些没验证（不许留空；真机没点到的必须写明谁没点到、为什么）。**再附**：栈 5/5 healthy、git status、配额最后一步查。
 >
-> **开工方式（新会话）**：仓库 `D:\new\projects\meeting-notes` → 读根 `AGENT.md` → `git status` 干净（HEAD = T4.12 验收后本次 docs 提交，`git log -1` 核对含 `docs(T4.12)`；**别回退 T4.1~T4.12**）
-> → 读本卡 + `state.md`/`handoff.md` → **先查配额**：`remaining_tasks < 3` 就等 00:00 日切；再确认 5/5 healthy 与 `/settings`。
+> **开工方式（新会话）**：仓库 `D:\new\projects\meeting-notes` → 读根 `AGENT.md` → `git status` 干净（HEAD = **`48df935`**〔T4.19〕；`git log -1` 核对；**别回退 T4.1~T4.16b**）
+> → 读本卡 + `state.md`/`handoff.md` → 查 `/api/v1/settings`（`remaining_tasks ≥ 3`）+ `docker compose ps` 5/5 healthy。
+> **已取消的旧前置**：00:10 自动化没执行（K-62），全量 235/235 已由 Lead 在 `fb93469` 上手跑通过，不再阻塞本卡。
+> **证据目录**：`D:\new\artifacts\T4.13\`（每条路径"操作 → 实际结果 → 截图文件名"）。
+
+---
+
+## T4.15 第 0 档：把已有东西摆出来 + AI 可见度（约 7–8h；0 配额；**纯 static**）✅ 已完成（`e95e7e2`；Lead 独立复核九项全过，`-UnitOnly` 225/225、可维护性 0/0、0 新增任务，D-105）
+
+> **要证明的事**：**不新增后端、不新增依赖**，只靠信息设计解决"页面太空 / 看不出 AI 在哪"——首页有「最近任务 + 怎么用 + 示例结果」，列表能搜能数，详情页每条待办都能看出「依据原文哪句」、能勾、能复制。
+>
+> **硬约束（违反即打回）**：只改 `app/src/main/resources/static/`（4 个 html + `style.css` + `app.js`）；
+> **零后端**：不新增/修改接口、不改 Java / `application.yml` / `.env` / DB / 契约；不新增依赖、不加构建链。
+> 只用现有接口：`GET /api/v1/tasks`、`GET /api/v1/tasks/{id}`、`PATCH /api/v1/tasks/{id}/todos/{index}`、`DELETE /api/v1/tasks/{id}/todos/{index}`、`GET /api/v1/settings`、`GET /actuator/health`。
+> **离线约束不破**：无 CDN / 外链字体 / 外部图片；图标一律内联 SVG 或 `data:`；页脚 GitHub 链接只是 `<a href>`，**不加载任何外部资源**。不动 T4.14 的设计 token（暖纸底/黄 accent/标题字号/圆角/阴影）。
+>
+> **九项要求 + 验收判据**（Lead 会逐条量，不许只给"看起来对"）：
+> 1. **首页「最近 3 条任务」**：`GET /api/v1/tasks?limit=3` 展示 名称/状态/时长/时间 + 可点详情；失败**整块静默隐藏**；0 条不显示。
+> 2. **首页「三步说明」**：①上传 ②等转写 ③看纪要/待办并导出；静态 HTML + 内联 SVG；桌面/手机不溢出，对比度 ≥4.5:1。
+> 3. **首页「示例结果」折叠卡**：展开显示一段**明确标注「示例数据」**的摘要/关键词/待办样例；**静态、不发请求、不建任务**（今日配额 0，不能靠它造数据）。另提供「复制示例文本去真跑」入口（只在 `remaining_tasks ≥ 1` 时可用，否则禁用并提示"今日任务额度已用尽"）。
+> 4. **列表页搜索**：输入文件名/ID 即时过滤**已加载**条目，文案写"在已加载的 N 条中筛选"（诚实标注），清空恢复，空结果空态。
+> 5. **列表页状态计数**：筛选胶囊旁显示 全部/进行中/已完成/失败 条数；实现 = 游标循环拉全量（**上限 200 条**，超过显示 `200+`；页面可见时 30s 刷新）。数字必须与 DB 实测一致。
+> 6. **列表页多选批量导出 md**：多选后逐个下载 `.md`（**浏览器端逐个 `a.download`，不做 zip**——zip 属 T7.7 后端工作）。
+> 7. **设置页「系统状态」卡**：5 服务（app/asr/minio/postgres/redis）UP/DOWN + 当前 AI 档位 + 今日配额 + 版本号 `v0.1.0`（**静态常量**；commit 展示属 T7 的 build-info，本卡不做）；任一接口失败显示"未知"而不是报错弹窗。
+> 8. **详情页「依据高亮 + 关键词定位」**：每条待办下方一行「依据：「原句」」，点它跳到逐字稿对应句并高亮；点关键词同样定位。
+>    实现 = 浏览器内用**与 `ai/TodoGrounding.java` 同口径**的算法（归一化：去空白/标点/小写 → 字符二元组命中率 ≥0.5）找最匹配句子；**匹配不到就写「未找到直接依据」，绝不瞎指**；
+>    文案必须是「在原文中匹配到的句子」（**不得声称是模型给出的依据**）。**只读，不改任何存储**。
+> 9. **详情页「待办勾选/删除 + 复制全文」**：待办 checkbox 调 `PATCH`（`{done:true|false}`，幂等，乐观更新 + 失败回滚 + 行内错误），可 `DELETE` 删待办；逐字稿旁「复制全文」用 `navigator.clipboard` + `textarea` 兜底 + "已复制"提示。
+> **顺带**：页脚 = 版本号 + GitHub 链接 + LICENSE 说明（T5.6 发布素材会用到）。
+>
+> **禁止**：其他风格改动 / 加新页面 / 引入外部资源 / 顺手改后端（哪怕只加 `total` 字段——那是 T7.2）/ 为凑效果造假（示例必须标"示例数据"、依据匹配不到就说匹配不到）/ 改 `.env` / 改 `docs/`。
+>
+> **回报（测试三问）**：`任务：T4.15`；改了什么（文件 + 行数）；验证命令（原样）；实际输出（关键输出 + exit code）；剩余风险（一句）。
+> 另附：`git diff --name-only`（只允许 `static/`）、`-UnitOnly` **225/225 exit 0**、可维护性 **exit 0**、桌面 1440 + 手机 390 截图路径、新增文字对比度数值、**最终 commit hash**、**已把 00:10 自动化（id 52235e59）重绑到该 commit 的确认**。
+>
+> **排期（A 方案）**：实现 → `-UnitOnly` 225/225 → 单 commit → **把自动化 `52235e59` 的 HEAD 重绑到该 commit** → 回报 hash；00:10 产物落 `artifacts\T4.15\post-midnight\`；明早 Lead 核验后写第 35 份验收报告。
+> **配额警告**：本卡 **0 任务**（`-UnitOnly` 不建任务；示例卡是静态数据）。**今日任务配额 50/50 已归零**，任何真提交都会 429——所以第 3 项的真跑入口只做界面与 mock 验证，真跑留给 T4.13 真机验收（日切后）。
+> **开工方式（新会话）**：仓库 `D:\new\projects\meeting-notes` → 读根 `AGENT.md` → `git status` 干净（HEAD = `643ed90`）→ 读本卡 + `state.md`/`handoff.md` → 先确认 5/5 healthy 与 `/settings`。
+
+---
+
+> **【验收后追加：T4.15b 对比度 P2 微修（约 5 分钟，0 配额，CSS-only）】✅ 已完成（`fb93469`；Lead 复测三处使用点 6.45:1，badge.done 6.49 不变，D-105）**
+> Lead 复核实测（`artifacts\T4.15\lead-verify\`）：`--accent-deep #a16207` on `--accent-tint #fdf4d9` = **4.48:1 < WCAG AA 4.5**（12px 文字）；
+> 受影响元素：**T4.15 新增的 `.sample-badge`**（"示例数据"诚实标签）+ **复用的 `.chip`（关键词胶囊）与 `.badge.busy`**（T4.14 就有，Lead 当时未量到，属漏项，K-56 补）。
+> **要求**：①`style.css` 里 token `--accent-deep: #a16207` → **`#92400e`**（Lead 预算：on tint = 6.45:1，on white = 更高；**不要动 `--accent` / `--accent-tint` / 其他 token**）；
+> ②复测并给出数值：`.sample-badge`、`.chip`、`.badge.busy`、以及 `grep` 到的所有 `--accent-deep` 使用点；
+> ③前后对比截图（index 示例卡 + task 203 关键词/待办 + 列表「进行中」徽章状态若可造）落 `artifacts\T4.15\after2\`；
+> ④`-UnitOnly` 225/225 + 可维护性 exit 0；⑤**CSS-only 单 commit**（`fix(T4.15b): ...`）；
+> ⑥**把 00:10 自动化（id 52235e59）重绑到新 commit 并回报 hash**（Lead 会只读查库核验）。
+
+---
+
+## T4.15c 详情页空态文案修正（约 10 分钟；0 配额；纯 static）
+
+> **要证明的事**：用户截图指出——1 秒静音样本（task 206）的详情页把"没识别到语音"显示成"AI 未启用或本次未生成"，**误导**。要按 D-072 语义把三种情况分清。
+>
+> **要求**（只改 `static/task.html`，不碰后端/契约）：
+> 1. `transcript` 为空 **且** `ai_tier` 为 null → 摘要/关键词/待办区域文案改为：**「这段音频未识别到语音（可能是纯音乐、静音或无人声），所以没有摘要/关键词/待办。」**
+> 2. `transcript` 非空 **且** `ai_tier` 为 null → **保留现有字符串不变**「AI 未启用或本次未生成，暂无内容。」（不要改字）
+> 3. `transcript` 非空且 `ai_tier` 有值 → 现有渲染不变；`todos === []` 仍显示"确实没有待办"（D-072 语义不动）。
+> 4. 判据：task **206/205**（空转写）显示新文案；task **203**（正常）三节不变；console error 0；手机 390 不溢出；`-UnitOnly` 225/225 + 可维护性 exit 0；单 commit（`fix(T4.15c): ...`）。**不需要重绑自动化**（00:10 自动化未执行，Lead 已在 `fb93469` 上亲自跑全量：235/235、`mvn exit 0`，证据 `artifacts\T4.15\post-midnight\full-test.log`）。**不动其他文案/样式。**
+5. 自验要求：改完 `docker compose build app` + `docker compose up -d app`（静态文件打在 jar 里，不重启看不到），确认容器 healthy 后用浏览器/接口核对上面 4 条，证据写进回报。Lead 会另开 Playwright 独立复核（含拦截模拟"有逐字稿但 AI 未跑成"的第四种情况）。
+
+---
+
+## T4.16 真内容质量验收（约 1.5h 机器时间；**6 任务 / 约 44 分钟配额**；D-103 之后的质量门）
+
+> **状态：✅ 已完成（2026-11-16，第 37 份报告，D-107）**——small 223/224/225、medium 229/230/231；结论：默认 ASR 保持 small，另开 T4.16b 修 LLM 三问题。以下为原始卡，保留追溯。
+
+> **要证明的事**：用**有内容的真实文件**验证「摘要 / 关键词 / 待办」到底好不好，并回答一个决策问题：**默认 ASR 模型要不要从 `small` 升到 `medium`**。
+>
+> **前置（硬性顺序）**：①Lead 先核完 00:10 自动化产物（含 235/235 + 冒烟）；②`GET /api/v1/settings` 查 `remaining_tasks ≥ 8`、剩余分钟 ≥ 60；不满足就报"配额未就绪"并停。
+>
+> **素材（Lead 已备好，勿改勿删）**：`D:\new\artifacts\T4.16\samples\` — `s1.mp3`（6.3min 音频）、`s2.mp4`（6.3min 视频）、`s3_10min.mp3`（10min，长音频裁段）。
+>
+> **步骤**：
+> 1. **small 档（线上现状）**：上传 3 个样本（一次一个或批量均可），等 DONE；记录每个的 `task_id` / `ai_tier`（应为 CLOUD）/ 耗时 / RTF / transcript 字数；用详情页「导出 md」各存一份到 `D:\new\artifacts\T4.16\outputs\small\`。
+> 2. **medium 档（临时切换，**不许改 `.env`**）**：写外部 override（`D:\new\artifacts\T4.16\override-medium.yml`，设 `ASR_MODEL_NAME=medium`），按 K-41/K-44 用 `docker compose -f docker-compose.yml -f <override> up -d asr` 起；确认 `/asr/health` 返回 `{"model":"medium","ready":true}` 再跑；同素材再跑 3 个任务，记录同样指标 + 导出到 `outputs\medium\`。
+> 3. **立即恢复**：`docker compose up -d asr` 回基础配置；确认 `/asr/health` `model=small`、5/5 healthy、`.env` hash `2BCC440F1C9E` 不变（K-45 最后查配额）。
+> 4. **归档日志**：`docker compose logs asr > D:\new\artifacts\T4.16\asr-small.log`（切换前）与 `asr-medium.log`（切换后）；app 日志同样落盘（K-39/K-43）。
+> 5. **回报（测试三问）**：6 个 task id + ai_tier + 耗时/RTF + transcript 字数；**摘要/关键词/待办原文**（或导出文件路径）；两侧差异（转写文字是否更准、专有名词是否正确、待办是否更多/更准）；配额消耗；有没有出现 429/超时/降级。
+>
+> **禁止**：改提示词/改 Java/改 `.env`；跑全量测试（吃 3 任务）；上传 `samples` 之外的文件；把 medium 档留在线上。**medium 跑完必须切回 small**。
+>
+> **Lead 会做的对照**：Lead 用本地已有的 faster-whisper **medium/large-v3** 在临时容器里转写同一素材（**不占任务配额**），自己整理一份「参考答案（摘要/关键词/待办）」，再与产品 small/medium 两侧输出做三方对比，写进第 36 份验收报告与 D-106（是否升默认模型/是否调提示词）。
+
+---
+
+## T4.16b LLM 结构化质量三修（约 30–40 分钟；0 配额；纯后端 + 提示词）
+
+> **状态：✅ 已完成（`885038b`，2026-11-16，第 38 份报告，D-108）**——我独立复核：`-UnitOnly` 231/231、可维护性 0/0、**三次变异测试全造红**、真实任务 232 摘要 134 字完整句+待办 0。以下为原始卡，保留追溯。
+
+> **要证明的事**：T4.16 用 3 个真实素材实测发现三件伤用户的事（第 37 份报告 / D-107）：
+> ①同一份转写稿两次结构化，待办条数 **0 vs 5**、摘要相似度 0.47（云档 `temperature` 用的是供应商默认值，没固定）；
+> ②摘要 200 字被 **`substring` 硬切**，出现「…测试与证据链。**未明确**」「…**无明确课后作业/**」这种末句腰斩；
+> ③待办把讲者的**演示动作**当听众任务（"登录 BOSS 账号并打开后台""查看后台沟通数据"），依据命中率 100% 但语义不是待办。
+>
+> **要求**（一个 commit 做完三件，不许顺手改别的）：
+> 1. **云档 temperature 固定 0.0**：`app/src/main/resources/application.yml` 的 `spring.ai.openai.chat.options` 下加
+>    `temperature: ${LLM_TEMPERATURE:0.0}`；同步 `.env.example` 与 `配置清单.md`（§1 键表、§2 快照 `$appKeys`）。
+>    判据：启动后日志/单测能证明云档用 0.0（参照 `OllamaChatModelConfig.localChatOptions` 的做法：把云档选项构造抽成 package-private 静态方法并加单测断言 `temperature==0.0`）。
+> 2. **summary 截断改句边界**：`StructuringService.truncate()` 只用于诊断日志，别动；为 summary 新增句边界截断（`len<=200` 原样；否则在 `[0,200)` 内从后往前找最后一个 `。！？!?`，找到就截到它含该标点；找不到再退回 200 硬截）。
+>    判据：单测覆盖 `<=200 原样` / `201 字且 180 处有句号 → 截到 180` / `201 字无标点 → 截 200` / `正好 200 不改`；重跑一条真实任务（可用一次新上传或已有任务的修复后重结构化——若不方便，用单测 + 一个 E2E 断言证明）。
+> 3. **待办提示词收紧**：`TodoService.promptSection()` 的 `3. todos ...` 段补充（保留原有 owner/deadline/null 规则，原文不要删）：
+>    「只列 transcript 里**明确要求听众/参会者去做**的行动项；讲者/主播自己的演示动作（如"我登录一下账号给你看"）、举例、知识点罗列、流程讲解都不算待办；
+>     教程/课程类通常 0–8 条，宁少不滥；确实没有就输出 {"todos": []}。」
+>    同步更新因文案变化而变红的测试（`TemplatePromptsTest` 有旧文案硬拷贝，仅当它断言这段才改）。
+>
+> **自验（必须全做，证据落盘 `D:\new\artifacts\T4.16b\workbuddy\`）**：
+> ```powershell
+> cd D:\new\projects\meeting-notes
+> powershell -NoProfile -ExecutionPolicy Bypass -File scripts\test.ps1 -UnitOnly     # 期望 225+ 全绿、exit 0
+> powershell -NoProfile -ExecutionPolicy Bypass -File tools\check-maintainability.ps1  # 期望 exit 0
+> docker compose build app; docker compose up -d app; docker compose ps   # app healthy
+> ```
+> 再用一次小体量真实任务（**最多 1 个任务**，可用 `D:\new\artifacts\T4.16\samples\tier2\s2.mp4` 换字节后上传，或直接复用已有任务走"修复后重新结构化"接口；避免重复上传同字节被 content_hash 复用）验证：摘要结尾是完整句子、待办里没有"登录/查看后台"这类演示动作。
+> 证据：改前后同一输入的对比（JSON 或截图）+ 单测输出 + exit code。
+>
+> **禁止**：改 ASR/模型默认值、改 `templates` 五个模板的 summary 规则文案（只动 todo 公共段）、改前端、跑全量测试（吃 3 任务）、push、多 commit。
+>
+> **回报**：按仓库根 `AGENT.md` 的回报模板 + 上面三件各自的"改前 → 改后"证据。
+
+---
+
+## T4.17 音频要点（keypoints）功能（约 2–2.5h；0 配额跑单测 + 1 任务真机抽检；后端+前端）
+
+> **状态：✅ 已完成（`66af59b`，2026-11-16，第 39 份报告，D-111）**——21 文件 +431/−117；我独立：`-UnitOnly` 240/240、**全量 250/250 exit 0（含 E2E 13 键）**、可维护性 0/0、**两处变异造红**、真实任务 237 要点 6 条依据可查。以下为原始卡，保留追溯。
+
+> **要证明的事**：用户要求新增「音频要点」——详情页与导出 md 里多一节编号要点，格式同他给的样例：
+> `1. **市场分化**：传统 Java 岗收缩、大厂基础开发编制缩减…`（编号 + 加粗小标题 + 冒号 + 说明）。
+> 条数**按内容长度自适应**（短 3–6 条、长最多 15 条），每说明 40–120 字，内容必须来自转写、不得编造；
+> 短内容（<3 分钟）不应硬凑条数。**待办功能保留不动**（用户决定先观察）。
+>
+> **改动范围**：
+> 1. **DB（Flyway V3）** `app/src/main/resources/db/migration/V3__keypoints.sql`：`ALTER TABLE task_result ADD COLUMN keypoints jsonb;`（历史任务为 null，前端按"未生成"处理，语义同 todos 的 null）。
+> 2. **结构化契约**：`StructuringResult` 增加 `keypoints`；JSON 输出增加 `keypoints: [{"title":"...","detail":"..."}]`；
+>    `StructuringPrompt`/`TemplatePrompts` 要求段增加要点规则（自适应条数、title ≤20 字、detail 40–120 字、必须来自 transcript、禁止编造；考点/结论/数据/建议优先）。
+>    解析容错：keypoints 缺失或形状不合法 → 视为该字段为空（null），**不影响 summary/keywords/todos 落库**（不要整条降级）。
+> 3. **落库/查询**：`StructuringService` 写 keypoints；`TaskController` 的 `GET /tasks/{id}` 响应增加 `keypoints`（字段顺序无关，snake_case）；
+>    历史任务返回 null。列表接口不动。
+> 4. **前端详情页**（`static/task.html` + `app.js`/`style.css` 尽量少改）：新增「要点」区块（在摘要之后、待办之前），渲染为
+>    `<ol>`：每条 = `编号` + `**加粗小标题**` + `：说明`；`null`/空 → 「AI 未启用或本次未生成，暂无要点。」；
+>    手机 390 宽不溢出；不引入外部资源。
+> 5. **导出 md**（`TaskMarkdownExporter`）：在「摘要」「关键词」之后加「## 要点」节：`1. **标题**：说明`；keypoints 为 null → 该节写「（未生成要点）」或省略该节（二选一，写清并保持稳定）。
+> 6. **配置**：若新增任何键（预计不需要），同步 `.env.example` 与权威仓 `配置清单.md`。
+>
+> **判据（必须自测并给证据）**：
+> - `-UnitOnly` 全绿（现有 231 + 新增用例，至少覆盖：keypoints 正常解析、缺失/坏形状容错、API 返回、导出含要点节）；
+> - 可维护性 `0/0` exit 0、单文件 ≤300 行；
+> - 用**已有真实任务**（如 231：10 分钟、4062 字）跑一次"重新结构化"或用新字节文件上传 **1 个任务**，确认：要点 3–15 条、每条 40–120 字、抽样 2 条能在转写里找到依据、导出 md 含要点节；截图详情页 + 导出文件；
+> - 证据落 `D:\new\artifacts\T4.17\workbuddy\`；**单 commit**（`feat(T4.17): ...`）。
+>
+> **禁止**：删/改待办功能；改 ASR；动 T4.16b 的 temperature/截断/提示词（除新增要点规则）；前端引入外部资源；改 `.env` 持久值；push。
+
+---
+
+## T4.18 转写一句一行（AI 加标点）+ 导出勾选/全选（约 2.5–3h；0 配额单测 + ≤2 任务；后端+前端）**✅ 已完成（`abf4649`，2026-11-16，第 40 份报告，D-112）**
+
+> **要证明的事**：
+> ① 现在 ASR 输出没标点，详情页转写是一整段。用户要求**一句一行**；方案已定：**AI 加标点后再按句换行**（失败回退原始转写，不降级、不影响 `ai_tier`）。
+> ② 导出的 markdown 要**让用户勾选导哪些内容**（摘要/关键词/要点/转写/待办），支持**一键全选**；默认勾选 摘要+关键词+要点+转写（**不含待办**，待办观察期）。
+>
+> **改动范围**：
+> 1. **DB（Flyway 新版本，编号顺延）**：`ALTER TABLE task_result ADD COLUMN transcript_punctuated text;`（历史任务 null）。
+> 2. **标点服务（新类或并入现有 AI 包）**：在结构化成功后、同一 worker 内**追加一次独立 LLM 调用**（CLOUD 可用时才做）：
+>    - 输入：transcript；输出：**只加标点、不加不删不改字**的全文；
+>    - 触发条件：transcript 非空且长度 ≤ `LLM_PUNCTUATE_MAX_CHARS`（新增配置键，默认 6000；设 0 可关闭）；
+>    - **失败/超时/长度不符 → 存 null，任务照样 DONE**（D-068：LLM 失败不许拖垮任务）；不得因为标点失败而降级 ai_tier；
+>    - 记录日志：耗时、字数、是否成功（不打印全文）。
+> 3. **API**：`GET /tasks/{id}` 增加 `transcript_punctuated`（null 表示没有/未生成）；历史任务 null。
+> 4. **前端详情页**：转写区优先用 `transcript_punctuated`，按 `。！？` 切句**一句一行**（无标点则回退现有 `mnSplitSentences` 逻辑）；
+>    「复制全文」与关键词/待办依据定位都以**展示的文本**为准（定位算法保持现有 normalize+bigram 口径，不得回归）；纯文本无标点时按现有方式渲染。
+> 5. **导出 md 可选择内容**：`GET /tasks/{id}/export?format=md&include=summary,keywords,keypoints,transcript,todos`
+>    - 合法值集合固定为这 5 个；未知值 → 400 `INVALID_PARAM`（消息列合法值）；`include` 省略 → 默认 `summary,keywords,keypoints,transcript`（**默认不含待办**）；
+>    - `include` 为空/全空 → 400；顺序始终固定为 摘要→关键词→要点→转写→待办（只输出被选中的节）；
+>    - 转写节用 transcript_punctuated（有则用），按句换行；空 transcript 仍按现有规则处理（400 INVALID_PARAM）；
+> 6. **前端导出区**：5 个复选框 + 「全选」+「下载 Markdown」；至少勾 1 项才可下载（否则按钮禁用+提示）；勾选状态只存页面内存即可；
+>    手机端可正常操作。
+> 7. **配置**：`LLM_PUNCTUATE_MAX_CHARS` 同步 `.env.example` + 权威仓 `配置清单.md`（§1 键表 + §2 快照注记口径同 T4.16b）。
+>
+> **判据**：
+> - `-UnitOnly` 全绿（新增用例覆盖：标点成功/失败回退/null、长度超限跳过、include 解析/默认值/非法值/空值、导出各节有无、转写换行）；
+> - 可维护性 0/0、单文件 ≤300 行；
+> - 按约定跑 **≤2 个真实任务**（16 分钟以内音频各一；用一个"无标点 ASR 输出"素材，如 `artifacts\T4.16\samples\tier3\s2.mp4` 的改字节副本）验证：
+>   transcript_punctuated 生成成功、详情页一句一行、复制全文=页面文本、导出勾选"全选"含 5 节 / 只勾"转写"只 1 节、非法 include 400；
+> - 证据落 `D:\new\artifacts\T4.18\workbuddy\`；**单 commit**（`feat(T4.18): ...`）。
+>
+> **禁止**：改 T4.16b 三修；改 ASR 服务；把标点失败当任务失败；改 `.env` 持久值；push；多 commit。
+
+---
+
+## T4.19 会议待办语义 + medium 提示（约 40–60 分钟；0 配额；提示词 + 静态页 + 文档）**✅ 已完成（`48df935`，2026-11-16，第 41 份报告，D-113）**
+
+> **要证明的事**：真实会议实测（task 235/236，8 条待办全可用）后确认待办功能保留，但补三处：
+> ①会议模板提示词区分「**已议定待办 / 讨论中未定 / 纯知识**」，避免把"可以考虑…"算成待办；
+> ②owner 只在原文**明确点名**负责人时才填（现有规则不动，只补一句强调 + 单测断言，未来说话人分离=T7.12 再增强）；
+> ③会议类素材**建议用 medium 模型**：设置页加一行提示 + README 写明（**只做提示，不改默认值**）。
+>
+> **改动**：
+> 1. `TodoService.promptSection()`：在现有三行规则后加一句（不删原文）：
+>    「区分三类：已议定的待办（明确要某人/某团队去做）→ 列入；讨论中未定（如"可以考虑""再看一下"）与纯知识/观点 → 不列入；owner 只有原文明确点名负责人才填，否则 null。」
+>    同步 `TodoServiceTest` 断言新文案；`TemplatePromptsTest` 若断言公共段一并更新。
+> 2. 设置页（`static/settings.html`）：在 AI 档位区域加一行灰色小字提示：
+>    「会议/远场录音建议使用 medium 语音模型（更准但更慢，需自备约 1.5GB 模型，配置 ASR_MODEL_NAME=medium）」；
+>    不加交互、不发请求、手机 390 不溢出、对比度 ≥4.5:1、不引入外部资源。
+> 3. `README.md`（或 `docs/接入指南` 对应节）：加"模型选择建议"三行——清晰单人录音 small 够用；会议/远场/多人建议 medium（RTF 约 0.38 vs 0.16，本机 CPU 实测）；medium 需自备模型文件。
+>
+> **判据**：`-UnitOnly` 全绿（含新断言）；可维护性 0/0；启动重建容器后截图设置页提示 + 手机 390 不溢出；单 commit（`feat(T4.19): ...`）；0 任务配额。
+>
+> **禁止**：改默认 ASR 模型/config 默认值；改前端其他部分；跑全量测试；push。
+
+---
+
+## T4.20 上传交互修复（约 1–1.5h；0 配额；**纯 static**；D-114）**✅ 已完成（`5be3a4e`，2026-11-16，第 43 份报告，D-116；我自写 Playwright 14/14 复验）**
+
+> **要证明的事**（用户真机验收 T4.13 发现，已在代码核实机制）：
+> ① 现在**分批次选文件会覆盖前一次**：`index.html` 的 `takeFiles()` 每次把 `mirror` 换成本次列表，`fileInput change` 又把 `mirror=null` → 只有"一次全选"才能都上传；
+> ② 已选文件显示在**拖拽框下方**的独立 `<ul id="fileList">`，不在框内，看起来像另一个列表；
+> ③ 任务列表/最近任务的「详情」是**同标签打开**，点开就把列表顶掉，想同时看多个详情得反复后退。
+>
+> **改动（只改 `static/index.html`、`static/tasks.html`，必要时 `style.css`）**：
+> 1. **累积选择**：维护一个 `selected` 数组（元素 `{file, key}`，key = `name|size|lastModified`）；
+>    - 文件选择器 `change` → 把新选的文件**追加**进 `selected`（按 key 去重，重复的静默跳过）；
+>    - 拖拽 `drop` → 同样**追加**（不替换）；
+>    - 上限 20（与 `MAX_BATCH_FILES` 一致）：超出的文件丢弃并提示"一次最多 20 个，已忽略 N 个"；
+>    - 超过 200MB 的单文件拒绝并提示（保留现有 `MAX_UPLOAD_BYTES` 校验，但改为在选择时就提示并跳过）；
+>    - 提交时用 `selected` 构造 FormData（**不要依赖 `input.files` 赋值**——老浏览器不支持，保留 mirror 作为兜底语义，但以 `selected` 为准）；
+>    - **提交成功后清空 `selected`** 并把下拉区恢复初始文案；提交失败**保留**选择供重试。
+> 2. **已选列表移进拖拽框内**：把 `<ul id="fileList">` 移到 `#dropZone` 内部（框底部），每行显示文件名 + 大小 + **「移除」按钮**；无选择时框内保持原提示（点击/拖拽文案）；`has-files` 时框内提示缩小为一行"已选 N 个文件，点击或拖拽可继续添加"。
+> 3. **详情链接新标签页**：`tasks.html` 两处 `详情` 链接加 `target="_blank" rel="noopener"`；首页"最近 3 条"的详情链接（若有）同样处理；详情页已有返回/导航，不动。
+> 4. 键盘可达性保持：拖拽框 `Enter/空格` 打开选择器；「移除」按钮 `Tab` 可达、`aria-label="移除 <文件名>"`；不引入外部资源。
+>
+> **判据（必须自测并给证据）**：
+> - 桌面手测（Playwright 或真实浏览器）：选 2 个 → 再选 1 个 → 列表显示 **3 个**（不覆盖）；点某个「移除」→ 剩 2 个；拖拽追加 1 个 → 3 个；选第 21 个 → 提示忽略；提交后列表清空；
+> - 上传**真的成功**：用 `artifacts\T4.13\files\` 里的文件，确认任务提交数 = 选中的文件数（可查 `/api/v1/tasks` 最新几条）；自验最多 **2 个**任务（配额 0 指本卡不改后端，但上传真跑会计任务配额——**允许 ≤2 个**，能复用已有任务就复用）；
+> - 列表页「详情」点击后：新标签页打开 `task.html?id=…`，原列表页仍在；
+> - 手机 390 宽：框内列表 + 移除按钮不溢出、可点；
+> - `-UnitOnly` 全绿 exit 0、可维护性 0/0（纯静态也应跑，防误伤）；
+> - 单 commit（`fix(T4.20): ...`）；证据落 `D:\new\artifacts\T4.20\workbuddy\`。
+>
+> **禁止**：改后端/契约/DB/.env；改其它页面布局；引入外部资源；跑全量测试；push；多 commit。
+
+---
+
+## T4.21 任务辨识信息 + 删除任务（约 4–5h；0 配额；后端+前端；D-114/D-115）**✅ 已通过（2026-11-16，`de031b2`，第 44 份报告，D-117；我独立 273/283 全绿 + 接口 48/49 + UI 31/31；遗留 P2 → T4.21b）**
+
+> **要证明的事**：用户真机验收（T4.13）反馈"列表看不出内容、而且只能增不能删，越积越多"：
+> ① 列表接口没有摘要/关键词/模板 → 长文件名+相似命名难分辨；
+> ② 全仓**没有删任务接口**（只有删待办），列表也没有删除入口。
+>
+> **已确认口径（D-115）**：辨识三件套（关键词 chips ≤3 + `+N`、摘要首句 ≤40 字、模板徽章）+ 单条/多选/**全选**删除 + **一键清空失败任务**；二次确认写明"不可恢复、配额不退还"；**不做**"清空全部任务"、**不做**并排分栏。
+>
+> **改动**：
+> 1. **列表接口只增字段**（`GET /api/v1/tasks` 的 items 元素，**只增不改**，D-041）：
+>    - `keywords`（string 数组，来自 `task_result.keywords`，null/坏 JSON → `[]`）
+>    - `summary_head`（`task_result.summary` 前 40 字，null 安全；是否加省略号由前端决定）
+>    - `template`（`task.template`，旧任务 null）
+>    - 实现：`TaskQueryService` 的 keyset 分页 SQL 加 `LEFT JOIN task_result r ON r.task_id = t.id`，三列一并查出（注意分页/排序不受影响）；详情接口 14 键**不动**。
+> 2. **列表展示（`static/tasks.html`）**：每行在状态徽章**前面**加：
+>    - 关键词 chips：最多 3 个（超出显示 `+N`），无关键词不显示；
+>    - 摘要首句：`summary_head` 灰字一行（≤40 字 + 省略号），无摘要不显示；
+>    - 模板徽章：会议/课程/访谈/播客/短视频（复用详情页 `TEMPLATE_TEXT` 映射；null 不显示）；
+>    - 手机 390：chips/摘要单行省略（`text-overflow: ellipsis`），不横向溢出；**不加新请求**（列表接口一次拿全）。
+> 3. **删除接口**（三条，契约写进 `接入指南.md`，响应字段 snake_case）：
+>    - `DELETE /api/v1/tasks/{id}`：不存在 → 404 `TASK_NOT_FOUND`；`status` 为 PENDING/RUNNING/RETRYING → **409 `TASK_BUSY`**；成功 → 200 `{"deleted":1}`。
+>    - `POST /api/v1/tasks/delete` body `{"ids":[…]}`：1–100 条；逐条返回 `{"results":[{"id":1,"deleted":true}|{"id":2,"deleted":false,"reason":"NOT_FOUND"|"TASK_BUSY"}]}`，**不整体失败**（口径同 T4.1 批量重试）；重复 id 去重。
+>    - `POST /api/v1/tasks/delete-failed`：删当前用户全部 `status='DEAD'` 的任务（不限已加载行），返回 `{"deleted":N}`；`RETRYING` 不算失败、不删。
+>    - **删除事务**：删 `task` / `task_result` / 关联 `dead_letter` / `webhook_delivery`（按 task_id）；**MinIO 对象删除 best-effort**（异常只 WARN + 记 taskId，**不回滚 DB 行**）；**配额不退还**（错误信息/文档写明）。
+> 4. **前端删除入口（`static/tasks.html` + `static/task.html`）**：
+>    - 列表：复用现有多选（`#checkAll` 已有）→ 操作条加「删除所选」（红色/危险样式）+「清空失败任务」按钮（无 DEAD 时禁用或隐藏）；**全选删除 = 勾选当前已加载行**，前端按 ≤100/批分批调 `POST /tasks/delete`；
+>    - 详情页：底部加「删除此任务」按钮；
+>    - 两个删除入口都要**二次确认**（`confirm` 或页内确认条）：文案"删除后不可恢复，已用配额不退还"；成功后列表就地刷新（保留当前筛选/搜索状态），详情页删除成功后跳回列表；
+>    - 手机 390 可操作、按钮不溢出。
+> 5. **测试**：`TaskQueryServiceTest`（三字段有/无/坏 JSON、分页不受影响）、`TaskControllerTest`（单条 404/409/成功、批量部分成功+重复 id、清空失败任务只删 DEAD）、`E2ETest`/`TaskListResponse` 契约（列表元素键集**只增**；详情 14 键不变）。
+>
+> **判据（必须自测并给证据）**：
+> - `scripts\test.ps1 -UnitOnly` 全绿（含新增用例）；**改到契约 → 先 `docker compose build app && docker compose up -d app` 再跑全量 `scripts\test.ps1`**（K-68），记录 head.txt + 用例数；可维护性 0/0；
+> - 真机/接口验证（≤3 任务配额）：列表能看到关键词/摘要首句/模板；删单条 → DB 里 `task`/`task_result` 行都没了、列表行消失；对运行中任务删 → 409；批量删 2 条 → 逐条结果；清空失败任务 → 只删 DEAD、返回条数；
+> - 手机 390 宽：新元素不溢出、删除按钮可点；二次确认文案含"不可恢复/配额不退还"；
+> - 证据落 `D:\new\artifacts\T4.21\workbuddy\`；单 commit（`feat(T4.21): ...`）。
+>
+> **禁止**：改详情接口既有的 14 键/导出契约；退还配额；MinIO 失败导致 DB 行残留；删 237/256 等验收证据任务（自验用新任务）；**做"清空全部任务"**；push；多 commit。
+
+---
+
+## T4.21b 清空失败任务补 MinIO 清理 + 防回归测试（约 0.5–1h；0 配额；后端；D-117 发现的 P2）**✅ 已通过（2026-11-16，`a1cc93f`，第 45 份报告，D-118；我独立 279/279 + 探针 19/19）**
+
+> **要证明的事**：T4.21 验收时我用**真实对象探针**实锤——任务 286 转写 DONE 后 SQL 置 `DEAD`，走 `POST /api/v1/tasks/delete-failed`，DB 行（task/task_result）清 0，但 MinIO 里 `meetingnotes/tasks/286/lead-t421-c.mp3` **仍在**。同一 commit 的另外两条删除路径（单条/批量）都调了 `purgeObjectBestEffort`，**只有"清空失败任务"漏了** → 失败任务的音频会永久堆在对象存储里（用户"越删越多"的另一半）。
+>
+> **改动**（只做这一件事）：
+> 1. `TaskDeleteService.deleteAllFailed()`：`deleteOne()` 已返回 `sourceUri`，对每个 `deleted=true` 的结果**在事务外**调 `purgeObjectBestEffort(id, sourceUri)`（口径与 `TaskDeleteController.deleteTask/deleteBatch` 一致：S3 失败只 WARN、不回滚 DB、不抛）。
+> 2. `TaskDeleteService.deleteOneInTx()` 的状态查询加行锁：`SELECT status FROM task WHERE id = ? AND user_id = ? FOR UPDATE`（T4.21 验收 P3：读状态与删行同事务但无锁，仍有毫秒级竞态窗口）。
+> 3. 测试（`TaskDeleteServiceTest` 补）：
+>    - `deleteAllFailedPurgesObjectForEachDeletedTask`：2 个 DEAD → `verify(s3, times(2)).deleteObject(...)`（**可证伪：不调用即红**）；
+>    - `deleteAllFailedS3FailureStillDeletesAllAndReturnsCount`：S3 抛 RuntimeException → 不向上抛、返回条数正确、DB DELETE 全部执行；
+>    - 现有 7 例保持全绿；如成本低可顺手加 2 个 controller 直测（`new TaskDeleteController(mockService)` 断言 404/409 的 ApiException code/status、成功返回 `{"deleted":1}`），不做 MockMvc 也行。
+>
+> **判据（必须自测并给证据）**：
+> - `scripts\test.ps1 -UnitOnly` 全绿（用例数 ≥273 + 新增），可维护性 `check-maintainability.ps1` **0/0**；
+> - **真机探针（0 配额）**：找一个已 DONE 的任务（**别用 237/256 验收证据任务**），`docker compose exec -T postgres psql -U mn -d meetingnotes -c "UPDATE task SET status='DEAD', error_code='ASR_ERROR' WHERE id=<id>"` 置 DEAD → 记下 `source_uri` 对应 MinIO 目录存在（`docker compose exec -T minio sh -c "ls /data/meetingnotes/tasks/<id>"`）→ 调 `POST /api/v1/tasks/delete-failed`（`Content-Type: application/json` + body `{}`，带 Bearer）→ 断言：返回条数对、`task`/`task_result` 0 行、**MinIO 目录消失**；
+> - 单 commit（`fix(T4.21b): ...`），不 push、不改列表三字段/详情 14 键/其它契约、不退还配额。
+>
+> **禁止**：把 purge 放进事务内（S3 慢/失败会拖长事务或造成回滚）；改前端；多 commit；删 237/256 等验收证据任务；为了验证再上传新任务（复用现有 DONE 任务即可，0 配额）。
+>
+> 证据落 `D:\new\artifacts\T4.21b\workbuddy\`（单测日志、探针命令 + 前后 `ls` 输出、DB 行查询）。
 
 ---
 
