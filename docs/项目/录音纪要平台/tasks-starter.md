@@ -2384,7 +2384,159 @@ F-15 控制在 ≤30 行并集中一处；新增静态资源不引第三方库�
 >
 > 证据落 `D:\new\artifacts\T4.22\workbuddy\`（route 捕获日志、两张截图、`git show --stat` 输出）。
 
+## T4.23 摘要级依据（约 1–2h；0 配额；**纯 static**；D-121，把功能清单里"部分做"的 1 项补完）
+
+> **要证明的事**：关键词/待办已有依据定位（T4.15⑧，D-104：浏览器内重算、匹配不到写"未找到直接依据"、**绝不声称是模型给出的依据**），但**摘要没有依据**——用户 2026-11-15 清单里"摘要/待办依据原文哪句"这一项只完成了一半。本卡把摘要那半补上。
+>
+> **口径（D-121）**：**只做前端重算**——不改后端/契约/LLM/DB、不新增请求、不落库；复用现有归一化/二元组/切句口径（`app.js` 的 `mnNormalize`/`mnBigrams`/`mnSplitSentences`/`mnGroundSentence`）；文案必须诚实。
+>
+> **改动（`static/task.html` + `static/style.css`，helper 可加在 `app.js`）**：
+> 1. 摘要卡（`summaryHtml`）里、摘要段落下方加「摘要依据」小块：
+>    - 把 `summary` 用 `mnSplitSentences` 切句（无标点则整段 1 句）；
+>    - 每句在 `transcript` 里找依据：摘要常被改写/压缩，**单句二元组 ≥0.5 会大量误判"未找到"** → 建议按**连续 2–3 句窗口**算覆盖率，阈值 ≥0.5 视为命中；命中记「窗口首句 index + 片段」；
+>    - 展示：`摘要依据 · 找到 2/3 句`；每句一行 `第 N 句 ↔ 原文：<片段…>`（**可点 → 滚到逐字稿对应句并高亮**，复用现有 `highlightSentence`/`data-sent` 机制）；未命中句写 `第 N 句 · 未找到直接依据`（灰字，`.ground-miss` 观感）；
+>    - `transcript` 空 / `summary` 空 → 整块隐藏（沿用现有空态语义 D-048/D-072）。
+> 2. 新样式 ≤10 行，复用 `.todo-ground`/`.ground-link`/`.ground-miss` 的观感；390 不溢出、可点按。
+>
+> **判据（必须自测并给证据）**：
+> - **0 新建任务**（只读现有 DONE 任务 **237/256**，别删它们）：详情页有「摘要依据」块、命中行可点且能滚到逐字稿并高亮、未命中行写"未找到直接依据"、无 console/pageerror、1280/390 无横向溢出（截图落盘）；
+> - **诚实性自检**：文案固定"在原文中匹配到的句子"，不许出现"模型依据/AI 引用"等说法；匹配不到不许硬凑；
+> - 纯 static 不改契约 → **不跑全量**（K-68 不触发）；`tools\check-maintainability.ps1` **0/0** exit 0；单 commit（`feat(T4.23): ...`），不 push。
+>
+> **禁止**：改详情接口 14 键/后端/DB；新增 LLM 调用或请求；把"最相似"包装成"模型依据"；多 commit；删 237/256。
+>
+> 证据落 `D:\new\artifacts\T4.23\workbuddy\`（1280/390 截图、匹配统计、`git show --stat`）。
+
 ---
+
+## 提前功能批次：第 1 档 + 第 2 档（D-122，用户"把这些都做完"）
+
+> 顺序 = 依赖 + 风险排序；**每张独立 commit + 独立验收报告 + 我独立复核**；卡在轮到时展开成上面这种完整卡（本表只放范围/依赖/判据要点，避免两处漂移 D-065）。
+> 已发卡/待做：**T4.23 摘要级依据**（卡已出）。
+
+| 编号 | 项（用户清单） | 范围 | 依赖 | 备注 |
+|---|---|---|---|---|
+| **T4.24** | 1.1 服务端搜索 + 真计数 | `GET /tasks` 加 `q`（参数化 ILIKE，逃生 `%_\`；`q` 为纯数字时兼 id 精确）；新 `GET /tasks/counts`（`GROUP BY status` 真计数，替换前端 200 条上限近似值）；前端防抖 + 计数卡切换 | — | 改契约 → 全量（K-68） |
+| **T4.25** | 1.2 统计摘要 | 新 `GET /api/v1/stats`：总任务/总时长/成功率（DONE/(DONE+DEAD)）/平均处理倍速（`updated_at-created_at`/`duration_sec`，口径写清）/`ai_tier` 分布；设置页「我的使用」卡 | — | RTF 定义必须写进接口注释 + 文档 |
+| **T4.26** | 1.4 换模板重跑（F-17） | `POST /tasks/{id}/restructure`（body `{"template":…}`）：只复用已存 transcript 重跑结构化，**不重跑 ASR、不扣任务配额**；覆盖前保留旧结果（写 `task_result` 前先留档或单测证覆盖语义）、并发幂等（同任务 409 `TASK_BUSY`） | — | 详情页下拉 + 二次确认 |
+| **T4.27** | 1.3 批量导出 zip | `GET /tasks/export?ids=1,2,…`（≤20，`application/zip` 流式 `ZipOutputStream`，每条一个 md，缺 id 逐条跳过并附 `_errors.txt`）；列表「导出所选」改 zip | T4.24 多选已存在 | 流式不占内存；400 INVALID_PARAM 口径 |
+| **T4.28** | 1.5 只读分享链接 | 迁移 V5 `share_link`（token 存 SHA256、task_id、expires_at、revoked_at）；`POST /tasks/{id}/share` 生成、`DELETE /tasks/{id}/share` 撤销、`GET /api/v1/share/{token}` **匿名只读单条**（认证豁免只放这一条，K-46）；前端详情「分享」+ 复制链接 + `share.html` 只读页 | — | 默认 7 天过期（配置键）；匿名只能拿令牌对应那一条 |
+| **T4.29** | 1.6 标签 / 收藏 | 迁移 V6 `task.labels jsonb` + `task.favorite boolean`；`PATCH /tasks/{id}/meta`；列表按标签/收藏筛选 + 详情编辑 | — | 迁移前备份（T2.8 已有恢复脚本） |
+| **T4.30** | 2.2 浏览器内录音 | 纯 static：`getUserMedia` + `MediaRecorder` → 录完走现有单文件上传；权限拒绝/长录音内存/失败重传处理；真实 1 任务验证 | — | 0 后端改动 |
+| **T4.31** | 2.5 PWA / 手机安装 | `manifest.json` + service worker 离线壳 + 本地图标（禁外链）；离线壳不缓存 API 响应 | — | 与"无 CDN/离线"约束一致 |
+| **T4.32a** | 2.1 前置：`FETCH` 直链 + SSRF（原 T4.3） | 内网/回环/元数据地址拒绝（400 `URL_BLOCKED`）、重定向次数上限、超时、响应体大小上限；`MediaFetcher` 接口 | — | 这是原计划就有、一直没做的卡 |
+| **T4.32b** | 2.1 链接导入 L1/L2/BYOF | L1 og:title/时长；L2 探测 Content-Type 走现有下载管线；BYOF `FETCHER_CMD`（不配 → `FETCHER_UNAVAILABLE`）；新 `POST /tasks/link` | T4.32a | 责任边界写 README |
+| **T4.33** | 2.3 INBOX 目录收取 | `@Scheduled` 轮询挂载目录 + `(user_id, content_hash)` 去重 + 失败隔离；`app.inbox.*` 死配置变成真消费方 | — | 依赖文件挂载说明 |
+| **T4.34** | 2.4 RSS 播客订阅 | feed 解析 + 去重 + 定时抓新一期 → 走 T4.32b 管线 | T4.32b | 与链接导入共用下载/SSRF |
+| **T4.35a** | 2.6 前置：ASR `segments` | `infra/asr/server.py` 返回句子级 `segments[{start,end,text}]`；**旧 `{text,duration,cost_sec}` 逐字兼容**；迁移 V7 `task_result.segments jsonb`（长音频体积策略） | — | 向后兼容旧任务（无 segments 隐藏播放器） |
+| **T4.35b** | 2.6 播放器 API | 预签名/流式音频接口 + 详情返回 segments；越权防护 | T4.35a | 预签名 URL 短时有效 |
+| **T4.35c** | 2.6 前端播放器跟随 | `<audio>` + 点句跳秒 + 播放高亮当前句；无 segments 优雅降级 | T4.35b | 390 可操作 |
+| **T4.36** | 2.7 说话人（先手工版） | 前端给句子打 `speaker` 标签 → 写 `speaker_map`；纪要/转写按说话人分组显示；**自动分离先出 1 天 spike 结论，可做才排**（pyannote 依赖/CPU/许可风险） | T4.35a | 自动分离不承诺 |
+| **T4.37** | 2.8 多用户 / 登录 | 登录/注册/会话、`DEFAULT_USER_ID` 全量替换、数据隔离、配额按人；v2 级改动 | — | **最后做**，涉及全仓 27 处硬编码 |
+
+**交付窗口提醒**（不是停的理由，是排期事实）：上述 ≈ 12–16 个工作日；12-16 交付窗口内需并行压缩（多数卡 0–2 任务、日配额 100 任务足够）。做完前 3–4 项我会用实测节奏复核一次预期，不提前承诺全部日期。
+
+---
+
+## T4.24 服务端搜索 + 真计数（约 2–3h；改契约；K-68 必跑全量；用户清单 1.1）
+
+> **要证明的事**：现在列表搜索是"前端在已加载行里筛"、状态计数是"前端每 30s 拉 `?limit=50` 累加、上限 200 条（超过显示 `N+`）"（`tasks.html:71/138`）——任务一多就不准，也搜不到没加载的行。本卡把搜索和计数都做成服务端。
+>
+> **改动**：
+> 1. **`GET /api/v1/tasks` 只增参数 `q`**（可选）：去空格；空白忽略；>100 字符 → 400 `INVALID_PARAM`。SQL **参数化** `source_uri ILIKE ?`（`%`/`_`/`\` 转义，`ESCAPE '\'`），`q` 为纯数字时 `OR id = ?` 精确匹配；与 `status`/`before_id` 可组合，`ORDER BY id DESC` 分页语义不变。响应结构**不动**。
+> 2. **新 `GET /api/v1/tasks/counts`**：`{total, active, done, dead}`（当前用户 `GROUP BY`，**真计数、无上限**；`active` = PENDING+RUNNING+RETRYING）。只增端点。
+> 3. **前端 `tasks.html`**：搜索框改为 **300ms 防抖 → 带 `q` 重新拉第一页**（不再本地过滤；提示文案从"在已加载 N 条中筛选"改成"服务端搜索 · 匹配 N 条"）；计数改调 `/tasks/counts`（去掉 `fetchCounts` 的 200 上限循环），30s 刷新保留；空结果空态文案不变。
+> 4. **文档**：`接入指南.md` 列表接口补 `q` 说明 + `GET /tasks/counts`。
+>
+> **测试**：`TaskQueryServiceTest`（q 进 SQL 且参数化/转义、空 q 不加条件、纯数字兼 id、与 status/before_id 组合）；`TaskControllerTest` 或直测（q 超长 400）；counts 服务单测（分组口径）；`E2ETest` 加列表 `q` 过滤 + counts 键集断言。
+>
+> **判据**：`-UnitOnly` 全绿；**先 `docker compose build app && up -d app` 再跑全量** `scripts\test.ps1` 全绿（K-68，记录 head.txt/用例数）；可维护性 0/0；真机：搜索一个**没加载到第一页**的文件名能搜到、计数与 psql `GROUP BY` 一致（贴两端数字）；1280/390 无溢出；单 commit；不 push。
+>
+> **禁止**：改详情 14 键/导出契约；`q` 拼字符串进 SQL（必须参数化）；把 counts 做成客户端近似；多 commit。
+
+---
+
+## T4.25 统计摘要 `GET /api/v1/stats`（约 3–4h；新端点；用户清单 1.2）
+
+> **要证明的事**：设置页现在只有配额/档位/术语/静态版本号，没有"我的使用"数据。新端点 + 设置页一张卡。
+>
+> **改动**：
+> 1. 新 `web/StatsController` + `task/StatsService`：`GET /api/v1/stats`（当前用户）→
+>    `{"tasks":{"total","active","done","dead"},"duration_sec_total","success_rate","avg_processing_ratio","tiers":{"CLOUD":n,"LOCAL":n,"EXTRACTIVE":n}}`。
+>    口径写进注释+`接入指南.md`：`success_rate = done/(done+dead)`（分母 0 → null，保留 3 位小数）；
+>    `avg_processing_ratio = AVG(EXTRACT(EPOCH FROM (updated_at-created_at))/NULLIF(duration_sec,0))`，只统计 `DONE 且 duration_sec>0`，无数据 → null（**不等于 RTF，命名/文案要写"平均处理倍速（含排队，近似值）"**）；`tiers` 按 `task_result.ai_tier` 分组（null 单列 `"null"` 或省略，文档写清）。
+> 2. `settings.html` 加「我的使用」卡（总任务/总时长/成功率/平均处理倍速/档位分布），无数据时写"—"；不改现有卡。
+> 3. 测试：`StatsServiceTest`（构造任务/结果行验口径、空库 null）；真机取数与 psql 复算一致。
+>
+> **判据**：`-UnitOnly` 全绿；**先 build/up 再全量**（新端点，K-68）；可维护性 0/0；真机 1280/390 截图、空态正常；单 commit。
+>
+> **禁止**：把 `avg_processing_ratio` 叫成 RTF（会误导）；改既有 `/settings` 契约；多 commit。
+
+## T4.26 换模板重跑 F-17（约 2–3h；改契约；用户清单 1.4）
+
+> **要证明的事**：摘要模板只在提交时定，用户想"同一条录音按课程/访谈模板重新生成"必须重传——F-17 一直没做。
+>
+> **现状（读代码确认）**：`StructuringService.structure(taskId, transcript)` 的模板来自 `templateOf(taskId)`（读 `task_result.template`，默认 meeting）；`persist()` 只写 summary/keywords/todos/keypoints/ai_tier，**不写 template**。所以新接口要显式传模板并落库。
+>
+> **改动**：
+> 1. `POST /api/v1/tasks/{id}/restructure`（body `{"template":"course"}`）：
+>    - 校验模板走 `TemplateResolver.validateExplicit`（非法 → 400 `INVALID_PARAM`，消息沿用 D-085）；
+>    - 任务不存在/非本人 → 404 `TASK_NOT_FOUND`；非 DONE（PENDING/RUNNING/RETRYING）→ 409 `TASK_BUSY`；
+>    - 读 `task_result.transcript`，空/空转写 → 400 `INVALID_PARAM`（该任务没有可重生成的转写）；
+>    - **只重跑结构化**（不重跑 ASR、不新建任务、**不扣任务配额**）；成功后 `UPDATE task_result SET template=?` 并落新结果（复用 `persist` 语义，把 template 一并写；失败时**保留旧结果+旧模板**，接口返回 500/降级说明，不写半截）；
+>    - 同一任务并发请求：用 DB 行锁或 Redis 锁做幂等（第二个请求 409 `TASK_BUSY`）。
+> 2. 前端 `task.html` 详情：DONE 任务加「按模板重新生成」下拉（5 模板）+ 二次确认（提示会覆盖当前摘要/关键词/待办/要点，不消耗配额但**会覆盖**）；成功后刷新详情。
+> 3. 测试：Service 单测（404/409/400/成功覆盖、失败保留旧值、模板落库、零配额）+ 真机 1 条 DONE 任务实测（0 新任务）。
+>
+> **判据**：`-UnitOnly` 全绿 + 先 build/up 再全量（K-68）；可维护性 0/0；真机：任务 237/256 之一改模板后详情/导出反映新模板、summary 变化、配额**不变**；390 可操作；单 commit。
+>
+> **禁止**：重跑 ASR；扣配额/新建任务；失败时留下半截结果；删证据任务；多 commit。
+
+## T4.27 批量导出 zip（约 3h；改契约；用户清单 1.3）
+
+> **要证明的事**：现在多选导出是浏览器逐个 `a.download` 下载 N 个 md（`tasks.html:429` 注释明确 zip 属后端工作）。
+>
+> **改动**：
+> 1. `GET /api/v1/tasks/export?ids=1,2,3`（**≤20 个**，逗号分隔；非法/空/超 20 → 400 `INVALID_PARAM`）→ `application/zip` **流式** `StreamingResponseBody` + `ZipOutputStream`，每个任务一个 `<id>-<安全文件名>.md`（内容复用 `TaskMarkdownExporter`，默认 include 与单条一致：摘要/关键词/要点/转写，**不含待办**）；
+>    - 不存在/非 DONE/非本人 → **跳过**并写 `_errors.txt`（`task_id: reason`）；全部跳过 → 400 `INVALID_PARAM`；
+>    - `Content-Disposition: attachment; filename="meeting-notes-<yyyyMMdd-HHmm>.zip"`；流式不一次性进内存。
+> 2. 前端列表「导出所选 Markdown」改为调 zip 端点（一次请求下 1 个 zip；失败就地提示）。
+> 3. 测试：Controller 单测（400 口径、跳过语义、zip 内文件数/文件名、`_errors.txt`）+ 真机下载 zip 解压核对 2 条内容与单条导出逐字节一致。
+>
+> **判据**：`-UnitOnly` 全绿 + 先 build/up 再全量（K-68）；可维护性 0/0；真机 zip 可解压、内容正确、390 可点；单 commit。
+>
+> **禁止**：把 zip 读进内存再返回（必须流式）；改单条导出契约；多 commit。
+
+## T4.28 只读分享链接（约 3–4h；迁移 V5 + 认证面收窄；用户清单 1.5；K-46）
+
+> **要证明的事**：没有分享能力；匿名访问现在只认全局 `Bearer API_TOKEN`（一个 token 能读全部）。
+>
+> **改动**：
+> 1. 迁移 `V5__share_link.sql`：`share_link(id bigserial PK, task_id bigint not null references task(id) on delete cascade, user_id bigint not null, token_hash varchar(64) not null unique, expires_at timestamptz not null, revoked_at timestamptz, created_at timestamptz not null default now())` + 索引 `(task_id)`、`(token_hash)`。
+> 2. `POST /api/v1/tasks/{id}/share` → 生成 32 字节随机 token（`SecureRandom`，base64url），**只存 SHA256 hex**；默认 7 天有效（新配置键 `SHARE_TTL_DAYS:7`，同步 `.env.example`/`配置清单.md`）；返回 `{token, url:"/share.html?token=…", expires_at}`；任务非 DONE → 400；404 口径同删除端点。
+> 3. `DELETE /api/v1/tasks/{id}/share` → 撤销该任务所有未撤销链接（200 `{"revoked":N}`）。
+> 4. `GET /api/v1/share/{token}`：**匿名可访问**（`ApiTokenFilter.shouldNotFilter` 只放行 `/api/v1/share/` 这一条前缀，其它不变，K-46）；查 SHA256、未撤销、未过期 → 返回只读详情子集（task_id/original_name/duration_sec/created_at/summary/keywords/keypoints/todos/transcript/transcript_punctuated/ai_tier/template），**不返回任何其它任务/列表/写入能力**；无效/过期/撤销 → 404 `SHARE_NOT_FOUND`（不区分原因，防探测）。
+> 5. 前端：详情页「分享」按钮（生成+复制链接+显示有效期与撤销）；新 `share.html` 只读页（无编辑/无删除/无 token 弹窗），390 可读。
+> 6. 测试：Token 只存 hash（DB 有行但明文不可查）、过期/撤销/伪造 404、匿名可读、带 token 也只能读这一条（**列表/其它任务 id 访问仍 401**）、分享页无写入口。
+>
+> **判据**：`-UnitOnly` 全绿 + 先 build/up 再全量（K-68，15 键详情不动）；可维护性 0/0；真机无痕窗口打开分享链接（不弹 token）看到内容、撤销后 404；单 commit。
+>
+> **禁止**：明文存 token；把认证豁免放大到 `/api/v1/**`；匿名能列任务/写库；多 commit。
+
+## T4.29 标签 / 收藏（约 4–5h；迁移 V6；用户清单 1.6）
+
+> **要证明的事**：任务无法分类、无法标星，列表只能按状态筛。
+>
+> **改动**：
+> 1. 迁移 `V6__task_labels_favorite.sql`：`ALTER TABLE task ADD COLUMN labels jsonb NOT NULL DEFAULT '[]'::jsonb, ADD COLUMN favorite boolean NOT NULL DEFAULT false;`（**迁移前先 `scripts\backup.ps1` 备份**，T2.8 恢复脚本可用）。
+> 2. `PATCH /api/v1/tasks/{id}/meta`（body 可只带一个键）：`labels`（≤10 个、每个 trim 后 1–20 字、去重、非法 400 `INVALID_PARAM`）、`favorite`（bool）→ 返回 `{task_id, labels, favorite}`；404 口径同删除端点。
+> 3. `GET /api/v1/tasks` **只增**字段 `labels`/`favorite`（D-041）；新增筛选参数 `label=<单标签>`、`favorite=true|false`（与 status/q 可组合，参数化）。
+> 4. 前端：详情页标签编辑（加/删 chip）+ 星标切换；列表行显示标签 chips + 星标，筛选条加「收藏」与标签下拉；390 不溢出。
+> 5. 测试：迁移后旧数据 `[]`/false；PATCH 校验矩阵；列表筛选与组合；E2E 列表键集只增断言更新。
+>
+> **判据**：`-UnitOnly` 全绿 + 先 build/up 再全量（K-68）；可维护性 0/0；真机打标签/标星后刷新仍存在、按标签筛出正确行、配额 0 变化；单 commit。
+>
+> **禁止**：用逗号拼字符串存标签（用 jsonb）；改详情 14 键；多 commit。
 
 ## 每张卡做完都要给你的回报
 
