@@ -269,8 +269,11 @@ function mnGroundSummaryWindow(summary, transcript) {
   return out;
 }
 
-/* 单个窗口 [s, s+w) 与摘要句的二元组覆盖率；rate<0.5 返回 null（不计入候选） */
+/* 单个窗口 [s, s+w) 与摘要句的二元组覆盖率；rate<0.5 返回 null（不计入候选）。
+   K-78：空归一化内容不得参与相似度判定——norm 为空时 indexOf("")===0 会把「。。」/「……」
+   这类无实词句判成完全匹配（假依据），守卫直接返回 null → 该摘要句如实写"未找到直接依据" */
 function groundWindowBest(norm, bigrams, srcSents, s, w) {
+  if (!norm) return null;
   var windowNorm = mnNormalize(srcSents.slice(s, s + w).join(''));
   var rate;
   if (!bigrams.length) {
