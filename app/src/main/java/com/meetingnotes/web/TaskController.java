@@ -141,15 +141,14 @@ public class TaskController {
         return "forward:/index.html";
     }
 
-    /**
-     * 服务端任务列表（T2.10 / D-053）：keyset 分页（before_id 游标，禁 OFFSET），
-     * user_id 服务端过滤（D-040）。limit 默认 20、上限 50；非数字/越界 → 400（码沿用既有校验类）。
-     */
+    /** 服务端任务列表（T2.10 / D-053）：keyset 分页（before_id 游标禁 OFFSET）、user_id 服务端过滤（D-040）；
+     *  limit 1..50、status 白名单、T4.24 只增可选 q（去空格/超长 400，见 TaskQueryService.normalizeQ）；非法 → 400。 */
     @GetMapping("/tasks")
     public TaskQueryService.TaskListResponse list(
             @org.springframework.web.bind.annotation.RequestParam(required = false) String status,
             @org.springframework.web.bind.annotation.RequestParam(required = false) String limit,
-            @org.springframework.web.bind.annotation.RequestParam(name = "before_id", required = false) String beforeId) {
+            @org.springframework.web.bind.annotation.RequestParam(name = "before_id", required = false) String beforeId,
+            @org.springframework.web.bind.annotation.RequestParam(required = false) String q) {
         int lim = TaskQueryService.DEFAULT_LIMIT;
         if (limit != null) {
             try {
@@ -178,7 +177,8 @@ public class TaskController {
                         "status 只允许 PENDING/RUNNING/RETRYING/DONE/DEAD");
             }
         }
-        return taskQueryService.list(DEFAULT_USER_ID, statusFilter, lim, before);
+        return taskQueryService.list(DEFAULT_USER_ID, statusFilter, lim, before,
+                TaskQueryService.normalizeQ(q));
     }
 
     /** 查任务状态（前端轮询/接入方）。未到 DONE 时 transcript 恒 null；error_code 仅 RETRYING/DEAD 有值（S-3）；查询带 user_id（D-040），不存在时 404 TASK_NOT_FOUND。 */

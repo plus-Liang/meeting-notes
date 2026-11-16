@@ -458,4 +458,43 @@ class E2ETest {
         assertTrue(docs.get("paths").has("/api/v1/tasks/batch"),
                 "/api/v1/tasks/batch 必须出现在 /v3/api-docs");
     }
+
+    /** T4.24 场景 H：列表 q 服务端搜索（纯数字兼 id / 转义 / 超长 400）+ counts 键集。零新建任务（复用 A）。 */
+    @Test
+    @Order(9)
+    void h_listSearchQAndCountsContract() throws Exception {
+        // 纯数字 q 精确命中 A 场景任务（不依赖 source_uri 内容）
+        HttpResponse<String> byId = send("GET", "/api/v1/tasks?q=" + taskId, null, null);
+        assertEquals(200, byId.statusCode());
+        JsonNode idList = M.readTree(byId.body());
+        assertEquals(1, idList.get("items").size(), "q=任务id 必须精确命中一条：" + abbreviate(byId.body()));
+        assertEquals(taskId, idList.get("items").get(0).get("id").asLong());
+
+        // 随机 UUID → 0 条（模糊匹配走 ILIKE，不炸）
+        HttpResponse<String> none = send("GET", "/api/v1/tasks?q=" + UUID.randomUUID(), null, null);
+        assertEquals(200, none.statusCode());
+        assertEquals(0, M.readTree(none.body()).get("items").size(), "不存在的关键词必须 0 条");
+
+        // % _ \ 字面化：不抛 500、返回合法 JSON（行数 ≥ 0）
+        HttpResponse<String> wildcard = send("GET", "/api/v1/tasks?q=%25_%5C", null, null);
+        assertEquals(200, wildcard.statusCode(), "通配符按字面匹配不炸：" + abbreviate(wildcard.body()));
+        assertTrue(M.readTree(wildcard.body()).get("items").isArray());
+
+        // q 超过 100 字符 → 400 INVALID_PARAM
+        HttpResponse<String> over = send("GET", "/api/v1/tasks?q=" + "x".repeat(101), null, null);
+        assertEquals(400, over.statusCode());
+        assertEquals("INVALID_PARAM", M.readTree(over.body()).get("code").asText());
+
+        // counts：键集固定四键、total ≥ 1（A 场景至少建了 1 条）
+        HttpResponse<String> counts = send("GET", "/api/v1/tasks/counts", null, null);
+        assertEquals(200, counts.statusCode(), "counts 端点：" + abbreviate(counts.body()));
+        JsonNode c = M.readTree(counts.body());
+        List<String> keys = new ArrayList<>();
+        c.fieldNames().forEachRemaining(keys::add);
+        assertEquals(List.of("total", "active", "done", "dead"), keys,
+                "counts 键集固定 {total, active, done, dead}（只增端点），实际：" + keys);
+        assertTrue(c.get("total").asLong() >= 1, "total 至少含 A 场景任务");
+        assertTrue(c.get("active").asLong() + c.get("done").asLong() + c.get("dead").asLong()
+                <= c.get("total").asLong(), "分类合计不得超过 total");
+    }
 }
