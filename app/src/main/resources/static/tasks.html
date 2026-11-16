@@ -29,6 +29,8 @@
       <span class="batch-actions">
         <button id="batchRetryBtn" class="btn-secondary">批量重试</button>
         <button id="exportBtn" class="btn-secondary">导出选中 Markdown</button>
+        <button id="deleteBtn" class="btn-danger">删除所选</button>
+        <button id="deleteFailedBtn" class="btn-danger">清空失败任务</button>
       </span>
       <span id="retryResult" class="hint"></span>
     </div>
@@ -59,6 +61,8 @@
   var retryResult = document.getElementById('retryResult');
   var moreBtn = document.getElementById('moreBtn');
   var exportBtn = document.getElementById('exportBtn'); /* T4.15⑥ */
+  var deleteBtn = document.getElementById('deleteBtn'); /* T4.21 */
+  var deleteFailedBtn = document.getElementById('deleteFailedBtn'); /* T4.21 */
   var searchInput = document.getElementById('searchInput'); /* T4.15④ */
   var timer = null;
   var lastRenderKey = null;
@@ -84,6 +88,31 @@
   function badgeHtml(status) {
     var cls = status === 'DONE' ? 'done' : (status === 'DEAD' ? 'dead' : 'busy');
     return '<span class="badge ' + cls + '">' + statusText(status) + '</span>';
+  }
+
+  /* T4.21（D-114）：辨识三件套——模板徽章 + 关键词 chips（≤3，超出 +N）+ 摘要首句灰字；均 null 安全 */
+  var TEMPLATE_SHORT = { meeting: '会议', course: '课程', interview: '访谈', podcast: '播客', shortvideo: '短视频' };
+
+  function identityHtml(item) {
+    var html = '';
+    if (item.template && TEMPLATE_SHORT[item.template]) {
+      html += '<span class="badge tpl">' + TEMPLATE_SHORT[item.template] + '</span>';
+    }
+    if (item.keywords && item.keywords.length) {
+      html += ' ' + item.keywords.slice(0, 3).map(function (k) {
+        return '<span class="chip plain kchip">' + escapeHtml(k) + '</span>';
+      }).join(' ');
+      if (item.keywords.length > 3) {
+        html += ' <span class="chip plain kchip">+' + (item.keywords.length - 3) + '</span>';
+      }
+    }
+    return html;
+  }
+
+  function summaryHtml(item) {
+    return item.summary_head
+      ? '<span class="task-summary">' + escapeHtml(item.summary_head) + '…</span>'
+      : '';
   }
 
   function renderFilterBar() {
@@ -170,8 +199,9 @@
       ' · ' + fmtDate(item.created_at) + '</span>';
     return '<div class="task-row" data-id="' + item.id + '">' +
       '<span class="task-name">' +
-      '<span class="task-title">' + checkbox + '#' + item.id + ' ' + escapeHtml(name) + '</span>' + meta + '</span>' +
-      '<span class="task-side">' + badgeHtml(item.status) + ' ' +
+      '<span class="task-title">' + checkbox + '#' + item.id + ' ' + escapeHtml(name) + '</span>' + meta +
+      summaryHtml(item) + '</span>' +
+      '<span class="task-side">' + identityHtml(item) + ' ' + badgeHtml(item.status) + ' ' +
       '<a href="task.html?id=' + item.id + '" target="_blank" rel="noopener">详情</a></span></div>';
   }
 
@@ -213,12 +243,15 @@
     var key = renderKey() + '|' + state.search;
     if (!force && key === lastRenderKey) { scheduleRefresh(); return; }
     lastRenderKey = key;
-    /* 操作条：DEAD 筛选（重试场景）或有勾选（导出场景）时出现 */
-    retryBar.style.display = state.items.length && (state.filter === 'DEAD' || count > 0) ? 'block' : 'none';
+    /* 操作条：DEAD 筛选（重试场景）或存在失败任务（清空场景）或有勾选（导出/删除场景）时出现 */
+    retryBar.style.display = state.items.length &&
+      (state.filter === 'DEAD' || count > 0 || countState.dead > 0) ? 'block' : 'none';
     retryBtn.style.display = state.filter === 'DEAD' ? '' : 'none'; /* 重试只对 DEAD 开放（语义不变） */
+    deleteFailedBtn.style.display = countState.dead > 0 ? '' : 'none'; /* T4.21：无失败任务时隐藏 */
     checkAllEl.checked = count > 0 && count === state.items.length;
     retryBtn.disabled = count === 0;
     exportBtn.disabled = count === 0;
+    deleteBtn.disabled = count === 0;
     document.getElementById('searchNote').textContent =
       '在已加载的 ' + state.items.length + ' 条中筛选。';
     var shown = state.items.filter(matchSearch);
@@ -328,6 +361,66 @@
   });
   retryBtn.addEventListener('click', doBatchRetry);
   moreBtn.addEventListener('click', loadMore);
+
+  /* ===== T4.21（D-115）：删除所选（≤100/批分批调 POST /tasks/delete）+ 清空失败任务 =====
+     二次确认文案固定含"不可恢复/配额不退还"；成功后就地刷新（保留当前筛选/搜索） */
+  var DELETE_CONFIRM_NOTE = '删除后不可恢复，已用配额不退还。';
+
+  function deleteSelected() {
+    var ids = Object.keys(state.checked).map(Number).sort(function (a, b) { return a - b; });
+    if (!ids.length) return;
+    if (!window.confirm('删除所选 ' + ids.length + ' 个任务？' + DELETE_CONFIRM_NOTE)) return;
+    deleteBtn.disabled = true;
+    var all = [], done = 0, batches = [];
+    for (var i = 0; i < ids.length; i += 100) {
+      batches.push(ids.slice(i, i + 100));
+    }
+    retryResult.textContent = '删除中… 0/' + ids.length;
+    function next() {
+      if (done >= batches.length) {
+        var ok = all.filter(function (r) { return r.deleted; }).length;
+        var skipped = all.filter(function (r) { return !r.deleted; }).map(function (r) {
+          return '#' + r.id + ' ' + (r.reason === 'TASK_BUSY' ? '进行中' : '不存在');
+        }).join('、');
+        retryResult.textContent = '已删除 ' + ok + ' 个' +
+          (skipped ? '；跳过：' + skipped : '') + '。';
+        state.checked = {}; state.checkedCount = 0;
+        lastRenderKey = null;
+        loadFirst(false); /* 就地刷新：保留当前筛选/搜索 */
+        return;
+      }
+      postJson('api/v1/tasks/delete', { ids: batches[done] }).then(function (data) {
+        done++;
+        if (data.__httpStatus === 200 && data.results) {
+          all = all.concat(data.results);
+          retryResult.textContent = '删除中… ' + done + '/' + batches.length + ' 批';
+        } else {
+          retryResult.textContent = '删除失败（' + (data.message || ('HTTP ' + data.__httpStatus)) + '）';
+        }
+        next();
+      });
+    }
+    next();
+  }
+
+  function deleteFailedAll() {
+    if (!window.confirm('清空全部失败（DEAD）任务？' + DELETE_CONFIRM_NOTE)) return;
+    deleteFailedBtn.disabled = true;
+    postJson('api/v1/tasks/delete-failed', {}).then(function (data) {
+      deleteFailedBtn.disabled = false;
+      if (data.__httpStatus === 200) {
+        retryResult.textContent = '已清空失败任务 ' + (data.deleted || 0) + ' 个。';
+        state.checked = {}; state.checkedCount = 0;
+        lastRenderKey = null;
+        loadFirst(false);
+      } else {
+        retryResult.textContent = '清空失败（' + (data.message || ('HTTP ' + data.__httpStatus)) + '）';
+      }
+    });
+  }
+  deleteBtn.addEventListener('click', deleteSelected);
+  deleteFailedBtn.addEventListener('click', deleteFailedAll);
+
   searchInput.addEventListener('input', function () {
     state.search = searchInput.value.trim();
     render(true); /* 搜索即时过滤已加载条目 */

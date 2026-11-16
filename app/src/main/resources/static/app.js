@@ -17,6 +17,7 @@ var ERROR_TEXT = {
   ASR_ERROR: '语音识别服务异常或暂时不可用',
   STORAGE_ERROR: '文件存取异常',
   FFMPEG_ERROR: '音频处理异常',
+  TASK_BUSY: '任务正在排队或转写中，暂不能删除',
   UNKNOWN_ERROR: '处理出现未知异常'
 };
 

@@ -176,6 +176,15 @@ class E2ETest {
                 "ai_tier 三选一：" + detail.get("ai_tier"));
         assertEquals("meeting", detail.get("template").asText(), "未指定模板默认 meeting");
         assertTrue(detail.get("error_code").isNull());
+        // T4.21：列表元素键集只增（原 6 键 + keywords/summary_head/template，D-114；详情 14 键不受影响）
+        HttpResponse<String> listResp = send("GET", "/api/v1/tasks?limit=1", null, null);
+        assertEquals(200, listResp.statusCode());
+        JsonNode firstItem = M.readTree(listResp.body()).get("items").get(0);
+        List<String> itemKeys = new ArrayList<>();
+        firstItem.fieldNames().forEachRemaining(itemKeys::add);
+        assertTrue(itemKeys.containsAll(List.of("id", "status", "original_name", "duration_sec",
+                        "created_at", "error_code", "keywords", "summary_head", "template")),
+                "列表元素键集 = 原 6 键 + T4.21 三键（只增不改），实际：" + itemKeys);
     }
 
     @Test

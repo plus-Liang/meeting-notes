@@ -305,6 +305,19 @@ a.btn-secondary:active { transform: scale(.98); }
 .file-remove:hover { color: var(--danger); background: var(--danger-tint); }
 .file-remove:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
 
+/* T4.21：删除操作危险样式（沿用 danger 变量，对比度与既有口径一致） */
+.btn-danger { background: var(--surface); color: var(--danger); border-color: var(--danger); }
+.btn-danger:hover { background: var(--danger-tint); color: var(--danger); }
+.btn-danger:disabled { background: var(--surface-muted); color: var(--ink-3); border-color: var(--border); cursor: not-allowed; transform: none; }
+
+/* T4.21：列表辨识三件套（模板徽章 / 关键词 chips / 摘要首句灰字，手机 390 单行省略） */
+.badge.tpl { background: var(--surface-muted); color: var(--ink-2); border: 1px solid var(--border); }
+.chip.kchip { max-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; vertical-align: middle; }
+.task-side .kchip { flex: none; }
+.task-summary { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); font-size: var(--fs-xs); line-height: var(--lh-xs); }
+/* T4.21：390 宽下 task-side（chips/徽章/详情）换行收窄，防横向溢出 */
+.task-side { flex-wrap: wrap; max-width: 58%; row-gap: var(--sp-1); justify-content: flex-end; }
+
 /* 筛选条 / 批量重试条 */
 .filter-bar { margin: var(--sp-3) 0; display: flex; gap: var(--sp-3); flex-wrap: wrap; }
 .filter-btn { margin-right: 0; background: var(--surface); color: var(--ink-2); border-color: var(--border-strong); border-radius: 999px; font-weight: var(--fw-medium); }

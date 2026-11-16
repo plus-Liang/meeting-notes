@@ -175,6 +175,38 @@
       '<p class="hint" id="exportMsg" style="margin-top:8px">至少勾选一项；默认不含待办（观察期）。导出内容为 Markdown 纪要文件。</p></div>';
   }
 
+  /* T4.21（D-115）：详情页删除入口（二次确认文案含"不可恢复/配额不退还"；成功跳回列表） */
+  function deleteHtml(data) {
+    return '<div class="section"><h2>删除</h2>' +
+      '<button type="button" class="btn-danger" id="deleteTaskBtn">删除此任务</button>' +
+      '<p class="hint" id="deleteMsg" style="margin-top:8px">删除后不可恢复，已用配额不退还。进行中（排队/转写/重试）的任务不能删除。</p></div>';
+  }
+
+  function bindDelete(data) {
+    var btn = document.getElementById('deleteTaskBtn');
+    var msgEl = document.getElementById('deleteMsg');
+    btn.addEventListener('click', function () {
+      if (!window.confirm('删除任务 #' + data.task_id + '？删除后不可恢复，已用配额不退还。')) return;
+      btn.disabled = true;
+      sendJson('api/v1/tasks/' + data.task_id, 'DELETE').then(function (resp) {
+        if (resp.status === 200) {
+          window.location.href = 'tasks.html'; /* 删除成功跳回列表 */
+          return;
+        }
+        return resp.json().then(function (err) {
+          btn.disabled = false;
+          msgEl.textContent = '删除失败（' + (err.code || resp.status) + '）：' + (err.message || '未知错误');
+        }, function () {
+          btn.disabled = false;
+          msgEl.textContent = '删除失败（HTTP ' + resp.status + '）';
+        });
+      }, function () {
+        btn.disabled = false;
+        msgEl.textContent = '删除失败：服务暂时不可用，请稍后重试。';
+      });
+    });
+  }
+
   function selectedInclude() {
     return EXPORT_SECTIONS.filter(function (s) { return exportSel[s.key]; })
       .map(function (s) { return s.key; }).join(',');
@@ -275,13 +307,15 @@
       body = '<div class="section"><p class="error-text">转写失败。原因：' + escapeHtml(errorTextOf(data.error_code)) + '</p>' +
         '<p class="hint">请检查 ASR 服务是否正常后，可在<a href="tasks.html">任务列表</a>按"失败"筛选并批量重试。</p></div>';
     } else if (status === 'DONE') {
-      body = summaryHtml(data) + keypointsHtml(data) + todosHtml(data) + transcriptHtml(data) + exportHtml(data);
+      body = summaryHtml(data) + keypointsHtml(data) + todosHtml(data) + transcriptHtml(data) +
+        exportHtml(data) + deleteHtml(data);
     } else {
       body = '<p class="hint">未知状态：' + escapeHtml(status) + '</p>';
     }
     card.innerHTML = head + body;
     if (status === 'DONE') {
       bindExport(data);
+      bindDelete(data);
       initTodos(data);
       bindKeywordChips(data);
       bindCopyTranscript(data);

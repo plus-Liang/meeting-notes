@@ -39,6 +39,12 @@ class TaskQueryServiceTest {
 
     /** 让 jdbc.query 的 RowCallbackHandler 收到 rowCount 行模拟数据（id 从 startId 递减）。一次性顺序打桩。 */
     private void stubRows(int rowCount, long startId) throws Exception {
+        stubRowsWithKeywords(rowCount, startId, null, null, null);
+    }
+
+    /** T4.21：带辨识三字段的行打桩（keywords/summary/template 逐行循环）。 */
+    private void stubRowsWithKeywords(int rowCount, long startId,
+                                      String[] keywordsRaw, String[] summaries, String[] templates) throws Exception {
         Long[] ids = new Long[rowCount];
         String[] uris = new String[rowCount];
         for (int i = 0; i < rowCount; i++) {
@@ -54,6 +60,12 @@ class TaskQueryServiceTest {
         when(rs.getObject(org.mockito.ArgumentMatchers.eq("created_at"),
                 org.mockito.ArgumentMatchers.<Class<OffsetDateTime>>any())).thenReturn(OffsetDateTime.now());
         when(rs.getString("error_code")).thenReturn(null);
+        when(rs.getString("keywords")).thenReturn(keywordsRaw == null ? null : keywordsRaw[0],
+                keywordsRaw == null ? new String[0] : java.util.Arrays.copyOfRange(keywordsRaw, 1, keywordsRaw.length));
+        when(rs.getString("summary")).thenReturn(summaries == null ? null : summaries[0],
+                summaries == null ? new String[0] : java.util.Arrays.copyOfRange(summaries, 1, summaries.length));
+        when(rs.getString("template")).thenReturn(templates == null ? null : templates[0],
+                templates == null ? new String[0] : java.util.Arrays.copyOfRange(templates, 1, templates.length));
         doAnswer(inv -> {
             RowCallbackHandler handler = inv.getArgument(1);
             for (int i = 0; i < rowCount; i++) {
@@ -62,6 +74,27 @@ class TaskQueryServiceTest {
             return null;
         }).when(jdbc).query(contains("FROM task"), ArgumentMatchers.<RowCallbackHandler>any(),
                 ArgumentMatchers.any(Object[].class));
+    }
+
+    /** T4.21：列表辨识三字段——keywords 解析 / 坏 JSON → [] / summary_head 40 字截断 / template 透传。 */
+    @Test
+    void listItemsCarryKeywordsSummaryHeadAndTemplate() throws Exception {
+        stubRowsWithKeywords(2, 9L,
+                new String[]{"[\"AI\",\"简历\",\"招聘\",\"扩容\"]", "{\"bad json"},
+                new String[]{"会议讨论了AI对就业市场的影响，覆盖基础开发岗位缩减与初级程序员入口收窄两大议题，并给出行动建议。", null},
+                new String[]{"meeting", null});
+
+        TaskQueryService.TaskListResponse resp = newService().list(1L, null, 5, null);
+
+        var first = resp.items().get(0);
+        assertEquals(List.of("AI", "简历", "招聘", "扩容"), first.keywords(), "合法 JSON → 数组原样");
+        assertEquals("会议讨论了AI对就业市场的影响，覆盖基础开发岗位缩减与初级程序员入口收窄两大议题",
+                first.summaryHead(), "summary 前 40 字截断");
+        assertEquals("meeting", first.template());
+        var second = resp.items().get(1);
+        assertEquals(List.of(), second.keywords(), "坏 JSON → []（不炸接口）");
+        assertNull(second.summaryHead(), "无 summary → null");
+        assertNull(second.template(), "旧任务 template → null");
     }
 
     @Test
@@ -97,9 +130,10 @@ class TaskQueryServiceTest {
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
         verify(jdbc).query(sql.capture(), ArgumentMatchers.<RowCallbackHandler>any(), args.capture());
-        assertTrue(sql.getValue().contains("AND status = ?"), "状态过滤必须进 SQL");
-        assertTrue(sql.getValue().contains("AND id < ?"), "keyset 游标必须进 SQL");
-        assertTrue(sql.getValue().contains("ORDER BY id DESC LIMIT ?"), "必须 keyset 倒序 + LIMIT");
+        assertTrue(sql.getValue().contains("AND t.status = ?"), "状态过滤必须进 SQL");
+        assertTrue(sql.getValue().contains("AND t.id < ?"), "keyset 游标必须进 SQL");
+        assertTrue(sql.getValue().contains("ORDER BY t.id DESC LIMIT ?"), "必须 keyset 倒序 + LIMIT");
+        assertTrue(sql.getValue().contains("LEFT JOIN task_result"), "T4.21：必须 JOIN task_result 取辨识字段");
         assertTrue(!sql.getValue().contains("OFFSET"), "禁止 OFFSET 分页");
         assertEquals(List.of(1L, "DEAD", 42L, 21), List.of(args.getValue()), "参数顺序：user_id/status/before_id/limit+1");
     }
