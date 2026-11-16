@@ -232,3 +232,56 @@ function mnGroundKeyword(keyword, transcript) {
   }
   return null;
 }
+
+/* 摘要依据定位（T4.23/D-121，与上面同口径，浏览器内重算、只读不改存储）：
+   摘要常被改写/压缩，单句命中率不足 → 按连续 2–3 句窗口算二元组覆盖率，≥0.5 视为命中；
+   窗口全不中再退回单句（覆盖单句逐字稿/精确复述场景），同样 ≥0.5 才算。
+   返回数组（每摘要句一项）：{ sumIndex, hit, sentIdx(命中窗口首句), fragment(原文窗口片段) } */
+function mnGroundSummaryWindow(summary, transcript) {
+  var sumSents = mnSplitSentences(summary);
+  var srcSents = mnSplitSentences(transcript);
+  var out = [];
+  for (var i = 0; i < sumSents.length; i++) {
+    var norm = mnNormalize(sumSents[i]);
+    var bigrams = mnBigrams(norm);
+    var best = null;
+    for (var s = 0; s < srcSents.length; s++) {
+      for (var w = 2; w <= 3; w++) {
+        if (s + w > srcSents.length) continue;
+        var cand = groundWindowBest(norm, bigrams, srcSents, s, w);
+        if (cand && (!best || cand.rate > best.rate)) best = cand;
+      }
+    }
+    if (!best) {
+      /* 窗口 2–3 句全不中 → 退回单句（覆盖单句逐字稿/精确复述场景），同样 ≥0.5 才算命中 */
+      for (var s1 = 0; s1 < srcSents.length; s1++) {
+        var cand1 = groundWindowBest(norm, bigrams, srcSents, s1, 1);
+        if (cand1 && (!best || cand1.rate > best.rate)) best = cand1;
+      }
+    }
+    out.push({
+      sumIndex: i,
+      hit: !!(best && best.rate >= 0.5),
+      sentIdx: best ? best.sentIdx : -1,
+      fragment: best ? best.fragment : null
+    });
+  }
+  return out;
+}
+
+/* 单个窗口 [s, s+w) 与摘要句的二元组覆盖率；rate<0.5 返回 null（不计入候选） */
+function groundWindowBest(norm, bigrams, srcSents, s, w) {
+  var windowNorm = mnNormalize(srcSents.slice(s, s + w).join(''));
+  var rate;
+  if (!bigrams.length) {
+    rate = windowNorm.indexOf(norm) >= 0 ? 1 : 0;
+  } else {
+    var hits = 0;
+    for (var j = 0; j < bigrams.length; j++) {
+      if (windowNorm.indexOf(bigrams[j]) >= 0) hits++;
+    }
+    rate = hits / bigrams.length;
+  }
+  if (rate < 0.5) return null;
+  return { sentIdx: s, rate: rate, fragment: srcSents.slice(s, s + w).join('') };
+}

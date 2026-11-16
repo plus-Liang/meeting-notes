@@ -532,6 +532,13 @@ details.example[open] summary { margin-bottom: var(--sp-3); }
 .ground-link:hover { color: var(--ink); }
 .ground-miss { color: var(--ink-3); }
 
+/* T4.23：摘要依据块（观感复用 .ground-link/.ground-miss/.todo-ground 口径，逐句行可点定位） */
+.summary-ground { margin-top: var(--sp-3); padding: var(--sp-3); background: var(--surface-muted); border-radius: var(--r-sm); color: var(--ink-3); font-size: var(--fs-xs); line-height: var(--lh-xs); }
+.summary-ground-title { color: var(--ink-2); font-weight: var(--fw-medium); margin-bottom: var(--sp-1); }
+.summary-ground ul { margin: 0; padding: 0; list-style: none; overflow-wrap: anywhere; }
+.summary-ground li { padding: var(--sp-1) 0; }
+.summary-ground .ground-link { color: var(--ink-2); }
+
 /* 逐字稿句子高亮（定位跳转用，黄 tint 短暂闪烁） */
 .sent-target { border-radius: var(--r-xs); }
 .sent-highlight { background: var(--accent-tint); transition: background-color 300ms var(--ease); }

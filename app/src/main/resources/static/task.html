@@ -86,6 +86,27 @@
   var NO_SPEECH_SUMMARY = '这段音频未识别到语音（可能是纯音乐、静音或无人声），所以没有摘要、关键词和待办。';
   var NO_SPEECH_TODOS = '这段音频未识别到语音，没有待办。';
 
+  /* T4.23（D-121）：摘要依据——逐摘要句在原文里按连续 2–3 句窗口找依据（口径复用 mnGroundSummaryWindow）；
+     文案固定「在原文中匹配到的句子」，未命中写「未找到直接依据」，绝不声称是模型给出的依据 */
+  function summaryGroundHtml(data) {
+    if (!data.summary || transcript === '') return '';
+    var grounds = mnGroundSummaryWindow(data.summary, transcript);
+    if (!grounds.length) return '';
+    var hitCount = 0;
+    var rows = grounds.map(function (g) {
+      var n = g.sumIndex + 1;
+      if (!g.hit) {
+        return '<li>第 ' + n + ' 句 · <span class="ground-miss">未找到直接依据</span></li>';
+      }
+      hitCount++;
+      var frag = g.fragment.length > 60 ? g.fragment.slice(0, 60) + '…' : g.fragment;
+      return '<li>第 ' + n + ' 句 ↔ 原文：<button type="button" class="ground-link" data-sent="' +
+        g.sentIdx + '" title="定位到原文">「' + escapeHtml(frag) + '」</button></li>';
+    }).join('');
+    return '<div class="summary-ground"><div class="summary-ground-title">摘要依据 · 找到 ' + hitCount + '/' +
+      grounds.length + ' 句（在原文中匹配到的句子，浏览器内重算）</div><ul>' + rows + '</ul></div>';
+  }
+
   /* T4.15⑧：关键词 chip 可定位（命中有依据句才可点，点它跳到逐字稿高亮；未命中保持不可点） */
   function summaryHtml(data) {
     if (!data.summary && !data.keywords) {
@@ -94,7 +115,7 @@
     }
     var html = '<div class="section"><h2>摘要与关键词</h2>';
     html += data.summary
-      ? '<p style="margin:0 0 8px">' + escapeHtml(data.summary) + '</p>'
+      ? '<p style="margin:0 0 8px">' + escapeHtml(data.summary) + '</p>' + summaryGroundHtml(data)
       : '<p class="hint" style="margin:0 0 8px">无摘要。</p>';
     if (data.keywords && data.keywords.length) {
       html += '<div>' + data.keywords.map(function (k) {
@@ -318,6 +339,7 @@
       bindDelete(data);
       initTodos(data);
       bindKeywordChips(data);
+      bindSummaryGround(data);
       bindCopyTranscript(data);
     }
     return status === 'DONE' || status === 'DEAD';
@@ -423,6 +445,15 @@
       chip.addEventListener('click', function () {
         var hit = mnGroundKeyword(chip.getAttribute('data-keyword'), transcript);
         if (hit) jumpToSentence(hit.index);
+      });
+    });
+  }
+
+  /* T4.23：摘要依据行点击 → 滚到逐字稿对应句并高亮（复用 jumpToSentence / data-sent 机制） */
+  function bindSummaryGround() {
+    card.querySelectorAll('.summary-ground .ground-link').forEach(function (a) {
+      a.addEventListener('click', function () {
+        jumpToSentence(Number(a.getAttribute('data-sent')));
       });
     });
   }
