@@ -27,11 +27,11 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <path d="M12 16V4"/><path d="M7 9l5-5 5 5"/><path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/>
       </svg>
-      <p class="drop-title">点击选择，或把文件拖到这里</p>
-      <p class="drop-hint">支持批量，逐文件独立转写</p>
+      <p class="drop-title" id="dropTitle">点击选择，或把文件拖到这里</p>
+      <p class="drop-hint" id="dropHint">支持批量，逐文件独立转写</p>
       <input type="file" id="file" multiple style="display:none">
+      <ul id="fileList" class="file-list" hidden></ul>
     </div>
-    <ul id="fileList" class="file-list" hidden></ul>
     <p><button id="submit">上传并开始转写</button></p>
     <p id="msg" class="hint" hidden></p>
     <div id="result" hidden>
@@ -109,12 +109,18 @@
   var btn = document.getElementById('submit');
   var fileInput = document.getElementById('file');
   var dropZone = document.getElementById('dropZone');
+  var dropTitle = document.getElementById('dropTitle');
+  var dropHint = document.getElementById('dropHint');
   var fileList = document.getElementById('fileList');
+  var DROP_TITLE = dropTitle.textContent;
+  var DROP_HINT = dropHint.textContent;
   var msg = document.getElementById('msg');
   var result = document.getElementById('result');
   var batchResult = document.getElementById('batch-result');
-  /* 拖入的文件镜像：dataTransfer.files 赋给 input.files 失败时兜底（提交逻辑仍与原先一致） */
-  var mirror = null;
+  /* T4.20：累积选择——元素 {file, key}，key = name|size|lastModified。
+     分批次选择/拖拽一律**追加**（按 key 去重，重复静默跳过），不再覆盖前一次选择；
+     提交以 selected 为准（不依赖 input.files 赋值，老浏览器兼容） */
+  var selected = [];
 
   function show(kind, text) {
     msg.hidden = !text;
@@ -122,44 +128,98 @@
     msg.textContent = text;
   }
 
+  function fileKey(f) {
+    return f.name + '|' + f.size + '|' + (f.lastModified || 0);
+  }
+
+  /* T4.20：追加文件（选择器 change 与拖拽 drop 共用）。
+     >200MB → 提示并跳过；累计超 20 → 丢弃并提示"一次最多 20 个，已忽略 N 个"；重复 → 静默跳过 */
+  function addFiles(list) {
+    var oversize = [];
+    var ignored = 0;
+    Array.prototype.slice.call(list || []).forEach(function (f) {
+      if (f.size > MAX_UPLOAD_BYTES) {
+        oversize.push(f.name);
+        return;
+      }
+      if (selected.length >= MAX_BATCH_FILES) {
+        ignored++;
+        return;
+      }
+      var key = fileKey(f);
+      for (var i = 0; i < selected.length; i++) {
+        if (selected[i].key === key) {
+          return; /* 重复静默跳过 */
+        }
+      }
+      selected.push({ file: f, key: key });
+    });
+    if (oversize.length) {
+      show('error', '文件 ' + oversize.join('、') + ' 超过 200 MB 上限，已跳过');
+    } else if (ignored) {
+      show('error', '一次最多 ' + MAX_BATCH_FILES + ' 个，已忽略 ' + ignored + ' 个');
+    } else {
+      show('info', '');
+    }
+    renderFileList();
+  }
+
   function pickedFiles() {
-    if (mirror && mirror.length) return mirror;
-    return (fileInput.files && fileInput.files.length) ? Array.prototype.slice.call(fileInput.files) : [];
+    return selected.map(function (item) { return item.file; });
   }
 
   function renderFileList() {
-    var files = pickedFiles();
     fileList.textContent = '';
-    if (!files.length) {
+    if (!selected.length) {
       fileList.hidden = true;
       dropZone.classList.remove('has-files');
+      dropTitle.textContent = DROP_TITLE;
+      dropHint.hidden = false;
       return;
     }
-    files.forEach(function (f) {
+    selected.forEach(function (item, index) {
       var li = document.createElement('li');
       var name = document.createElement('span');
-      name.textContent = f.name;
-      name.style.overflow = 'hidden';
-      name.style.textOverflow = 'ellipsis';
+      name.className = 'file-name';
+      name.textContent = item.file.name;
+      name.title = item.file.name;
       var size = document.createElement('span');
-      size.textContent = fmtBytes(f.size);
+      size.textContent = fmtBytes(item.file.size);
       size.className = 'num';
+      var remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'file-remove';
+      remove.textContent = '移除';
+      remove.setAttribute('aria-label', '移除 ' + item.file.name);
+      remove.addEventListener('click', function (e) {
+        e.stopPropagation(); /* T4.20：DOM 移除后事件仍沿旧路径冒泡，截断防穿透 dropZone 的 guard */
+        selected.splice(index, 1);
+        renderFileList();
+      });
       li.appendChild(name);
       li.appendChild(size);
+      li.appendChild(remove);
       fileList.appendChild(li);
     });
     fileList.hidden = false;
     dropZone.classList.add('has-files');
+    dropTitle.textContent = '已选 ' + selected.length + ' 个文件，点击或拖拽可继续添加';
+    dropHint.hidden = true;
   }
 
-  function takeFiles(list) {
-    mirror = Array.prototype.slice.call(list);
-    try { fileInput.files = list; } catch (e) { /* 老浏览器不支持赋值，走镜像 */ }
+  function clearSelection() {
+    selected = [];
     renderFileList();
   }
 
-  dropZone.addEventListener('click', function () { fileInput.click(); });
+  dropZone.addEventListener('click', function (e) {
+    /* T4.20：框内列表（移除按钮等）的点击不触发选择器；contains 兜住"按钮已从 DOM 移除后
+       事件沿旧路径冒泡"的 detached target（此时 closest('#fileList') 会返回 null） */
+    if (!dropZone.contains(e.target) || e.target.closest('#fileList')) return;
+    fileInput.click();
+  });
   dropZone.addEventListener('keydown', function (e) {
+    if (e.target.closest('#fileList')) return; /* T4.20：框内控件（移除按钮）自己的键盘行为优先，不打开选择器 */
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.click(); }
   });
   ['dragover', 'dragenter'].forEach(function (ev) {
@@ -172,10 +232,13 @@
     e.preventDefault();
     dropZone.classList.remove('dragover');
     if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) {
-      takeFiles(e.dataTransfer.files);
+      addFiles(e.dataTransfer.files); /* T4.20：拖拽同样追加，不替换 */
     }
   });
-  fileInput.addEventListener('change', function () { mirror = null; renderFileList(); });
+  fileInput.addEventListener('change', function () {
+    addFiles(this.files);
+    this.value = ''; /* 重置以便再次选择同一文件（选择已累积在 selected，不依赖 input.files） */
+  });
 
   /* ===== T4.15：最近 3 条任务（失败/空 → 整块静默隐藏，不弹错） ===== */
   getJson('api/v1/tasks?limit=3').then(function (data) {
@@ -188,7 +251,7 @@
         '<span class="task-name"><span class="task-title">' + escapeHtmlIndex(name) + '</span>' +
         '<span class="task-meta">' + fmtDuration(item.duration_sec) + ' · ' + fmtDate(item.created_at) + '</span></span>' +
         '<span class="task-side">' + badgeHtmlIndex(item.status) + ' ' +
-        '<a href="task.html?id=' + item.id + '">详情</a></span></div>';
+        '<a href="task.html?id=' + item.id + '" target="_blank" rel="noopener">详情</a></span></div>';
     }).join('');
     card.hidden = false;
   }, function () { /* 静默隐藏 */ });
@@ -276,6 +339,7 @@
             (data.reused ? ' · 命中已有任务，未重复处理' : '');
           document.getElementById('detail-link').href = 'task.html?id=' + data.task_id;
           result.hidden = false;
+          clearSelection(); /* T4.20：提交成功清空选择并恢复初始文案 */
           show('info', '');
         } else {
           show('error', '提交失败（' + (data.code || data.__httpStatus) + '）：' + (data.message || '未知错误'));
@@ -301,6 +365,7 @@
       btn.disabled = false;
       if (data.__httpStatus === 200) {
         renderBatch(data);
+        clearSelection(); /* T4.20：提交成功清空选择并恢复初始文案 */
         show('info', '');
       } else {
         show('error', '批量提交失败（' + (data.code || data.__httpStatus) + '）：' + (data.message || '未知错误'));
