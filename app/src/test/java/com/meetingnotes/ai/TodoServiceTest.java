@@ -39,6 +39,12 @@ class TodoServiceTest {
         assertTrue(prompt.contains("明确要求听众/参会者去做的行动项"), "必须只列听众的行动项");
         assertTrue(prompt.contains("演示动作"), "演示动作不得算待办（s2 实测误判：登录账号给观众看）");
         assertTrue(prompt.contains("宁少不滥"), "教程类 0-8 条，宁少不滥");
+        /* T4.19/D-110：三类区分——已议定才列入；讨论中未定与纯知识/观点/资讯不列入；owner 未点名一律 null */
+        assertTrue(prompt.contains("区分三类"), "三类区分口径必须进提示词");
+        assertTrue(prompt.contains("已议定的待办"), "已议定待办才列入");
+        assertTrue(prompt.contains("讨论中未定"), "讨论中未定（可以考虑/再看看）不列入");
+        assertTrue(prompt.contains("纯知识/观点/资讯"), "纯知识/观点/资讯不列入");
+        assertTrue(prompt.contains("未点名一律 null"), "owner 未点名一律 null（D-110 实测：观念条不得带人名）");
     }
 
     @Test

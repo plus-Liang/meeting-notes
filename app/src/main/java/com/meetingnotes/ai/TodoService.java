@@ -26,7 +26,8 @@ public class TodoService {
     public record TodoItem(String action, String owner, String deadline) {
     }
 
-    /** 合并提示词里 todos 一节的约束（package-private 供单测断言口径）。 */
+    /** 合并提示词里 todos 一节的约束（package-private 供单测断言口径）。
+     *  T4.19/D-110：追加三类区分——已议定待办才列入，讨论中未定与纯知识/观点不列入；owner 未点名一律 null。 */
     static String promptSection() {
         return """
                 3. todos 是最多 20 条最明确的待办（按重要性排序），没有就输出 {"todos":[]}；
@@ -35,7 +36,10 @@ public class TodoService {
                    deadline 保留原文说法（如"下周三"），不要换算成具体日期。
                    只列 transcript 里明确要求听众/参会者去做的行动项；讲者/主播自己的演示动作
                    （如"我登录一下账号给你看"）、举例、知识点罗列、流程讲解都不算待办；
-                   教程/课程类通常 0-8 条，宁少不滥；确实没有就输出 {"todos":[]}。""";
+                   教程/课程类通常 0-8 条，宁少不滥；确实没有就输出 {"todos":[]}。
+                   区分三类：已议定的待办（原文明确要某人/某团队去做）→ 列入；讨论中未定
+                   （如"可以考虑""再看看""后续再看"）与纯知识/观点/资讯 → 不列入；
+                   owner 只有原文明确点名负责人才填，未点名一律 null。""";
     }
 
     /**
