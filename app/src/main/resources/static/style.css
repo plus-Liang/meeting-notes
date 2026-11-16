@@ -305,6 +305,14 @@ a.btn-secondary:active { transform: scale(.98); }
 .file-remove:hover { color: var(--danger); background: var(--danger-tint); }
 .file-remove:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
 
+/* T4.22（D-119）：上传页模板选择器——只摆出后端已有能力，复用 token；390 宽 flex-wrap 换行不溢出 */
+.tpl-pick { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-3) var(--sp-4); margin: var(--sp-4) 0 var(--sp-2); }
+.tpl-pick label { font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink-2); }
+.tpl-pick select { font-family: inherit; font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--ink); background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--r-md); padding: var(--sp-3) var(--sp-4); min-height: 44px; cursor: pointer; }
+.tpl-pick select:hover { border-color: var(--ink-3); }
+.tpl-pick select:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.tpl-pick .hint { flex: 1 1 auto; min-width: 200px; } /* 窄屏挤不下时整体换行，不横向溢出 */
+
 /* T4.21：删除操作危险样式（沿用 danger 变量，对比度与既有口径一致） */
 .btn-danger { background: var(--surface); color: var(--danger); border-color: var(--danger); }
 .btn-danger:hover { background: var(--danger-tint); color: var(--danger); }

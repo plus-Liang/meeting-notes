@@ -32,6 +32,18 @@
       <input type="file" id="file" multiple style="display:none">
       <ul id="fileList" class="file-list" hidden></ul>
     </div>
+    <div class="tpl-pick">
+      <label for="templateSelect">摘要模板</label>
+      <select id="templateSelect">
+        <option value="" selected>自动识别（按文件名）</option>
+        <option value="meeting">会议</option>
+        <option value="course">课程</option>
+        <option value="interview">访谈</option>
+        <option value="podcast">播客</option>
+        <option value="shortvideo">短视频</option>
+      </select>
+      <span class="hint">自动：按文件名关键字选（课程/访谈/播客/会议…）；猜不到用「会议」。</span>
+    </div>
     <p><button id="submit">上传并开始转写</button></p>
     <p id="msg" class="hint" hidden></p>
     <div id="result" hidden>
@@ -108,6 +120,7 @@
   var MAX_BATCH_FILES = 20; /* 与服务端 BATCH_MAX_FILES 默认一致，仅前端提示，服务端仍是权威 */
   var btn = document.getElementById('submit');
   var fileInput = document.getElementById('file');
+  var templateSelect = document.getElementById('templateSelect'); /* T4.22（D-119）："" = 自动识别，不传 template 字段 */
   var dropZone = document.getElementById('dropZone');
   var dropTitle = document.getElementById('dropTitle');
   var dropHint = document.getElementById('dropHint');
@@ -327,6 +340,7 @@
     if (files.length === 1) {
       var form = new FormData();
       form.append('file', files[0]);
+      if (templateSelect.value) form.append('template', templateSelect.value); /* T4.22：显式选了模板才传 */
       apiFetch('api/v1/tasks', { method: 'POST', body: form }).then(function (resp) {
         return resp.json().then(function (data) { data.__httpStatus = resp.status; return data; });
       }).then(function (data) {
@@ -359,6 +373,7 @@
     show('info', '批量上传中…（共 ' + files.length + ' 个文件，大文件可能需要一些时间）');
     var batchForm = new FormData();
     files.forEach(function (f) { batchForm.append('files', f); });
+    if (templateSelect.value) batchForm.append('template', templateSelect.value); /* T4.22：显式选了模板才传 */
     apiFetch('api/v1/tasks/batch', { method: 'POST', body: batchForm }).then(function (resp) {
       return resp.json().then(function (data) { data.__httpStatus = resp.status; return data; });
     }).then(function (data) {
