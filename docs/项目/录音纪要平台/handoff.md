@@ -10,7 +10,7 @@
 
 1. **T4.23b 微修（5–10min，卡在 `tasks-starter.md`，T4.25 开工前置）**：`groundWindowBest` 空归一化守卫（`indexOf("")===0` 会让「。。」/「……」被判命中=假依据，K-78）；hit=false 写"未找到直接依据"；Playwright 注入探针 4 例（`'。。'`/`'……'`/`'   '`/正例）；单 commit `fix(T4.23)`；不 push。
 2. **T4.25 统计摘要（~3–4h，新端点，改契约 → 先 commit→build/up→全量）**：`web/StatsController` + `task/StatsService`：`GET /api/v1/stats` → `{"tasks":{total,active,done,dead},"duration_sec_total","success_rate","avg_processing_ratio","tiers":{CLOUD,LOCAL,EXTRACTIVE}}`；`success_rate=done/(done+dead)`、`avg_processing_ratio=AVG((updated_at-created_at)/NULLIF(duration_sec,0))` 只统计 DONE；设置页「我的使用」卡；口径写注释+`接入指南.md`；`StatsServiceTest`；真机取数与 psql 复算一致。
-3. **随后按 D-122 队列**：T4.26 换模板 → T4.27 zip → T4.28 分享（V5）→ T4.29 标签（V6）→ T4.30 录音 → T4.31 PWA → T4.32a FETCH/SSRF → T4.32b 链接导入 → T4.33 INBOX → T4.34 RSS → T4.35a/b/c 播放器（V7）→ T4.36 说话人 → T4.37 登录；做完前 3–4 项复核一次交付预期。
+3. **随后按 D-122（经 D-126 裁剪）队列**：T4.26 换模板 → T4.27 zip → T4.28 分享（V5）→ T4.29 标签（V6）→ T4.30 录音 → **T4.32b 链接导入（含最小必要 SSRF 安全底座，原 32a 并入）** → T4.35a/b/c 播放器（V7）→ T4.36 说话人 → T4.37 登录。**不做：T4.31 PWA / T4.33 INBOX / T4.34 RSS**（D-126，`app.inbox.*` 保持死配置）。做完前 3–4 项复核一次交付预期。
 4. **发布材料（T4.10 README+录屏 → T4.9 → T4.11）在批次之后**；发布前清 MinIO 历史孤儿对象 74–79。
 
 ## 2. 别踩的坑（最高频；全表见 `踩坑与复盘-面试用.md` K-01~K-78）
@@ -43,7 +43,7 @@
 - **审计断链**：T4.21b 少 6 条、T4.22 少 2 条旧 E2E 任务（旧容器日志随重建丢失，K-74；证据行全在）。
 - MinIO 桶内 6 个**早于删除功能上线**的历史孤儿对象（74–79）待发布前清理（可选）。
 - T4.22 残余：真实端到端模板消费未跑；拖拽路径未单独断言。T4.21b 残余：`FOR UPDATE` 未做并发压测。T4.18 残余 P3：导出切句只按 `。！？!?`；只勾"要点"且无要点时导出空文件。
-- 批量 413/429、Webhook SSRF、120s 读超时全链路、amr-wb 变体、跨机器恢复未验；**v1 余量 0**（D-032）。
+- 批量 413/429、Webhook SSRF、120s 读超时全链路、amr-wb 变体、跨机器恢复未验；**D-126 裁剪：T4.31 PWA / T4.33 INBOX / T4.34 RSS 不做（`app.inbox.*` 死配置保留为已知限制），T4.32a 安全底座并入 T4.32b**；**v1 余量 0**（D-032）。
 
 ## 5. 存储纪律（D-088）
 
