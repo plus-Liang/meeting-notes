@@ -509,4 +509,34 @@ class StructuringServiceTest {
                 anyString(), eq("EXTRACTIVE"), eq(61L));
         assertTrue(summary.getValue().contains("工作副盘"), "无词表不得改变输出：" + summary.getValue());
     }
+
+    /** T4.16b/D-107：摘要句边界截断——不再切半句。 */
+    @Test
+    void truncateSummaryKeepsShortTextUntouched() {
+        assertEquals("不到两百字。", StructuringService.truncateSummary("不到两百字。"));
+    }
+
+    @Test
+    void truncateSummaryCutsAtLastSentenceEndWithinLimit() {
+        // 201 字、index 179 处是句号 → 截到句号（含），输出 180 字且以句号结尾
+        StringBuilder sb = new StringBuilder();
+        sb.append("前".repeat(179)).append('。');
+        sb.append("后".repeat(21)); // 总长 201
+        assertEquals(201, sb.length());
+        String out = StructuringService.truncateSummary(sb.toString());
+        assertEquals(180, out.length());
+        assertTrue(out.endsWith("。"), "必须以句末标点结尾，不得腰斩：" + out);
+    }
+
+    @Test
+    void truncateSummaryFallsBackToHardCutWhenNoSentenceEnd() {
+        String out = StructuringService.truncateSummary("字".repeat(201)); // 200 内无句末标点
+        assertEquals(200, out.length());
+    }
+
+    @Test
+    void truncateSummaryKeepsExactly200() {
+        String s = "句".repeat(200);
+        assertEquals(s, StructuringService.truncateSummary(s));
+    }
 }

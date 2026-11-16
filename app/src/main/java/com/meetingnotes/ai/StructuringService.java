@@ -27,8 +27,7 @@ import java.util.List;
  * EXTRACTIVE 零依赖兜底：transcript 非空就必定有产出；空 transcript 跳过结构化、{@code ai_tier} 留 null（D-048）。
  *
  * <p>不重试同一档（D-068/D-071）：空 content 重试还是空；"第二次机会"是换方法（降级）。
- * 同一档的失败诊断写 WARN：{@code finish_reason} + usage（含 reasoning_tokens）+ 原始输出截 200 字。
- * 阈值（summary 200 字 / keywords 10 / todos 20）在解析后由**代码层**再截断一次（⑦ 体积预算兜底）。
+ * 同一档的失败诊断写 WARN：{@code finish_reason} + usage（含 reasoning_tokens）+ 原始输出截 200 字；阈值（summary 200 字 / keywords 10 / todos 20）解析后由**代码层**再截断（⑦ 体积预算兜底）。
  */
 @Service
 public class StructuringService {
@@ -178,7 +177,7 @@ public class StructuringService {
         if (summary == null || summary.isBlank()) {
             throw new IllegalArgumentException("缺少 summary 字段");
         }
-        return new StructuringResult(truncate(summary.trim(), MAX_SUMMARY_CHARS),
+        return new StructuringResult(truncateSummary(summary.trim()),
                 keywords(root.path("keywords")), todoService.parse(root), tier);
     }
 
@@ -278,5 +277,24 @@ public class StructuringService {
 
     private static String truncate(String text, int maxChars) {
         return text.length() <= maxChars ? text : text.substring(0, maxChars);
+    }
+
+    /** 摘要句边界截断（T4.16b/D-107）：≤200 原样；超长在 [0,200) 内找最后一个句末标点截到它含标点（治「…证据链。未明确」末句腰斩）；找不到退回 200 硬截。诊断日志 truncate 不动。 */
+    static String truncateSummary(String text) {
+        if (text == null || text.length() <= MAX_SUMMARY_CHARS) {
+            return text;
+        }
+        int end = lastSentenceEnd(text, MAX_SUMMARY_CHARS);
+        return end > 0 ? text.substring(0, end) : text.substring(0, MAX_SUMMARY_CHARS);
+    }
+
+    /** [0,limit) 内最后一个句末标点的下一个位置（含标点）；找不到 -1。 */
+    private static int lastSentenceEnd(String text, int limit) {
+        for (int i = limit - 1; i >= 0; i--) {
+            if ("。！？!?".indexOf(text.charAt(i)) >= 0) {
+                return i + 1;
+            }
+        }
+        return -1;
     }
 }

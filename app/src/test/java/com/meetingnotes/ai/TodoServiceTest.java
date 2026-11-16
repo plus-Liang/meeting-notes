@@ -35,6 +35,10 @@ class TodoServiceTest {
         assertTrue(prompt.contains("严禁猜测"), "owner/deadline 未知必须为 null，不许猜");
         assertTrue(prompt.contains("不得编造或引申"), "action 必须有 transcript 依据");
         assertTrue(prompt.contains("不要换算成具体日期"), "D-076：相对时间词保留原词");
+        /* T4.16b/D-107：待办语义收紧——讲者演示动作/举例/知识点罗列/流程讲解不算待办 */
+        assertTrue(prompt.contains("明确要求听众/参会者去做的行动项"), "必须只列听众的行动项");
+        assertTrue(prompt.contains("演示动作"), "演示动作不得算待办（s2 实测误判：登录账号给观众看）");
+        assertTrue(prompt.contains("宁少不滥"), "教程类 0-8 条，宁少不滥");
     }
 
     @Test

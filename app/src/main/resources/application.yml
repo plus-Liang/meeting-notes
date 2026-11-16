@@ -63,6 +63,9 @@ spring:
           # deepseek-flash 默认开启 thinking，max-tokens 过小会让 content 为空
           # F-8（D-071）：默认 8192——推理模型的思考链吃 token，1024 必空、4096 不稳
           max-tokens: ${LLM_MAX_TOKENS:8192}
+          # T4.16b（D-107）：同内容两次结构化结果乱跳（待办 0 vs 5、摘要相似度 0.47）→
+          # 云档固定贪心解码（0.0）；要采样式多样性时用环境变量覆盖
+          temperature: ${LLM_TEMPERATURE:0.0}
       audio:
         transcription:
           # 契约端点：http://asr:8000/v1/audio/transcriptions
