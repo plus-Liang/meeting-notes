@@ -146,11 +146,11 @@
 | **T4.28** | **1.5 只读分享链接**（D-122） | 生成只读链接给别人看单条 | 待做：迁移 V5 `share_link`（token SHA256/过期/撤销）；POST/DELETE share + 匿名只读 `GET /api/v1/share/{token}`（认证豁免只放这一条）；share.html；全量 |
 | **T4.29** | **1.6 标签/收藏**（D-122） | 打标签标星、列表可筛 | 待做：迁移 V6 `task.labels jsonb`+`favorite`；`PATCH /tasks/{id}/meta`；列表筛选+详情编辑；迁移前备份；全量 |
 | **T4.30** | **2.2 浏览器内录音**（D-122） | 点开始录制，说完自动转写 | 待做：纯 static `getUserMedia`+`MediaRecorder`→现有上传；权限/长录音/失败重传；1 真实任务 |
-| **T4.31** | **2.5 PWA / 手机安装**（D-122） | 添加到主屏、像 App 打开 | 待做：manifest + service worker 离线壳 + 本地图标（禁外链）；离线壳不缓存 API |
-| **T4.32a** | **2.1 前置：FETCH 直链 + SSRF**（原 T4.3，D-122） | 内网地址被拒 | 待做：内网/回环/元数据拒绝 400 `URL_BLOCKED`、重定向上限、超时、响应体上限；`MediaFetcher` 接口 |
-| **T4.32b** | **2.1 链接导入 L1/L2/BYOF**（D-122） | 粘链接就能转写 | 待做：L1 og:title/时长、L2 Content-Type 探测走下载管线、BYOF `FETCHER_CMD`（不配返回 `FETCHER_UNAVAILABLE`）；`POST /tasks/link`；依赖 T4.32a |
-| **T4.33** | **2.3 INBOX 目录收取**（D-122） | 丢文件进目录自动转写 | 待做：`@Scheduled` 轮询挂载目录 + content_hash 去重 + 失败隔离；`app.inbox.*` 变真消费方 |
-| **T4.34** | **2.4 RSS 播客订阅**（D-122） | 订阅播客自动转新一期 | 待做：feed 解析 + 去重 + 定时抓 → 走 T4.32b 管线；依赖 T4.32b |
+| ~~**T4.31**~~ | ~~2.5 PWA / 手机安装~~ | — | **不做（D-126：用户 2026-11-16 明确取消）** |
+| **T4.32a** | **2.1 前置：FETCH 直链 + SSRF**（原 T4.3，D-122） | 内网地址被拒 | 待做（**D-127：保留单列卡**）：内网/回环/链路本地/元数据拒绝 400 `URL_BLOCKED`、重定向每跳校验且上限、连接/读超时、响应体上限；`MediaFetcher` 接口 |
+| **T4.32b** | **2.1 链接导入 L1/L2/BYOF**（D-122） | 粘链接就能转写 | 待做：L1 og:title/时长、L2 Content-Type 探测走下载管线、BYOF `FETCHER_CMD`（不配返回 `FETCHER_UNAVAILABLE`）；`POST /tasks/link`；**依赖 T4.32a** |
+| ~~**T4.33**~~ | ~~2.3 INBOX 目录收取~~ | — | **不做（D-126）**；`app.inbox.*` 保持死配置并登记已知限制 |
+| ~~**T4.34**~~ | ~~2.4 RSS 播客订阅~~ | — | **不做（D-126）** |
 | **T4.35a** | **2.6 前置：ASR segments**（D-122） | 句子级时间戳入库 | 待做：`server.py` 返回 `segments[{start,end,text}]` 且**旧三键逐字兼容**；迁移 V7 `task_result.segments jsonb`；旧任务无 segments 隐藏播放器 |
 | **T4.35b** | **2.6 播放器 API**（D-122） | 详情能拿音频地址+句时间 | 待做：预签名/流式音频接口 + 详情返回 segments；越权防护；依赖 T4.35a |
 | **T4.35c** | **2.6 前端播放器跟随**（D-122） | 点句跳音频、播放高亮 | 待做：`<audio>` + 点句 seek + 当前句高亮；无 segments 降级；依赖 T4.35b；390 可操作 |
