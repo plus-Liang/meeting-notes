@@ -105,7 +105,7 @@ class StructuringServiceTest {
                 eq("会议讨论了材料整理"), eq("[\"材料整理\"]"),
                 eq("[{\"action\":\"整理材料\",\"owner\":\"张三\",\"deadline\":\"下周三\"}]"),
                 eq(KEYPOINTS_JSON),
-                eq("CLOUD"), eq(7L));
+                eq("CLOUD"), eq("meeting"), eq(7L));
     }
 
     @Test
@@ -138,7 +138,8 @@ class StructuringServiceTest {
         assertTrue(newService(true).structure(9L, TRANSCRIPT));
 
         verify(cloudModel, times(1)).call(any(Prompt.class));
-        verify(jdbc).update(contains("UPDATE task_result"), anyString(), anyString(), anyString(), anyString(), eq("LOCAL"), eq(9L));
+        verify(jdbc).update(contains("UPDATE task_result"), anyString(), anyString(), anyString(), anyString(),
+                eq("LOCAL"), eq("meeting"), eq(9L));
     }
 
     @Test
@@ -150,7 +151,8 @@ class StructuringServiceTest {
 
         newService(true).structure(10L, TRANSCRIPT);
 
-        verify(jdbc).update(contains("UPDATE task_result"), anyString(), anyString(), anyString(), anyString(), eq("LOCAL"), eq(10L));
+        verify(jdbc).update(contains("UPDATE task_result"), anyString(), anyString(), anyString(), anyString(),
+                eq("LOCAL"), eq("meeting"), eq(10L));
     }
 
     @Test
@@ -163,7 +165,8 @@ class StructuringServiceTest {
         newService(true).structure(11L, TRANSCRIPT);
 
         verify(cloudModel, times(1)).call(any(Prompt.class));
-        verify(jdbc).update(contains("UPDATE task_result"), anyString(), anyString(), anyString(), anyString(), eq("LOCAL"), eq(11L));
+        verify(jdbc).update(contains("UPDATE task_result"), anyString(), anyString(), anyString(), anyString(),
+                eq("LOCAL"), eq("meeting"), eq(11L));
     }
 
     @Test
@@ -175,7 +178,7 @@ class StructuringServiceTest {
 
         ArgumentCaptor<String> summary = ArgumentCaptor.forClass(String.class);
         verify(jdbc).update(contains("UPDATE task_result"), summary.capture(),
-                anyString(), anyString(), isNull(), eq("EXTRACTIVE"), eq(12L));
+                anyString(), anyString(), isNull(), eq("EXTRACTIVE"), eq("meeting"), eq(12L));
         assertFalse(summary.getValue().isBlank(), "抽取式兜底必须给出非空 summary");
         assertTrue(summary.getValue().length() <= 200, "⑦ 预算：抽取式 summary 也受 200 字上限");
     }
@@ -186,7 +189,7 @@ class StructuringServiceTest {
 
         ArgumentCaptor<String> summary = ArgumentCaptor.forClass(String.class);
         verify(jdbc).update(contains("UPDATE task_result"), summary.capture(),
-                anyString(), anyString(), isNull(), eq("EXTRACTIVE"), eq(13L));
+                anyString(), anyString(), isNull(), eq("EXTRACTIVE"), eq("meeting"), eq(13L));
         assertFalse(summary.getValue().isBlank());
         verifyNoInteractions(cloudModel, localModel);
     }
@@ -225,7 +228,7 @@ class StructuringServiceTest {
 
         ArgumentCaptor<String> todosJson = ArgumentCaptor.forClass(String.class);
         verify(jdbc).update(contains("UPDATE task_result"), anyString(), anyString(), todosJson.capture(),
-                isNull(), eq("CLOUD"), eq(16L));
+                isNull(), eq("CLOUD"), eq("meeting"), eq(16L));
         assertTrue(todosJson.getValue().contains("\"deadline\":null"), "⑨ 原文没有 2023-04-15 → 置 null，实际："
                 + todosJson.getValue());
         assertTrue(todosJson.getValue().contains("\"owner\":null"), "⑨ 原文没有'李四' → 置 null");
@@ -248,7 +251,7 @@ class StructuringServiceTest {
         ArgumentCaptor<String> summary = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<String> keywordsJson = ArgumentCaptor.forClass(String.class);
         verify(jdbc).update(contains("UPDATE task_result"), summary.capture(), keywordsJson.capture(),
-                eq("[]"), isNull(), eq("CLOUD"), eq(17L));
+                eq("[]"), isNull(), eq("CLOUD"), eq("meeting"), eq(17L));
         assertEquals(200, summary.getValue().length(), "⑦ 预算：summary 代码层截断 200 字");
         JsonNode parsed = mapper.readTree(keywordsJson.getValue());
         assertEquals(10, parsed.size(), "⑦ 预算：keywords 代码层截断 10 个");
@@ -282,7 +285,7 @@ class StructuringServiceTest {
 
         ArgumentCaptor<String> todosJson = ArgumentCaptor.forClass(String.class);
         verify(jdbc).update(contains("UPDATE task_result"), anyString(), anyString(), todosJson.capture(),
-                isNull(), eq("CLOUD"), eq(18L));
+                isNull(), eq("CLOUD"), eq("meeting"), eq(18L));
         assertEquals(20, todosJson.getValue().split("action", -1).length - 1,
                 "F-5：代码层截断 20 条，实际：" + todosJson.getValue());
     }
@@ -295,7 +298,7 @@ class StructuringServiceTest {
 
         newService(true).structure(19L, TRANSCRIPT);
 
-        verify(jdbc).update(contains("UPDATE task_result"), eq("会议"), eq("[]"), eq("[]"), isNull(), eq("CLOUD"), eq(19L));
+        verify(jdbc).update(contains("UPDATE task_result"), eq("会议"), eq("[]"), eq("[]"), isNull(), eq("CLOUD"), eq("meeting"), eq(19L));
     }
 
     // ---- T3.4 ④ JSON 抽取容错（云/本地共用） ----
@@ -310,7 +313,7 @@ class StructuringServiceTest {
         assertTrue(newService(true).structure(20L, TRANSCRIPT));
 
         verify(jdbc).update(contains("UPDATE task_result"), eq("会议讨论了材料整理"),
-                anyString(), anyString(), anyString(), eq("CLOUD"), eq(20L));
+                anyString(), anyString(), anyString(), eq("CLOUD"), eq("meeting"), eq(20L));
     }
 
     @Test
@@ -323,7 +326,7 @@ class StructuringServiceTest {
         assertTrue(newService(true).structure(21L, TRANSCRIPT));
 
         verify(jdbc).update(contains("UPDATE task_result"), eq("会议讨论了材料整理"),
-                anyString(), anyString(), anyString(), eq("CLOUD"), eq(21L));
+                anyString(), anyString(), anyString(), eq("CLOUD"), eq("meeting"), eq(21L));
     }
 
     @Test
@@ -335,7 +338,7 @@ class StructuringServiceTest {
         assertTrue(newService(true).structure(22L, TRANSCRIPT));
 
         verify(jdbc).update(contains("UPDATE task_result"), anyString(), anyString(), anyString(),
-                isNull(), eq("EXTRACTIVE"), eq(22L));
+                isNull(), eq("EXTRACTIVE"), eq("meeting"), eq(22L));
     }
 
     // ---- T3.6 术语注入（glossary → 提示词，US-3 闭环） ----
@@ -406,18 +409,21 @@ class StructuringServiceTest {
     }
 
     @Test
-    void persistSqlUpdatesOnlyItsOwnColumnsAndNeverTouchesTemplate() {
+    void persistSqlWritesTemplateWithTheValueUsedAndNeverNull() {
         when(cloudProvider.getIfAvailable()).thenReturn(cloudModel);
         when(cloudModel.call(any(Prompt.class))).thenReturn(response(VALID_JSON, "stop"));
 
         newService(true).structure(42L, TRANSCRIPT);
 
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
-        verify(jdbc).update(sql.capture(), anyString(), anyString(), anyString(), anyString(), eq("CLOUD"), eq(42L));
+        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbc).update(sql.capture(), args.capture());
         assertTrue(sql.getValue().contains("summary") && sql.getValue().contains("ai_tier")
-                        && sql.getValue().contains("keypoints"),
-                "persist 只更新 summary/keywords/todos/keypoints/ai_tier：" + sql.getValue());
-        assertFalse(sql.getValue().contains("template"), "T3.9 坑 3：结构化不得把 template 覆盖成 NULL");
+                        && sql.getValue().contains("keypoints") && sql.getValue().contains("template = ?"),
+                "persist 更新 summary/keywords/todos/keypoints/ai_tier/template：" + sql.getValue());
+        // T3.9 坑 3 的不变量在 T4.26 后仍成立：worker 路径写回读到的同一个值（templateOf 的 COALESCE 兜底，
+        // 旧任务无行 → meeting），**永不写 NULL**；重跑路径写的是调用方已校验的显式值（见 explicitTemplate 用例）
+        assertEquals("meeting", args.getValue()[5], "worker 路径 template 原样写回，不得为 null 或漂移");
     }
 
     // ---- T3.8 测试补强：畸形 JSON 矩阵 + LOCAL 异常降级 ----
@@ -434,7 +440,7 @@ class StructuringServiceTest {
         verify(localModel, times(1)).call(any(Prompt.class));
         ArgumentCaptor<String> summary = ArgumentCaptor.forClass(String.class);
         verify(jdbc).update(contains("UPDATE task_result"), summary.capture(),
-                anyString(), anyString(), isNull(), eq("EXTRACTIVE"), eq(50L));
+                anyString(), anyString(), isNull(), eq("EXTRACTIVE"), eq("meeting"), eq(50L));
         assertFalse(summary.getValue().isBlank(), "EXTRACTIVE 兜底必须产出非空 summary");
     }
 
@@ -448,7 +454,7 @@ class StructuringServiceTest {
         assertTrue(newService(true).structure(51L, TRANSCRIPT));
 
         verify(jdbc).update(contains("UPDATE task_result"), anyString(), anyString(), anyString(),
-                isNull(), eq("EXTRACTIVE"), eq(51L));
+                isNull(), eq("EXTRACTIVE"), eq("meeting"), eq(51L));
     }
 
     @Test
@@ -461,7 +467,7 @@ class StructuringServiceTest {
         assertTrue(newService(true).structure(52L, TRANSCRIPT));
 
         verify(jdbc).update(contains("UPDATE task_result"), eq("正常摘要"),
-                eq("[\"123\",\"有效词\"]"), eq("[]"), isNull(), eq("CLOUD"), eq(52L));
+                eq("[\"123\",\"有效词\"]"), eq("[]"), isNull(), eq("CLOUD"), eq("meeting"), eq(52L));
     }
 
     @Test
@@ -475,7 +481,7 @@ class StructuringServiceTest {
         assertTrue(newService(true).structure(53L, TRANSCRIPT));
 
         verify(jdbc).update(contains("UPDATE task_result"), eq("摘要"), anyString(),
-                eq("[]"), isNull(), eq("CLOUD"), eq(53L));
+                eq("[]"), isNull(), eq("CLOUD"), eq("meeting"), eq(53L));
     }
 
     @Test
@@ -488,7 +494,7 @@ class StructuringServiceTest {
         assertTrue(newService(true).structure(54L, TRANSCRIPT));
 
         verify(jdbc).update(contains("UPDATE task_result"), anyString(), anyString(), anyString(),
-                isNull(), eq("EXTRACTIVE"), eq(54L));
+                isNull(), eq("EXTRACTIVE"), eq("meeting"), eq(54L));
     }
 
     // ---- T4.1 F-15：EXTRACTIVE 读词表（D-089） ----
@@ -505,7 +511,7 @@ class StructuringServiceTest {
         verify(termSource, times(1)).terms();
         ArgumentCaptor<String> summary = ArgumentCaptor.forClass(String.class);
         verify(jdbc).update(contains("UPDATE task_result"), summary.capture(), anyString(),
-                anyString(), isNull(), eq("EXTRACTIVE"), eq(60L));
+                anyString(), isNull(), eq("EXTRACTIVE"), eq("meeting"), eq(60L));
         assertFalse(summary.getValue().contains("工作副盘"), "错词必须被词表纠正");
         assertTrue(summary.getValue().contains("工作复盘"), "实际落库：" + summary.getValue());
     }
@@ -519,7 +525,7 @@ class StructuringServiceTest {
 
         ArgumentCaptor<String> summary = ArgumentCaptor.forClass(String.class);
         verify(jdbc).update(contains("UPDATE task_result"), summary.capture(), anyString(),
-                anyString(), isNull(), eq("EXTRACTIVE"), eq(61L));
+                anyString(), isNull(), eq("EXTRACTIVE"), eq("meeting"), eq(61L));
         assertTrue(summary.getValue().contains("工作副盘"), "无词表不得改变输出：" + summary.getValue());
     }
 
@@ -536,7 +542,7 @@ class StructuringServiceTest {
         verify(jdbc).update(contains("UPDATE task_result"),
                 eq("会议讨论了材料整理"), eq("[\"材料整理\"]"),
                 eq("[{\"action\":\"整理材料\",\"owner\":\"张三\",\"deadline\":\"下周三\"}]"),
-                isNull(), eq("CLOUD"), eq(70L));
+                isNull(), eq("CLOUD"), eq("meeting"), eq(70L));
     }
 
     @Test
@@ -549,7 +555,7 @@ class StructuringServiceTest {
         assertTrue(newService(true).structure(71L, TRANSCRIPT));
 
         verify(jdbc).update(contains("UPDATE task_result"), eq("正常摘要"), eq("[]"), eq("[]"),
-                isNull(), eq("CLOUD"), eq(71L));
+                isNull(), eq("CLOUD"), eq("meeting"), eq(71L));
     }
 
     @Test
@@ -561,7 +567,7 @@ class StructuringServiceTest {
         assertTrue(newService(true).structure(72L, TRANSCRIPT));
 
         verify(jdbc).update(contains("UPDATE task_result"), eq("正常摘要"), eq("[]"), eq("[]"),
-                isNull(), eq("CLOUD"), eq(72L));
+                isNull(), eq("CLOUD"), eq("meeting"), eq(72L));
     }
 
     @Test
@@ -580,7 +586,7 @@ class StructuringServiceTest {
 
         ArgumentCaptor<String> kpsJson = ArgumentCaptor.forClass(String.class);
         verify(jdbc).update(contains("UPDATE task_result"), eq("会议"), eq("[]"), eq("[]"),
-                kpsJson.capture(), eq("CLOUD"), eq(73L));
+                kpsJson.capture(), eq("CLOUD"), eq("meeting"), eq(73L));
         assertEquals(15, kpsJson.getValue().split("\"title\"", -1).length - 1,
                 "⑦ 预算：keypoints 代码层截断 15 条，实际：" + kpsJson.getValue());
     }
@@ -598,7 +604,7 @@ class StructuringServiceTest {
 
         ArgumentCaptor<String> kpsJson = ArgumentCaptor.forClass(String.class);
         verify(jdbc).update(contains("UPDATE task_result"), eq("正常摘要"), eq("[]"), eq("[]"),
-                kpsJson.capture(), eq("CLOUD"), eq(74L));
+                kpsJson.capture(), eq("CLOUD"), eq("meeting"), eq(74L));
         assertEquals("[{\"title\":\"有效要点\",\"detail\":\"这条有标题也有说明。\"}]", kpsJson.getValue(),
                 "无效条目丢弃、有效条目保留，实际：" + kpsJson.getValue());
     }
@@ -631,5 +637,31 @@ class StructuringServiceTest {
     void truncateSummaryKeepsExactly200() {
         String s = "句".repeat(200);
         assertEquals(s, StructuringService.truncateSummary(s));
+    }
+
+    /* ===== T4.26（F-17）：显式模板重跑——提示词用显式值、persist 把 template 一并写 ===== */
+
+    @Test
+    void explicitTemplateGoesToPromptAndPersistsIt() {
+        when(cloudProvider.getIfAvailable()).thenReturn(cloudModel);
+        when(cloudModel.call(any(Prompt.class))).thenReturn(response(VALID_JSON, "stop"));
+
+        assertTrue(newService(true).structure(16L, TRANSCRIPT, "course"));
+
+        // 提示词携带显式模板（course 的角色行是课程特有文案，meeting 不是）；不再读落库 templateOf
+        ArgumentCaptor<Prompt> promptCaptor = ArgumentCaptor.forClass(Prompt.class);
+        verify(cloudModel).call(promptCaptor.capture());
+        assertTrue(promptCaptor.getValue().getContents().contains("你是课程笔记助手"),
+                "提示词必须由显式模板 course 驱动（课程角色行）");
+        assertFalse(promptCaptor.getValue().getContents().contains("核心观点、论据/例子"),
+                "不得仍是默认 meeting 模板的 summary 规则");
+        verify(jdbc, never()).query(contains("COALESCE(template"),
+                ArgumentMatchers.<RowMapper<String>>any(), eq(16L));
+        // persist 落新结果 + template（第 6 个绑定参数）
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbc).update(sql.capture(), args.capture());
+        assertTrue(sql.getValue().contains("template = ?"), "persist 必须写 template 列");
+        assertEquals("course", args.getValue()[5], "template 是第 6 个绑定参数");
     }
 }

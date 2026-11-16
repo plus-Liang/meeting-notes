@@ -203,6 +203,46 @@
       '<p class="hint" id="deleteMsg" style="margin-top:8px">删除后不可恢复，已用配额不退还。进行中（排队/转写/重试）的任务不能删除。</p></div>';
   }
 
+  /* T4.26（F-17）：换模板重跑——只用已存转写重跑结构化；二次确认覆盖语义，成功后整页刷新 */
+  var TEMPLATE_NAMES = { meeting: '会议', course: '课程', interview: '访谈', podcast: '播客', shortvideo: '短视频' };
+
+  function restructureHtml(data) {
+    var current = data.template || 'meeting';
+    var options = Object.keys(TEMPLATE_NAMES).map(function (k) {
+      return '<option value="' + k + '"' + (k === current ? ' selected' : '') + '>' + TEMPLATE_NAMES[k] + '</option>';
+    }).join('');
+    return '<div class="section"><h2>按模板重新生成</h2>' +
+      '<div class="tpl-pick">' +
+      '<label for="restructureTemplate">摘要模板</label>' +
+      '<select id="restructureTemplate" aria-label="选择重新生成使用的模板">' + options + '</select>' +
+      '<button type="button" class="btn-secondary" id="restructureBtn">重新生成</button></div>' +
+      '<p class="hint" id="restructureMsg" style="margin-top:8px">只用已保存的转写重跑摘要/关键词/待办/要点：不重跑转写、不新建任务、不消耗配额；但会<b>覆盖</b>当前结果与模板。</p></div>';
+  }
+
+  function bindRestructure(data) {
+    var btn = document.getElementById('restructureBtn');
+    var sel = document.getElementById('restructureTemplate');
+    var msg = document.getElementById('restructureMsg');
+    btn.addEventListener('click', function () {
+      var template = sel.value;
+      if (!window.confirm('按「' + TEMPLATE_NAMES[template] + '」模板重新生成？将覆盖当前摘要/关键词/待办/要点与模板（不重跑转写、不消耗配额）。')) return;
+      btn.disabled = true;
+      msg.textContent = '重新生成中…（AI 调用可能需要一点时间）';
+      postJson('api/v1/tasks/' + data.task_id + '/restructure', { template: template }).then(function (resp) {
+        if (resp.__httpStatus === 200) {
+          window.location.reload(); /* 成功后整页刷新：新摘要/关键词/待办/要点/模板全量可见 */
+          return;
+        }
+        btn.disabled = false;
+        msg.textContent = '重新生成失败（' + (resp.code || resp.__httpStatus) + '）：' +
+          (resp.message || '未知错误') + '。原结果未被修改。';
+      }, function () {
+        btn.disabled = false;
+        msg.textContent = '重新生成失败：服务暂时不可用，请稍后重试。';
+      });
+    });
+  }
+
   function bindDelete(data) {
     var btn = document.getElementById('deleteTaskBtn');
     var msgEl = document.getElementById('deleteMsg');
@@ -329,7 +369,7 @@
         '<p class="hint">请检查 ASR 服务是否正常后，可在<a href="tasks.html">任务列表</a>按"失败"筛选并批量重试。</p></div>';
     } else if (status === 'DONE') {
       body = summaryHtml(data) + keypointsHtml(data) + todosHtml(data) + transcriptHtml(data) +
-        exportHtml(data) + deleteHtml(data);
+        restructureHtml(data) + exportHtml(data) + deleteHtml(data);
     } else {
       body = '<p class="hint">未知状态：' + escapeHtml(status) + '</p>';
     }
@@ -340,6 +380,7 @@
       initTodos(data);
       bindKeywordChips(data);
       bindSummaryGround(data);
+      bindRestructure(data);
       bindCopyTranscript(data);
     }
     return status === 'DONE' || status === 'DEAD';

@@ -20,11 +20,11 @@ import java.util.List;
 
 /**
  * 结构化编排（T3.3）：摘要 + 关键词 + 待办 + 要点（T4.17）**一次 LLM 调用**（F-7），三档**级联降级**（D-075）。
- * 流程：首选档由 {@link AiStructuringRouter} 判定 → 调用异常 / 空 content / {@code finish_reason=length} /
- * JSON 解析失败 → **降一档再试**（CLOUD → LOCAL → EXTRACTIVE）；{@code ai_tier} 落**实际产出那一档**（D-020）。
- * EXTRACTIVE 零依赖兜底：transcript 非空就必定有产出；空 transcript 跳过结构化（D-048）。
- * 不重试同一档（D-068/D-071）；失败诊断写 WARN（finish_reason + usage + 原始输出截 200 字）；
- * 阈值（summary 200 字 / keywords 10 / todos 20 / keypoints 15）解析后由**代码层**再截断（⑦ 预算兜底）。
+ * 首选档由 {@link AiStructuringRouter} 判定 → 异常/空 content/length/解析失败 → 降一档再试（CLOUD → LOCAL → EXTRACTIVE）；
+ * {@code ai_tier} 落实际产出那一档（D-020）。EXTRACTIVE 零依赖兜底：transcript 非空必有产出；空 transcript 跳过（D-048）。
+ * 不重试同一档（D-068/D-071）；失败诊断写 WARN；阈值由代码层再截断（⑦ 预算兜底）。
+ * T4.26（F-17）：{@code structure(taskId, transcript, explicitTemplate)} 重跑入口——显式模板由调用方校验后传入，
+ * persist 把 template 一并写（worker 路径两参重载不变，template 仍读落库值并原样写回）。
  */
 @Service
 public class StructuringService {
@@ -62,26 +62,27 @@ public class StructuringService {
 
     /** @return true = 结果已写入 task_result；false = 空 transcript 跳过或降级链耗尽（字段一起留空，任务仍 DONE） */
     public boolean structure(long taskId, String transcript) {
+        return structure(taskId, transcript, null);
+    }
+
+    /** 重跑入口（T4.26/F-17）：explicitTemplate 非空时直接用（调用方已 validateExplicit），否则读落库模板（worker 路径不变）。 */
+    public boolean structure(long taskId, String transcript, String explicitTemplate) {
         if (transcript == null || transcript.isBlank()) {
             log.info("transcript 为空（D-048 无语音内容），跳过结构化，ai_tier 留 null");
             return false;
         }
-        // T3.9：读提交时落库的模板（旧任务/无行 → meeting），传给提示词组装；worker 不加参数
-        String template = templateOf(taskId);
+        String template = explicitTemplate != null ? explicitTemplate : templateOf(taskId);
         log.info("结构化模板：{}", template);
         GlossaryTermSource.GlossaryInjection injection = termSource.inject();
-        if (injection == null || injection.termCount() <= 0) {
-            log.info("术语注入：0 条（跳过）");
-            injection = GlossaryTermSource.GlossaryInjection.EMPTY;
-        } else {
-            log.info("术语注入：{} 条（≤20）/ 长度 {} 字", injection.termCount(), injection.text().length());
-        }
+        injection = injection == null || injection.termCount() <= 0
+                ? GlossaryTermSource.GlossaryInjection.EMPTY : injection;
+        log.info("术语注入：{} 条（≤20）/ 长度 {} 字", injection.termCount(), injection.text().length());
         AiTier tier = router.preferredTier();
         log.info("结构化首选档：{}", tier);
         while (tier != null) {
             StructuringResult result = attempt(tier, transcript, injection.text(), template);
             if (result != null) {
-                persist(taskId, result);
+                persist(taskId, result, template);
                 return true;
             }
             AiTier next = router.nextTier(tier);
@@ -211,18 +212,17 @@ public class StructuringService {
         return rows.get(0);
     }
 
-    private void persist(long taskId, StructuringResult result) {
+    private void persist(long taskId, StructuringResult result, String template) {
         jdbc.update("""
                 UPDATE task_result SET summary = ?, keywords = ?::jsonb, todos = ?::jsonb, keypoints = ?::jsonb,
-                       ai_tier = ?
+                       ai_tier = ?, template = ?
                 WHERE task_id = ?
                 """, result.summary(), toJson(result.keywords()), toJson(result.todos()),
                 result.keypoints() == null ? null : toJson(result.keypoints()),
-                result.aiTier().name(), taskId);
-        log.info("结构化已落库（ai_tier={}，summary {} 字，keywords {} 个，todos {} 条，keypoints {}）",
-                result.aiTier().name(), result.summary().length(),
-                result.keywords().size(), result.todos().size(),
-                result.keypoints() == null ? "未生成" : result.keypoints().size() + " 条");
+                result.aiTier().name(), template, taskId);
+        log.info("结构化已落库（ai_tier={}，template={}，summary {} 字，keywords {} 个，todos {} 条，keypoints {}）",
+                result.aiTier().name(), template, result.summary().length(), result.keywords().size(),
+                result.todos().size(), result.keypoints() == null ? "未生成" : result.keypoints().size() + " 条");
     }
 
     private String toJson(Object value) {
