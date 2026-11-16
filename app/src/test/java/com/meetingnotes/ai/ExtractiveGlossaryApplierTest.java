@@ -21,6 +21,7 @@ class ExtractiveGlossaryApplierTest {
                 "本周整理工作副盘，要点清晰。",
                 List.of("工作副盘", "复盘"),
                 List.of(new TodoService.TodoItem("整理工作副盘", "张三", "下周三")),
+                List.of(new StructuringResult.KeyPoint("工作副盘", "本周整理工作副盘的纪要要点。")),
                 AiTier.EXTRACTIVE);
 
         StructuringResult out = ExtractiveGlossaryApplier.apply(input,
@@ -32,6 +33,8 @@ class ExtractiveGlossaryApplierTest {
         assertEquals("张三", out.todos().get(0).owner(), "owner 不受替换影响");
         assertEquals("下周三", out.todos().get(0).deadline(), "deadline 不受替换影响");
         assertEquals(AiTier.EXTRACTIVE, out.aiTier(), "ai_tier 透传不变");
+        assertEquals(List.of(new StructuringResult.KeyPoint("工作副盘", "本周整理工作副盘的纪要要点。")),
+                out.keypoints(), "keypoints 原样透传（EXTRACTIVE 不产要点，替换口径不动它）");
     }
 
     @Test
@@ -39,6 +42,7 @@ class ExtractiveGlossaryApplierTest {
         // T3.6 同款回归判据：词表为空不改变任何行为（返回同一实例，零拷贝零替换）
         StructuringResult input = new StructuringResult(
                 "摘要原样", List.of("关键词"), List.of(new TodoService.TodoItem("待办", null, null)),
+                List.of(new StructuringResult.KeyPoint("要点标题", "要点说明正文。")),
                 AiTier.EXTRACTIVE);
 
         assertSame(input, ExtractiveGlossaryApplier.apply(input, List.of()));

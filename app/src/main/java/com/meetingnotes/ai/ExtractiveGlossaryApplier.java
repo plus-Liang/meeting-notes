@@ -53,6 +53,6 @@ final class ExtractiveGlossaryApplier {
         if (replaced > 0) {
             log.info("术语替换：{} 处（EXTRACTIVE 读词表）", replaced);
         }
-        return new StructuringResult(summary, keywords, todos, result.aiTier());
+        return new StructuringResult(summary, keywords, todos, result.keypoints(), result.aiTier());
     }
 }

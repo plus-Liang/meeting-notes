@@ -8,8 +8,9 @@ import java.util.Set;
  * 值固定为 {@code meeting}（默认）/{@code course}/{@code interview}/{@code podcast}/{@code shortvideo}；
  * 不许为场景新增管线（AGENT.md 硬约束 9）。
  *
- * <p>三字段 JSON 结构不变（{@code summary/keywords/todos}，预算沿用 T3.3/T3.6：
- * summary ≤200 字、keywords ≤10、todos ≤20）；只改 summary 的**结构与关注点**。
+ * <p>四字段 JSON 结构不变（{@code summary/keywords/todos/keypoints}，预算沿用 T3.3/T3.6/T4.17：
+ * summary ≤200 字、keywords ≤10、todos ≤20、keypoints 3~15）；只改 summary 的**结构与关注点**。
+ * T4.17（D-109）：JSON 示例五模板统一追加 keypoints 字段（要点小标题/40~120 字说明）。
  * 注入顺序不变（由 {@link StructuringPrompt} 组装）：模板主体 → glossary 注入段（为空时逐字节不变）
  * → 共用要求（{@code TodoService.promptSection()} + 严禁编造）→ transcript。
  *
@@ -41,31 +42,36 @@ public final class TemplatePrompts {
     private static final Spec MEETING = new Spec(
             "你是会议纪要助手。请阅读下面的转写全文，只输出**一个**严格的 JSON 对象（不要输出任何其它文字或代码块标记）：",
             "{\"summary\": \"不超过 200 字的会议摘要\", \"keywords\": [\"关键词1\", \"关键词2\"],"
-                    + " \"todos\": [{\"action\": \"要做的具体事项\", \"owner\": \"负责人\", \"deadline\": \"截止时间\"}]}",
+                    + " \"todos\": [{\"action\": \"要做的具体事项\", \"owner\": \"负责人\", \"deadline\": \"截止时间\"}],"
+                    + " \"keypoints\": [{\"title\": \"要点小标题\", \"detail\": \"40~120 字的要点说明\"}]}",
             "1. summary 覆盖主要议题与结论，不超过 200 字；");
 
     private static final Spec COURSE = new Spec(
             "你是课程笔记助手。请阅读下面的转写全文，只输出**一个**严格的 JSON 对象（不要输出任何其它文字或代码块标记）：",
             "{\"summary\": \"不超过 200 字的课程笔记摘要\", \"keywords\": [\"关键词1\", \"关键词2\"],"
-                    + " \"todos\": [{\"action\": \"要做的具体事项\", \"owner\": \"负责人\", \"deadline\": \"截止时间\"}]}",
+                    + " \"todos\": [{\"action\": \"要做的具体事项\", \"owner\": \"负责人\", \"deadline\": \"截止时间\"}],"
+                    + " \"keypoints\": [{\"title\": \"要点小标题\", \"detail\": \"40~120 字的要点说明\"}]}",
             "1. summary 按课堂知识点分点（含定义/公式/例题结论），并写明讲师强调的重点与考点、课后作业/复习要求，不超过 200 字；");
 
     private static final Spec INTERVIEW = new Spec(
             "你是访谈整理助手。请阅读下面的转写全文，只输出**一个**严格的 JSON 对象（不要输出任何其它文字或代码块标记）：",
             "{\"summary\": \"不超过 200 字的访谈纪要\", \"keywords\": [\"关键词1\", \"关键词2\"],"
-                    + " \"todos\": [{\"action\": \"要做的具体事项\", \"owner\": \"负责人\", \"deadline\": \"截止时间\"}]}",
+                    + " \"todos\": [{\"action\": \"要做的具体事项\", \"owner\": \"负责人\", \"deadline\": \"截止时间\"}],"
+                    + " \"keypoints\": [{\"title\": \"要点小标题\", \"detail\": \"40~120 字的要点说明\"}]}",
             "1. summary 以问答结构组织（问题 → 回答要点），提炼受访者核心观点与结论/金句，不超过 200 字；");
 
     private static final Spec PODCAST = new Spec(
             "你是播客 show notes 助手。请阅读下面的转写全文，只输出**一个**严格的 JSON 对象（不要输出任何其它文字或代码块标记）：",
             "{\"summary\": \"不超过 200 字的 show notes\", \"keywords\": [\"关键词1\", \"关键词2\"],"
-                    + " \"todos\": [{\"action\": \"要做的具体事项\", \"owner\": \"负责人\", \"deadline\": \"截止时间\"}]}",
+                    + " \"todos\": [{\"action\": \"要做的具体事项\", \"owner\": \"负责人\", \"deadline\": \"截止时间\"}],"
+                    + " \"keypoints\": [{\"title\": \"要点小标题\", \"detail\": \"40~120 字的要点说明\"}]}",
             "1. summary 写 show notes：主题、章节要点、提到的资源/人名/作品与可执行启发，不超过 200 字；");
 
     private static final Spec SHORTVIDEO = new Spec(
             "你是短视频拆解助手。请阅读下面的转写全文，只输出**一个**严格的 JSON 对象（不要输出任何其它文字或代码块标记）：",
             "{\"summary\": \"不超过 200 字的短视频拆解\", \"keywords\": [\"关键词1\", \"关键词2\"],"
-                    + " \"todos\": [{\"action\": \"要做的具体事项\", \"owner\": \"负责人\", \"deadline\": \"截止时间\"}]}",
+                    + " \"todos\": [{\"action\": \"要做的具体事项\", \"owner\": \"负责人\", \"deadline\": \"截止时间\"}],"
+                    + " \"keypoints\": [{\"title\": \"要点小标题\", \"detail\": \"40~120 字的要点说明\"}]}",
             "1. summary 提炼核心观点、论据/例子与可执行动作，并明确给出是否值得收藏的结论，不超过 200 字；");
 
     private static final Map<String, Spec> SPECS = Map.of(

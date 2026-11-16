@@ -109,6 +109,19 @@
     return html + '</div>';
   }
 
+  /* T4.17：音频要点（编号 + 加粗小标题 + ：说明）。null/空 = AI 未启用或本次未生成（历史任务同语义，D-109） */
+  function keypointsHtml(data) {
+    var html = '<div class="section"><h2>要点</h2>';
+    if (!data.keypoints || !data.keypoints.length) {
+      html += '<p class="hint" style="margin:0">AI 未启用或本次未生成，暂无要点。</p>';
+    } else {
+      html += '<ol class="keypoints">' + data.keypoints.map(function (kp) {
+        return '<li><strong>' + escapeHtml(kp.title) + '</strong>：' + escapeHtml(kp.detail) + '</li>';
+      }).join('') + '</ol>';
+    }
+    return html + '</div>';
+  }
+
   /* T4.15⑨：待办可勾选（PATCH）/ 可删除（DELETE）/ 依据定位⑧；D-104 口径：匹配不到写「未找到直接依据」 */
   function todosHtml(data) {
     var html = '<div class="section"><div class="section-head"><h2>待办</h2>' +
@@ -212,7 +225,7 @@
       body = '<div class="section"><p class="error-text">转写失败。原因：' + escapeHtml(errorTextOf(data.error_code)) + '</p>' +
         '<p class="hint">请检查 ASR 服务是否正常后，可在<a href="tasks.html">任务列表</a>按"失败"筛选并批量重试。</p></div>';
     } else if (status === 'DONE') {
-      body = summaryHtml(data) + todosHtml(data) + transcriptHtml(data) + exportHtml(data);
+      body = summaryHtml(data) + keypointsHtml(data) + todosHtml(data) + transcriptHtml(data) + exportHtml(data);
     } else {
       body = '<p class="hint">未知状态：' + escapeHtml(status) + '</p>';
     }

@@ -512,6 +512,11 @@ details.example[open] summary { margin-bottom: var(--sp-3); }
 
 /* 关键词可点定位 */
 .chip.linkable { cursor: pointer; }
+
+/* T4.17：要点列表（编号 + 加粗小标题）；padding 收窄防 390 宽溢出 */
+.keypoints { margin: 0; padding-left: 20px; }
+.keypoints li { margin: var(--sp-2) 0; font-size: var(--fs-sm); line-height: var(--lh-sm); overflow-wrap: anywhere; }
+.keypoints li strong { font-weight: var(--fw-semibold); }
 .chip.plain { cursor: default; }
 
 /* 页脚（T4.15：版本号 + GitHub 链接 + LICENSE；纯 <a> 不加载资源） */

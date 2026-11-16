@@ -45,7 +45,7 @@ class E2ETest {
 
     private static final List<String> DETAIL_KEYS = List.of(
             "task_id", "status", "duration_sec", "size_bytes", "created_at", "transcript",
-            "error_code", "summary", "keywords", "ai_tier", "todos", "template");
+            "error_code", "summary", "keywords", "ai_tier", "todos", "keypoints", "template");
 
     private static String textA;
     private static long taskId;
@@ -166,7 +166,7 @@ class E2ETest {
         assertEquals("DONE", detail.get("status").asText(), "60s 未 DONE，最后状态：" + abbreviate(last));
         List<String> keys = new ArrayList<>();
         detail.fieldNames().forEachRemaining(keys::add);
-        assertEquals(DETAIL_KEYS, keys, "详情键集 = 原 11 键 + template（不多不少、键序不变）");
+        assertEquals(DETAIL_KEYS, keys, "详情键集 = 原 11 键 + template（第 12）+ keypoints（T4.17 第 13）（不多不少、键序不变）");
         assertEquals(textA.trim(), detail.get("transcript").asText(), "PASTE transcript 与输入一致（trim）");
         assertFalse(detail.get("summary").asText().isBlank(), "summary 非空");
         assertTrue(detail.get("keywords").isArray(), "keywords 是数组");

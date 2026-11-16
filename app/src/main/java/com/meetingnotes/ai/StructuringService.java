@@ -19,15 +19,12 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 结构化编排（T3.3）：摘要 + 关键词 + 待办 **一次 LLM 调用**（F-7），三档**级联降级**（D-075）。
- *
- * <p>流程：首选档由 {@link AiStructuringRouter} 按 plan §5.1 判定 → 该档
- * 调用异常 / 空 content / {@code finish_reason=length} / JSON 解析失败 → **降一档再试**
- * （CLOUD → LOCAL → EXTRACTIVE）；{@code ai_tier} 落**实际产出结果的那一档**（D-020 诚实标注）。
- * EXTRACTIVE 零依赖兜底：transcript 非空就必定有产出；空 transcript 跳过结构化、{@code ai_tier} 留 null（D-048）。
- *
- * <p>不重试同一档（D-068/D-071）：空 content 重试还是空；"第二次机会"是换方法（降级）。
- * 同一档的失败诊断写 WARN：{@code finish_reason} + usage（含 reasoning_tokens）+ 原始输出截 200 字；阈值（summary 200 字 / keywords 10 / todos 20）解析后由**代码层**再截断（⑦ 体积预算兜底）。
+ * 结构化编排（T3.3）：摘要 + 关键词 + 待办 + 要点（T4.17）**一次 LLM 调用**（F-7），三档**级联降级**（D-075）。
+ * 流程：首选档由 {@link AiStructuringRouter} 判定 → 调用异常 / 空 content / {@code finish_reason=length} /
+ * JSON 解析失败 → **降一档再试**（CLOUD → LOCAL → EXTRACTIVE）；{@code ai_tier} 落**实际产出那一档**（D-020）。
+ * EXTRACTIVE 零依赖兜底：transcript 非空就必定有产出；空 transcript 跳过结构化（D-048）。
+ * 不重试同一档（D-068/D-071）；失败诊断写 WARN（finish_reason + usage + 原始输出截 200 字）；
+ * 阈值（summary 200 字 / keywords 10 / todos 20 / keypoints 15）解析后由**代码层**再截断（⑦ 预算兜底）。
  */
 @Service
 public class StructuringService {
@@ -63,10 +60,7 @@ public class StructuringService {
         this.extractiveEnabled = extractiveEnabled;
     }
 
-    /**
-     * @return true = 结构化结果（summary/keywords/todos/ai_tier）已写入 task_result；
-     *         false = 空 transcript 跳过，或降级链耗尽（三个字段一起留空，任务仍 DONE）
-     */
+    /** @return true = 结果已写入 task_result；false = 空 transcript 跳过或降级链耗尽（字段一起留空，任务仍 DONE） */
     public boolean structure(long taskId, String transcript) {
         if (transcript == null || transcript.isBlank()) {
             log.info("transcript 为空（D-048 无语音内容），跳过结构化，ai_tier 留 null");
@@ -158,9 +152,10 @@ public class StructuringService {
     }
 
     /**
-     * 合并 JSON 解析（同一个 DTO，三档同构）：summary 必填，keywords/todos 容错但形状必须合法。
+     * 合并 JSON 解析（同一个 DTO，三档同构）：summary 必填，keywords/todos 容错但形状必须合法；
+     * keypoints 容错且**不参与降级**（T4.17/D-109：缺失或形状不合法 → null，其余字段照常落库）。
      * T3.4 ④：先经 {@link JsonExtractor} 抽取（散文包裹 / ```json 围栏），抽不到才按解析失败处理——
-     * 不放宽提示词硬约束，失败语义（三字段一起留空 + 降级）不变。
+     * 不放宽提示词硬约束，失败语义（其余字段一起留空 + 降级）不变。
      */
     StructuringResult parse(String raw, AiTier tier) {
         JsonNode root;
@@ -178,7 +173,8 @@ public class StructuringService {
             throw new IllegalArgumentException("缺少 summary 字段");
         }
         return new StructuringResult(truncateSummary(summary.trim()),
-                keywords(root.path("keywords")), todoService.parse(root), tier);
+                keywords(root.path("keywords")), todoService.parse(root),
+                Keypoints.parse(root.path("keypoints")), tier);
     }
 
     private static List<String> keywords(JsonNode node) {
@@ -198,10 +194,10 @@ public class StructuringService {
         return keywords;
     }
 
-    /** ⑨ 三档统一：owner/deadline 无依据置 null，action 无依据整条丢弃（D-076）。 */
+    /** ⑨ 三档统一：owner/deadline 无依据置 null，action 无依据整条丢弃（D-076）；keypoints 原样透传。 */
     private static StructuringResult withGroundedTodos(StructuringResult result, String transcript) {
         return new StructuringResult(result.summary(), result.keywords(),
-                TodoGrounding.validate(result.todos(), transcript), result.aiTier());
+                TodoGrounding.validate(result.todos(), transcript), result.keypoints(), result.aiTier());
     }
 
     /** 读提交时落库的模板（T3.9）：COALESCE 兜 NULL（旧任务）→ meeting；查不到行同样按 meeting。 */
@@ -217,13 +213,16 @@ public class StructuringService {
 
     private void persist(long taskId, StructuringResult result) {
         jdbc.update("""
-                UPDATE task_result SET summary = ?, keywords = ?::jsonb, todos = ?::jsonb, ai_tier = ?
+                UPDATE task_result SET summary = ?, keywords = ?::jsonb, todos = ?::jsonb, keypoints = ?::jsonb,
+                       ai_tier = ?
                 WHERE task_id = ?
                 """, result.summary(), toJson(result.keywords()), toJson(result.todos()),
+                result.keypoints() == null ? null : toJson(result.keypoints()),
                 result.aiTier().name(), taskId);
-        log.info("结构化已落库（ai_tier={}，summary {} 字，keywords {} 个，todos {} 条）",
+        log.info("结构化已落库（ai_tier={}，summary {} 字，keywords {} 个，todos {} 条，keypoints {}）",
                 result.aiTier().name(), result.summary().length(),
-                result.keywords().size(), result.todos().size());
+                result.keywords().size(), result.todos().size(),
+                result.keypoints() == null ? "未生成" : result.keypoints().size() + " 条");
     }
 
     private String toJson(Object value) {

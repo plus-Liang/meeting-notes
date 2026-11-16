@@ -29,6 +29,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -40,6 +41,7 @@ import static org.mockito.Mockito.when;
 /**
  * T3.3 主任务：结构化编排——**一次** LLM 调用出 summary/keywords/todos（F-7）、
  * 三档级联降级（D-075）、ai_tier 诚实落库（D-020）、⑨ 依据校验、⑦ 体积预算截断。
+ * T4.17（D-109）：同次调用出 keypoints——缺失/形状不合法 → null（**不整条降级**），条数截断 15。
  *
  * <p>关键可证伪断言：{@code verify(model, times(1)).call(...)}——把实现改回"两次调用"或"失败重试"都会红。
  */
@@ -47,7 +49,13 @@ import static org.mockito.Mockito.when;
 class StructuringServiceTest {
 
     private static final String TRANSCRIPT = "由张三负责整理材料，下周三截止。";
+    private static final String KEYPOINTS_JSON =
+            "[{\"title\":\"材料整理\",\"detail\":\"由张三负责整理材料，下周三截止，会后提交。\"}]";
     private static final String VALID_JSON = "{\"summary\":\"会议讨论了材料整理\",\"keywords\":[\"材料整理\"],"
+            + "\"todos\":[{\"action\":\"整理材料\",\"owner\":\"张三\",\"deadline\":\"下周三\"}],"
+            + "\"keypoints\":" + KEYPOINTS_JSON + "}";
+    /** 无 keypoints 的合法输出（旧口径 / LLM 没产要点）：keypoints 落 null，其余字段照常。 */
+    private static final String VALID_JSON_NO_KEYPOINTS = "{\"summary\":\"会议讨论了材料整理\",\"keywords\":[\"材料整理\"],"
             + "\"todos\":[{\"action\":\"整理材料\",\"owner\":\"张三\",\"deadline\":\"下周三\"}]}";
 
     @Mock
@@ -86,7 +94,7 @@ class StructuringServiceTest {
     }
 
     @Test
-    void oneCallProducesAllThreeFieldsAndPersistsTierCloud() {
+    void oneCallProducesAllFieldsAndPersistsTierCloud() {
         when(cloudProvider.getIfAvailable()).thenReturn(cloudModel);
         when(cloudModel.call(any(Prompt.class))).thenReturn(response(VALID_JSON, "stop"));
 
@@ -96,11 +104,12 @@ class StructuringServiceTest {
         verify(jdbc).update(contains("UPDATE task_result"),
                 eq("会议讨论了材料整理"), eq("[\"材料整理\"]"),
                 eq("[{\"action\":\"整理材料\",\"owner\":\"张三\",\"deadline\":\"下周三\"}]"),
+                eq(KEYPOINTS_JSON),
                 eq("CLOUD"), eq(7L));
     }
 
     @Test
-    void singleMergedPromptCarriesSummaryKeywordsAndTodosAtOnce() {
+    void singleMergedPromptCarriesSummaryKeywordsTodosAndKeypointsAtOnce() {
         when(cloudProvider.getIfAvailable()).thenReturn(cloudModel);
         when(cloudModel.call(any(Prompt.class))).thenReturn(response(VALID_JSON, "stop"));
 
@@ -112,7 +121,10 @@ class StructuringServiceTest {
         assertTrue(prompt.contains("\"summary\""), "一次调用里必须同时要 summary");
         assertTrue(prompt.contains("\"keywords\""), "一次调用里必须同时要 keywords");
         assertTrue(prompt.contains("\"todos\""), "一次调用里必须同时要 todos（F-7）");
+        assertTrue(prompt.contains("\"keypoints\""), "一次调用里必须同时要 keypoints（T4.17）");
         assertTrue(prompt.contains("最多 20 条"), "F-5：条数口径进提示词");
+        assertTrue(prompt.contains("最多 15 条") && prompt.contains("detail 40~120 字"),
+                "T4.17：要点口径进提示词");
         assertTrue(prompt.contains(TRANSCRIPT), "transcript 只交一次");
     }
 
@@ -126,7 +138,7 @@ class StructuringServiceTest {
         assertTrue(newService(true).structure(9L, TRANSCRIPT));
 
         verify(cloudModel, times(1)).call(any(Prompt.class));
-        verify(jdbc).update(contains("UPDATE task_result"), anyString(), anyString(), anyString(), eq("LOCAL"), eq(9L));
+        verify(jdbc).update(contains("UPDATE task_result"), anyString(), anyString(), anyString(), anyString(), eq("LOCAL"), eq(9L));
     }
 
     @Test
@@ -138,7 +150,7 @@ class StructuringServiceTest {
 
         newService(true).structure(10L, TRANSCRIPT);
 
-        verify(jdbc).update(contains("UPDATE task_result"), anyString(), anyString(), anyString(), eq("LOCAL"), eq(10L));
+        verify(jdbc).update(contains("UPDATE task_result"), anyString(), anyString(), anyString(), anyString(), eq("LOCAL"), eq(10L));
     }
 
     @Test
@@ -151,11 +163,11 @@ class StructuringServiceTest {
         newService(true).structure(11L, TRANSCRIPT);
 
         verify(cloudModel, times(1)).call(any(Prompt.class));
-        verify(jdbc).update(contains("UPDATE task_result"), anyString(), anyString(), anyString(), eq("LOCAL"), eq(11L));
+        verify(jdbc).update(contains("UPDATE task_result"), anyString(), anyString(), anyString(), anyString(), eq("LOCAL"), eq(11L));
     }
 
     @Test
-    void parseFailureLeavesAllThreeFieldsEmptyAndFallsThroughToExtractive() {
+    void parseFailureLeavesAllFieldsEmptyAndFallsThroughToExtractive() {
         when(cloudProvider.getIfAvailable()).thenReturn(cloudModel);
         when(cloudModel.call(any(Prompt.class))).thenReturn(response("这不是 JSON", "stop"));
 
@@ -163,7 +175,7 @@ class StructuringServiceTest {
 
         ArgumentCaptor<String> summary = ArgumentCaptor.forClass(String.class);
         verify(jdbc).update(contains("UPDATE task_result"), summary.capture(),
-                anyString(), anyString(), eq("EXTRACTIVE"), eq(12L));
+                anyString(), anyString(), isNull(), eq("EXTRACTIVE"), eq(12L));
         assertFalse(summary.getValue().isBlank(), "抽取式兜底必须给出非空 summary");
         assertTrue(summary.getValue().length() <= 200, "⑦ 预算：抽取式 summary 也受 200 字上限");
     }
@@ -174,7 +186,7 @@ class StructuringServiceTest {
 
         ArgumentCaptor<String> summary = ArgumentCaptor.forClass(String.class);
         verify(jdbc).update(contains("UPDATE task_result"), summary.capture(),
-                anyString(), anyString(), eq("EXTRACTIVE"), eq(13L));
+                anyString(), anyString(), isNull(), eq("EXTRACTIVE"), eq(13L));
         assertFalse(summary.getValue().isBlank());
         verifyNoInteractions(cloudModel, localModel);
     }
@@ -191,7 +203,7 @@ class StructuringServiceTest {
         when(cloudProvider.getIfAvailable()).thenReturn(cloudModel);
         when(cloudModel.call(any(Prompt.class))).thenReturn(response("坏 JSON", "stop"));
 
-        assertFalse(newService(false).structure(15L, TRANSCRIPT), "第三档被开关关掉时降级链耗尽 → 三字段留空");
+        assertFalse(newService(false).structure(15L, TRANSCRIPT), "第三档被开关关掉时降级链耗尽 → 字段留空");
 
         // T3.8（K-31）：varargs never() 按"逐位 matcher"才不会空过——这里改为可靠断言：
         // jdbc 只发生 1 次 query（读模板，只读），除此之外**零交互**（失败路径零写库是真绿，
@@ -213,7 +225,7 @@ class StructuringServiceTest {
 
         ArgumentCaptor<String> todosJson = ArgumentCaptor.forClass(String.class);
         verify(jdbc).update(contains("UPDATE task_result"), anyString(), anyString(), todosJson.capture(),
-                eq("CLOUD"), eq(16L));
+                isNull(), eq("CLOUD"), eq(16L));
         assertTrue(todosJson.getValue().contains("\"deadline\":null"), "⑨ 原文没有 2023-04-15 → 置 null，实际："
                 + todosJson.getValue());
         assertTrue(todosJson.getValue().contains("\"owner\":null"), "⑨ 原文没有'李四' → 置 null");
@@ -236,7 +248,7 @@ class StructuringServiceTest {
         ArgumentCaptor<String> summary = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<String> keywordsJson = ArgumentCaptor.forClass(String.class);
         verify(jdbc).update(contains("UPDATE task_result"), summary.capture(), keywordsJson.capture(),
-                eq("[]"), eq("CLOUD"), eq(17L));
+                eq("[]"), isNull(), eq("CLOUD"), eq(17L));
         assertEquals(200, summary.getValue().length(), "⑦ 预算：summary 代码层截断 200 字");
         JsonNode parsed = mapper.readTree(keywordsJson.getValue());
         assertEquals(10, parsed.size(), "⑦ 预算：keywords 代码层截断 10 个");
@@ -270,7 +282,7 @@ class StructuringServiceTest {
 
         ArgumentCaptor<String> todosJson = ArgumentCaptor.forClass(String.class);
         verify(jdbc).update(contains("UPDATE task_result"), anyString(), anyString(), todosJson.capture(),
-                eq("CLOUD"), eq(18L));
+                isNull(), eq("CLOUD"), eq(18L));
         assertEquals(20, todosJson.getValue().split("action", -1).length - 1,
                 "F-5：代码层截断 20 条，实际：" + todosJson.getValue());
     }
@@ -283,7 +295,7 @@ class StructuringServiceTest {
 
         newService(true).structure(19L, TRANSCRIPT);
 
-        verify(jdbc).update(contains("UPDATE task_result"), eq("会议"), eq("[]"), eq("[]"), eq("CLOUD"), eq(19L));
+        verify(jdbc).update(contains("UPDATE task_result"), eq("会议"), eq("[]"), eq("[]"), isNull(), eq("CLOUD"), eq(19L));
     }
 
     // ---- T3.4 ④ JSON 抽取容错（云/本地共用） ----
@@ -298,7 +310,7 @@ class StructuringServiceTest {
         assertTrue(newService(true).structure(20L, TRANSCRIPT));
 
         verify(jdbc).update(contains("UPDATE task_result"), eq("会议讨论了材料整理"),
-                anyString(), anyString(), eq("CLOUD"), eq(20L));
+                anyString(), anyString(), anyString(), eq("CLOUD"), eq(20L));
     }
 
     @Test
@@ -311,7 +323,7 @@ class StructuringServiceTest {
         assertTrue(newService(true).structure(21L, TRANSCRIPT));
 
         verify(jdbc).update(contains("UPDATE task_result"), eq("会议讨论了材料整理"),
-                anyString(), anyString(), eq("CLOUD"), eq(21L));
+                anyString(), anyString(), anyString(), eq("CLOUD"), eq(21L));
     }
 
     @Test
@@ -323,7 +335,7 @@ class StructuringServiceTest {
         assertTrue(newService(true).structure(22L, TRANSCRIPT));
 
         verify(jdbc).update(contains("UPDATE task_result"), anyString(), anyString(), anyString(),
-                eq("EXTRACTIVE"), eq(22L));
+                isNull(), eq("EXTRACTIVE"), eq(22L));
     }
 
     // ---- T3.6 术语注入（glossary → 提示词，US-3 闭环） ----
@@ -401,9 +413,10 @@ class StructuringServiceTest {
         newService(true).structure(42L, TRANSCRIPT);
 
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
-        verify(jdbc).update(sql.capture(), anyString(), anyString(), anyString(), eq("CLOUD"), eq(42L));
-        assertTrue(sql.getValue().contains("summary") && sql.getValue().contains("ai_tier"),
-                "persist 只更新 summary/keywords/todos/ai_tier：" + sql.getValue());
+        verify(jdbc).update(sql.capture(), anyString(), anyString(), anyString(), anyString(), eq("CLOUD"), eq(42L));
+        assertTrue(sql.getValue().contains("summary") && sql.getValue().contains("ai_tier")
+                        && sql.getValue().contains("keypoints"),
+                "persist 只更新 summary/keywords/todos/keypoints/ai_tier：" + sql.getValue());
         assertFalse(sql.getValue().contains("template"), "T3.9 坑 3：结构化不得把 template 覆盖成 NULL");
     }
 
@@ -421,13 +434,13 @@ class StructuringServiceTest {
         verify(localModel, times(1)).call(any(Prompt.class));
         ArgumentCaptor<String> summary = ArgumentCaptor.forClass(String.class);
         verify(jdbc).update(contains("UPDATE task_result"), summary.capture(),
-                anyString(), anyString(), eq("EXTRACTIVE"), eq(50L));
+                anyString(), anyString(), isNull(), eq("EXTRACTIVE"), eq(50L));
         assertFalse(summary.getValue().isBlank(), "EXTRACTIVE 兜底必须产出非空 summary");
     }
 
     @Test
     void nonStringSummaryFailsParsingAndDegradesToExtractive() {
-        // 畸形矩阵：summary 是 JSON 对象（非字符串）→ 解析失败 → 三字段一起留空并降级，任务不失败
+        // 畸形矩阵：summary 是 JSON 对象（非字符串）→ 解析失败 → 其余字段一起留空并降级，任务不失败
         when(cloudProvider.getIfAvailable()).thenReturn(cloudModel);
         when(cloudModel.call(any(Prompt.class))).thenReturn(response(
                 "{\"summary\":{\"text\":\"对象型 summary\"},\"keywords\":[],\"todos\":[]}", "stop"));
@@ -435,7 +448,7 @@ class StructuringServiceTest {
         assertTrue(newService(true).structure(51L, TRANSCRIPT));
 
         verify(jdbc).update(contains("UPDATE task_result"), anyString(), anyString(), anyString(),
-                eq("EXTRACTIVE"), eq(51L));
+                isNull(), eq("EXTRACTIVE"), eq(51L));
     }
 
     @Test
@@ -448,7 +461,7 @@ class StructuringServiceTest {
         assertTrue(newService(true).structure(52L, TRANSCRIPT));
 
         verify(jdbc).update(contains("UPDATE task_result"), eq("正常摘要"),
-                eq("[\"123\",\"有效词\"]"), eq("[]"), eq("CLOUD"), eq(52L));
+                eq("[\"123\",\"有效词\"]"), eq("[]"), isNull(), eq("CLOUD"), eq(52L));
     }
 
     @Test
@@ -462,7 +475,7 @@ class StructuringServiceTest {
         assertTrue(newService(true).structure(53L, TRANSCRIPT));
 
         verify(jdbc).update(contains("UPDATE task_result"), eq("摘要"), anyString(),
-                eq("[]"), eq("CLOUD"), eq(53L));
+                eq("[]"), isNull(), eq("CLOUD"), eq(53L));
     }
 
     @Test
@@ -475,7 +488,7 @@ class StructuringServiceTest {
         assertTrue(newService(true).structure(54L, TRANSCRIPT));
 
         verify(jdbc).update(contains("UPDATE task_result"), anyString(), anyString(), anyString(),
-                eq("EXTRACTIVE"), eq(54L));
+                isNull(), eq("EXTRACTIVE"), eq(54L));
     }
 
     // ---- T4.1 F-15：EXTRACTIVE 读词表（D-089） ----
@@ -492,7 +505,7 @@ class StructuringServiceTest {
         verify(termSource, times(1)).terms();
         ArgumentCaptor<String> summary = ArgumentCaptor.forClass(String.class);
         verify(jdbc).update(contains("UPDATE task_result"), summary.capture(), anyString(),
-                anyString(), eq("EXTRACTIVE"), eq(60L));
+                anyString(), isNull(), eq("EXTRACTIVE"), eq(60L));
         assertFalse(summary.getValue().contains("工作副盘"), "错词必须被词表纠正");
         assertTrue(summary.getValue().contains("工作复盘"), "实际落库：" + summary.getValue());
     }
@@ -506,8 +519,88 @@ class StructuringServiceTest {
 
         ArgumentCaptor<String> summary = ArgumentCaptor.forClass(String.class);
         verify(jdbc).update(contains("UPDATE task_result"), summary.capture(), anyString(),
-                anyString(), eq("EXTRACTIVE"), eq(61L));
+                anyString(), isNull(), eq("EXTRACTIVE"), eq(61L));
         assertTrue(summary.getValue().contains("工作副盘"), "无词表不得改变输出：" + summary.getValue());
+    }
+
+    // ---- T4.17（D-109）：keypoints 解析容错与预算 ----
+
+    @Test
+    void missingKeypointsPersistAsNullWithoutAffectingOtherFields() {
+        // LLM 输出没有 keypoints（旧口径/没产要点）→ keypoints 落 null，summary/keywords/todos 照常落库，不降级
+        when(cloudProvider.getIfAvailable()).thenReturn(cloudModel);
+        when(cloudModel.call(any(Prompt.class))).thenReturn(response(VALID_JSON_NO_KEYPOINTS, "stop"));
+
+        assertTrue(newService(true).structure(70L, TRANSCRIPT));
+
+        verify(jdbc).update(contains("UPDATE task_result"),
+                eq("会议讨论了材料整理"), eq("[\"材料整理\"]"),
+                eq("[{\"action\":\"整理材料\",\"owner\":\"张三\",\"deadline\":\"下周三\"}]"),
+                isNull(), eq("CLOUD"), eq(70L));
+    }
+
+    @Test
+    void malformedKeypointsShapeBecomesNullWithoutDegrading() {
+        // 畸形矩阵（D-109 核心）：keypoints 是字符串/对象（非数组）→ 置 null，**不整条降级**（仍 CLOUD 落库）
+        when(cloudProvider.getIfAvailable()).thenReturn(cloudModel);
+        when(cloudModel.call(any(Prompt.class))).thenReturn(response(
+                "{\"summary\":\"正常摘要\",\"keywords\":[],\"todos\":[],\"keypoints\":\"不是数组\"}", "stop"));
+
+        assertTrue(newService(true).structure(71L, TRANSCRIPT));
+
+        verify(jdbc).update(contains("UPDATE task_result"), eq("正常摘要"), eq("[]"), eq("[]"),
+                isNull(), eq("CLOUD"), eq(71L));
+    }
+
+    @Test
+    void objectKeypointsShapeAlsoBecomesNull() {
+        when(cloudProvider.getIfAvailable()).thenReturn(cloudModel);
+        when(cloudModel.call(any(Prompt.class))).thenReturn(response(
+                "{\"summary\":\"正常摘要\",\"keywords\":[],\"todos\":[],\"keypoints\":{\"title\":\"x\"}}", "stop"));
+
+        assertTrue(newService(true).structure(72L, TRANSCRIPT));
+
+        verify(jdbc).update(contains("UPDATE task_result"), eq("正常摘要"), eq("[]"), eq("[]"),
+                isNull(), eq("CLOUD"), eq(72L));
+    }
+
+    @Test
+    void keypointsTruncatedTo15WhenModelOverProduces() {
+        StringBuilder kps = new StringBuilder("[");
+        for (int i = 1; i <= 20; i++) {
+            kps.append(i == 1 ? "" : ",").append("{\"title\":\"要点").append(i)
+                    .append("\",\"detail\":\"第").append(i).append("条要点说明。\"}");
+        }
+        kps.append("]");
+        String json = "{\"summary\":\"会议\",\"keywords\":[],\"todos\":[],\"keypoints\":" + kps + "}";
+        when(cloudProvider.getIfAvailable()).thenReturn(cloudModel);
+        when(cloudModel.call(any(Prompt.class))).thenReturn(response(json, "stop"));
+
+        newService(true).structure(73L, TRANSCRIPT);
+
+        ArgumentCaptor<String> kpsJson = ArgumentCaptor.forClass(String.class);
+        verify(jdbc).update(contains("UPDATE task_result"), eq("会议"), eq("[]"), eq("[]"),
+                kpsJson.capture(), eq("CLOUD"), eq(73L));
+        assertEquals(15, kpsJson.getValue().split("\"title\"", -1).length - 1,
+                "⑦ 预算：keypoints 代码层截断 15 条，实际：" + kpsJson.getValue());
+    }
+
+    @Test
+    void blankTitleOrDetailKeypointElementsAreDropped() {
+        // 畸形矩阵：元素缺 title / 缺 detail / 非对象 → 丢弃（宁缺毋滥）；有效条目保留
+        when(cloudProvider.getIfAvailable()).thenReturn(cloudModel);
+        when(cloudModel.call(any(Prompt.class))).thenReturn(response(
+                "{\"summary\":\"正常摘要\",\"keywords\":[],\"todos\":[],\"keypoints\":["
+                        + "{\"title\":\"只有标题\"},{\"detail\":\"只有说明\"},\"纯文本\","
+                        + "{\"title\":\"有效要点\",\"detail\":\"这条有标题也有说明。\"}]}", "stop"));
+
+        newService(true).structure(74L, TRANSCRIPT);
+
+        ArgumentCaptor<String> kpsJson = ArgumentCaptor.forClass(String.class);
+        verify(jdbc).update(contains("UPDATE task_result"), eq("正常摘要"), eq("[]"), eq("[]"),
+                kpsJson.capture(), eq("CLOUD"), eq(74L));
+        assertEquals("[{\"title\":\"有效要点\",\"detail\":\"这条有标题也有说明。\"}]", kpsJson.getValue(),
+                "无效条目丢弃、有效条目保留，实际：" + kpsJson.getValue());
     }
 
     /** T4.16b/D-107：摘要句边界截断——不再切半句。 */

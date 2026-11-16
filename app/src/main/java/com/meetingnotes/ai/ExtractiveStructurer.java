@@ -68,13 +68,14 @@ public final class ExtractiveStructurer {
     public static StructuringResult extract(String transcript) {
         List<String> sentences = ExtractiveSegmenter.sentences(transcript);
         if (sentences.isEmpty()) {
-            return new StructuringResult("", List.of(), List.of(), AiTier.EXTRACTIVE);
+            return new StructuringResult("", List.of(), List.of(), null, AiTier.EXTRACTIVE);
         }
         Map<String, Integer> termFrequency = termFrequency(sentences);
         return new StructuringResult(
                 summaryOf(sentences, termFrequency),
                 keywordsOf(termFrequency),
                 todosOf(sentences),
+                null,
                 AiTier.EXTRACTIVE);
     }
 

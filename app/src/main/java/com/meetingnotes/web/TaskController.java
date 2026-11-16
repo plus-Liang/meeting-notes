@@ -120,10 +120,7 @@ public class TaskController {
                         body == null ? null : body.template()));
     }
 
-    /**
-     * 批量重试（T4.1）：只处理 DEAD（复活口径与重传复活 D-049 逐字一致，不消费配额）；
-     * 非 DEAD / 不存在 / 非本人 → 逐条 skipped（NOT_DEAD / NOT_FOUND），不整体失败。
-     */
+    /** 批量重试（T4.1）：只处理 DEAD（复活口径与重传复活 D-049 逐字一致，不消费配额）；非 DEAD/不存在/非本人 → 逐条 skipped（NOT_DEAD / NOT_FOUND），不整体失败。 */
     @PostMapping(value = "/tasks/retry", consumes = MediaType.APPLICATION_JSON_VALUE)
     public TaskRetryResponse retry(@RequestBody RetryRequest body) {
         TaskRetryService.RetryOutcome outcome = taskRetryService.retry(body == null ? null : body.ids());
@@ -184,16 +181,13 @@ public class TaskController {
         return taskQueryService.list(DEFAULT_USER_ID, statusFilter, lim, before);
     }
 
-    /**
-     * 查任务状态（前端轮询 / 接入方）。未到 DONE 时 transcript 恒为 null；
-     * error_code 仅 RETRYING/DEAD 有值（S-3）；查询带 user_id（D-040），不存在时 404 TASK_NOT_FOUND。
-     */
+    /** 查任务状态（前端轮询/接入方）。未到 DONE 时 transcript 恒 null；error_code 仅 RETRYING/DEAD 有值（S-3）；查询带 user_id（D-040），不存在时 404 TASK_NOT_FOUND。 */
     @GetMapping("/tasks/{id}")
     public TaskStatusResponse status(@PathVariable("id") long id) {
         TaskStatusResponse resp = jdbc.query("""
                 SELECT t.id, t.status, t.duration_sec, t.size_bytes, t.created_at, t.error_code,
                        CASE WHEN t.status = 'DONE' THEN r.transcript END AS transcript,
-                       r.summary, r.keywords, r.ai_tier, r.todos, r.template
+                       r.summary, r.keywords, r.ai_tier, r.todos, r.keypoints, r.template
                 FROM task t
                 LEFT JOIN task_result r ON r.task_id = t.id
                 WHERE t.id = ? AND t.user_id = ?
@@ -231,11 +225,24 @@ public class TaskController {
                             todos = null;
                         }
                     }
+                    // keypoints 列是 JSONB（T4.17/D-109）：缺失/坏数据 → null（历史任务与"未生成"同语义），不炸接口
+                    List<KeypointView> keypoints = null;
+                    String keypointsRaw = rs.getString("keypoints");
+                    if (keypointsRaw != null && !keypointsRaw.isBlank()) {
+                        try {
+                            JsonNode kpArray = mapper.readTree(keypointsRaw);
+                            if (kpArray.isArray()) {
+                                keypoints = KeypointView.listFrom(kpArray);
+                            }
+                        } catch (Exception e) {
+                            keypoints = null;
+                        }
+                    }
                     return new TaskStatusResponse(rs.getLong("id"), rs.getString("status"),
                             duration, size,
                             rs.getObject("created_at", OffsetDateTime.class), rs.getString("transcript"),
                             rs.getString("error_code"), rs.getString("summary"), keywords,
-                            rs.getString("ai_tier"), todos, rs.getString("template"));
+                            rs.getString("ai_tier"), todos, keypoints, rs.getString("template"));
                 },
                 id, DEFAULT_USER_ID);
         if (resp == null) {

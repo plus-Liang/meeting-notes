@@ -17,8 +17,8 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 /**
- * 导出 Markdown（T3.7 / US-2；T3.9 从 {@link TaskController} 整体抽出，行为逐字节不变）：
- * 三节固定顺序（摘要/关键词/待办），待办带 done 勾选状态。
+ * 导出 Markdown（T3.7 / US-2；T3.9 从 {@link TaskController} 整体抽出，行为逐字节不变；
+ * T4.17 增「要点」节）：四节固定顺序（摘要/关键词/要点/待办），待办带 done 勾选状态。
  * format 目前只支持 md；任务不存在 → 404；无内容（未 DONE/transcript 空）→ 400。
  */
 @RestController
@@ -43,17 +43,20 @@ public class TaskExportController {
         if (!"md".equals(format)) {
             throw new ApiException(400, "INVALID_PARAM", "format 目前只支持 md");
         }
-        record ExportRow(String status, String transcript, String summary, String keywords, String todos) {
+        record ExportRow(String status, String transcript, String summary,
+                         String keywords, String todos, String keypoints) {
         }
         List<ExportRow> rows = jdbc.query("""
                 SELECT t.status,
                        CASE WHEN t.status = 'DONE' THEN r.transcript END AS transcript,
-                       r.summary, r.keywords::text AS keywords, r.todos::text AS todos
+                       r.summary, r.keywords::text AS keywords, r.todos::text AS todos,
+                       r.keypoints::text AS keypoints
                 FROM task t
                 LEFT JOIN task_result r ON r.task_id = t.id
                 WHERE t.id = ? AND t.user_id = ?
                 """, (rs, i) -> new ExportRow(rs.getString("status"), rs.getString("transcript"),
-                rs.getString("summary"), rs.getString("keywords"), rs.getString("todos")),
+                rs.getString("summary"), rs.getString("keywords"), rs.getString("todos"),
+                rs.getString("keypoints")),
                 id, DEFAULT_USER_ID);
         if (rows.isEmpty()) {
             throw new ApiException(404, "TASK_NOT_FOUND", "任务 " + id + " 不存在");
@@ -64,6 +67,7 @@ public class TaskExportController {
         }
         List<String> keywords = null;
         List<TodoItemView> todos = null;
+        List<KeypointView> keypoints = null;
         try {
             if (row.keywords() != null && !row.keywords().isBlank()) {
                 keywords = mapper.readValue(row.keywords(), new TypeReference<List<String>>() { });
@@ -73,11 +77,17 @@ public class TaskExportController {
             if (todosNode != null && todosNode.isArray()) {
                 todos = TodoItemView.listFrom(todosNode);
             }
+            JsonNode kpNode = row.keypoints() == null || row.keypoints().isBlank()
+                    ? null : mapper.readTree(row.keypoints());
+            if (kpNode != null && kpNode.isArray()) {
+                keypoints = KeypointView.listFrom(kpNode);
+            }
         } catch (Exception e) {
             keywords = null;
             todos = null;
+            keypoints = null;
         }
-        String markdown = TaskMarkdownExporter.export(row.summary(), keywords, todos);
+        String markdown = TaskMarkdownExporter.export(row.summary(), keywords, keypoints, todos);
         return ResponseEntity.ok()
                 .contentType(new MediaType("text", "markdown", StandardCharsets.UTF_8))
                 .header("Content-Disposition", "attachment; filename=\"task-" + id + ".md\"")
