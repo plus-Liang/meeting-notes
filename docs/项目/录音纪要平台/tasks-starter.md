@@ -2473,6 +2473,22 @@ F-15 控制在 ≤30 行并集中一处；新增静态资源不引第三方库�
 
 ---
 
+## T4.23b T4.23 微修：空归一化摘要句被误判"命中"（约 5–10min；**下一张卡开工前置**）
+
+> **要证明的事**（我在 T4.23 验收时页面内探针实测）：`mnGroundSummaryWindow('。。', transcript)` / `('……', transcript)` 返回 **hit=true**，并配第一句原文当"依据"。根因：`groundWindowBest` 在 `bigrams.length===0` 时走 `windowNorm.indexOf(norm) >= 0`，而 `mnNormalize('。。')==''`、**任何字符串 `indexOf("")===0`** → rate=1。既有 `mnGroundSentence` 有 `if (!normAction) return null;` 守卫，新 helper 漏了 → 摘要里若出现仅标点片段（连续句末标点/"……"单独成段，模型偶发），会显示**假依据**，违反 D-104。
+>
+> **改动**（只改 `app.js`，不动 task.html/style.css）：
+> 1. `groundWindowBest` 开头加空归一化守卫：`norm` 为空（或 `mnNormalize` 后为空）→ `return null`；`mnGroundSummaryWindow` 里该摘要句直接 `hit=false`（渲染为"第 N 句 · 未找到直接依据"，不跳过、不改行数口径）。
+> 2. 注释写清"空内容不得参与相似度判定"。
+>
+> **测试**：无 JS 单测框架，写 Playwright 注入探针（`page.evaluate` 直接调 helper 即可，0 配额）：`('。。')` / `('……')` / `('   ')` → 全部 hit=false；正常句仍能命中（用 256 原文句做正例）；真实 256 仍 0/3 不回归。
+>
+> **判据**：`-UnitOnly` 全绿（纯静态本不改后端，但按纪律跑一遍）；**先 commit → build/up → 容器静态 sha256 == 工作区**（K-50/K-63）；探针 4 例全过；单 commit `fix(T4.23)`；不 push。
+>
+> **禁止**：改阈值/改行数口径/改文案；动后端或 DB。
+
+---
+
 ## T4.25 统计摘要 `GET /api/v1/stats`（约 3–4h；新端点；用户清单 1.2）
 
 > **要证明的事**：设置页现在只有配额/档位/术语/静态版本号，没有"我的使用"数据。新端点 + 设置页一张卡。
