@@ -2359,6 +2359,31 @@ F-15 控制在 ≤30 行并集中一处；新增静态资源不引第三方库�
 >
 > 证据落 `D:\new\artifacts\T4.21b\workbuddy\`（单测日志、探针命令 + 前后 `ls` 输出、DB 行查询）。
 
+## T4.22 上传页模板选择器（约 1h；0 配额；**纯 static**；D-119，补"已有能力没摆出来"）**✅ 已通过（2026-11-16，`92abadc`，第 46 份报告，D-120；我自写 Playwright 18/18，0 配额）**
+
+> **要证明的事**：后端从 T3.9 起就支持 5 套模板（`meeting/course/interview/podcast/shortvideo`），上传接口可传 `template`，文件名含"课程/访谈/播客/会议"等关键字还会自动推荐；**但网页上传页从来没有模板选择器、JS 里一次都没传过 `template`**（`index.html` 单文件只 `append('file', ...)`、批量只 `append('files', ...)`）→ 网页用户实际上永远只能用默认 `meeting`。这是"把已有能力摆出来"，不是新功能。
+>
+> **口径（D-119）**：只补上传页的模板选择；**不做**模板预览/效果对比、**不做**自定义提示词（=T7.15）、**不改后端/契约/DB**、**不新增请求**。
+>
+> **改动（只动 `static/index.html` + `static/style.css`）**：
+> 1. 上传区（`#dropZone` 与「上传并开始转写」按钮之间）加一行：
+>    `<label for="templateSelect">摘要模板</label><select id="templateSelect">`
+>    - `value=""` → **自动识别（按文件名）**（默认选中；**不传** `template` 字段，后端行为一字不变）
+>    - `meeting` 会议 / `course` 课程 / `interview` 访谈 / `podcast` 播客 / `shortvideo` 短视频
+>    - 旁边一行 hint："自动：按文件名关键字选（课程/访谈/播客/会议…）；猜不到用「会议」。"
+> 2. 提交逻辑（两个分支都要）：单文件 `form.append('template', v)`、批量 `batchForm.append('template', v)`，**仅当 v 非空时**；提交成功后**保留当前选择**（连续上传同类文件不用重选）。
+> 3. `style.css` 加最小样式（复用 `--sp/--fs/--border/--surface/--ink` token，≤15 行）：`.tpl-pick` 横向 flex + `flex-wrap`、select 与现有输入框同观感（边框/圆角/内边距/背景/字色）、`:focus-visible` 有焦点环；**390 宽换行不溢出、点按区足够大**。
+>
+> **判据（必须自测并给证据）**：
+> - **0 配额验证（用 Playwright route 拦截，不真建任务）**：mock `POST /api/v1/tasks` 201 与 `POST /api/v1/tasks/batch` 200，捕获请求体断言三例：①默认「自动识别」→ 请求体**没有** `template` 字段；②选「课程」+ 单文件 → 请求体含 `template=course`；③选「播客」+ 2 文件批量 → 批量请求体含 `template=podcast`；
+> - 页面 1280/390 截图（我逐张看）：选择器可见、不溢出（`scrollWidth-innerWidth=0`）、console/pageerror **0**、键盘可操作（Tab 到 select、方向键改值）；
+> - `tools\check-maintainability.ps1` **0 阻塞 / 0 提示** exit 0；纯前端不改契约 → **不跑全量**（K-68 不触发），`-UnitOnly` 也无需跑（不覆盖前端）；
+> - 单 commit（`feat(T4.22): ...`），不 push、不动其它页面。
+>
+> **禁止**：改后端/上传契约/`template` 默认值；把"自动识别"做成强制传 `meeting`；新增外链/CDN/字体；多 commit。
+>
+> 证据落 `D:\new\artifacts\T4.22\workbuddy\`（route 捕获日志、两张截图、`git show --stat` 输出）。
+
 ---
 
 ## 每张卡做完都要给你的回报
