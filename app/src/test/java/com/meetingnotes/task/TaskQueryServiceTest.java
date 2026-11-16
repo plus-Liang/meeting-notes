@@ -261,6 +261,30 @@ class TaskQueryServiceTest {
         assertEquals(List.of(1L, "%42%", 42L, 21), List.of(c.args()));
     }
 
+    /* ===== T4.24b：纯数字 q 溢出安全（超 64 位只走 ILIKE，不 500） ===== */
+
+    @Test
+    void overLongNumericQOnlyGoesIlikeWithoutIdMatch() {
+        // 20 位数字 > Long.MAX → 不加 OR t.id（防 NumberFormatException 打 500），只走 ILIKE，保持 200
+        String q20 = "9".repeat(20);
+        newService().list(1L, null, 20, null, q20);
+
+        CapturedSql c = captureLastQuery();
+        assertFalse(c.sql().contains("OR t.id = ?"), "超出 64 位范围的数字不得加 id 精确匹配");
+        assertEquals(List.of(1L, "%" + q20 + "%", 21), List.of(c.args()), "仍按普通关键词参数化 ILIKE");
+    }
+
+    @Test
+    void longMaxValueQStillMatchesIdExactly() {
+        // Long.MAX_VALUE（9223372036854775807）恰好能装进 long → 精确匹配保留，参数 = MAX
+        String max = Long.toString(Long.MAX_VALUE);
+        newService().list(1L, null, 20, null, max);
+
+        CapturedSql c = captureLastQuery();
+        assertTrue(c.sql().contains("OR t.id = ?"), "Long.MAX 边界值仍走 id 精确匹配");
+        assertEquals(List.of(1L, "%" + max + "%", Long.MAX_VALUE, 21), List.of(c.args()));
+    }
+
     @Test
     void countsGroupsByStatusAndMergesActive() throws Exception {
         when(rs.getString(1)).thenReturn("DONE", "DEAD", "RUNNING");

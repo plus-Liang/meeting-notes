@@ -36,6 +36,9 @@ public class TaskQueryService {
     /** q 最大长度（卡口径 100 字符，超出 controller 报 400）。 */
     public static final int Q_MAX_CHARS = 100;
 
+    /** Long.MAX_VALUE 的十进制字面量（T4.24b：判纯数字 q 能否安全 parseLong，防溢出 500）。 */
+    private static final String MAX_ID_LITERAL = Long.toString(Long.MAX_VALUE);
+
     /** T4.24：q 归一化（去空格；空白 → null；超 {@value #Q_MAX_CHARS} 字符 → 400 INVALID_PARAM）。 */
     public static String normalizeQ(String q) {
         if (q == null || q.isBlank()) {
@@ -113,7 +116,9 @@ public class TaskQueryService {
             String like = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
             sql.append(" AND (t.source_uri ILIKE ? ESCAPE '\\'");
             args.add("%" + like + "%");
-            if (q.matches("\\d+")) {
+            if (q.matches("\\d+") && parseableAsId(q)) {
+                /* T4.24b：仅当能装进 long 才加 id 精确匹配；超 64 位范围（如 20 位数字）
+                   按普通关键词只走 ILIKE，保持 200（不再抛 NumberFormatException 打 500） */
                 sql.append(" OR t.id = ?");
                 args.add(Long.parseLong(q));
             }
@@ -143,6 +148,12 @@ public class TaskQueryService {
 
         Long nextBeforeId = hasMore[0] && !items.isEmpty() ? items.get(items.size() - 1).id() : null;
         return new TaskListResponse(items, nextBeforeId);
+    }
+
+    /** 纯数字串能否安全 parseLong：位数小于 MAX 或同位数字典序 ≤ MAX（全数字时字典序=数值序）。 */
+    static boolean parseableAsId(String digits) {
+        return digits.length() < MAX_ID_LITERAL.length()
+                || (digits.length() == MAX_ID_LITERAL.length() && digits.compareTo(MAX_ID_LITERAL) <= 0);
     }
 
     /**

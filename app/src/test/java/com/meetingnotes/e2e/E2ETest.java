@@ -485,6 +485,11 @@ class E2ETest {
         assertEquals(400, over.statusCode());
         assertEquals("INVALID_PARAM", M.readTree(over.body()).get("code").asText());
 
+        // T4.24b：30 位数字超 long 范围 → 按普通关键词 200 + 合法数组（不再 500）
+        HttpResponse<String> huge = send("GET", "/api/v1/tasks?q=" + "9".repeat(30), null, null);
+        assertEquals(200, huge.statusCode(), "超 64 位数字必须 200（只走 ILIKE）：" + abbreviate(huge.body()));
+        assertTrue(M.readTree(huge.body()).get("items").isArray(), "超长数字 q 响应结构不变");
+
         // counts：键集固定四键、total ≥ 1（A 场景至少建了 1 条）
         HttpResponse<String> counts = send("GET", "/api/v1/tasks/counts", null, null);
         assertEquals(200, counts.statusCode(), "counts 端点：" + abbreviate(counts.body()));
