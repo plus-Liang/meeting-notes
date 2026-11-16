@@ -502,4 +502,36 @@ class E2ETest {
         assertTrue(c.get("active").asLong() + c.get("done").asLong() + c.get("dead").asLong()
                 <= c.get("total").asLong(), "分类合计不得超过 total");
     }
+
+    /** T4.25 场景 I：GET /stats 键集固定、tasks 与 /tasks/counts 同口径。零新建任务（只读）。 */
+    @Test
+    @Order(10)
+    void i_statsKeysAndConsistencyWithCounts() throws Exception {
+        HttpResponse<String> stats = send("GET", "/api/v1/stats", null, null);
+        assertEquals(200, stats.statusCode(), "stats 端点：" + abbreviate(stats.body()));
+        JsonNode s = M.readTree(stats.body());
+        List<String> keys = new ArrayList<>();
+        s.fieldNames().forEachRemaining(keys::add);
+        assertEquals(List.of("tasks", "duration_sec_total", "success_rate", "avg_processing_ratio", "tiers"),
+                keys, "stats 键集固定五键（null 值不省略），实际：" + keys);
+        List<String> taskKeys = new ArrayList<>();
+        s.get("tasks").fieldNames().forEachRemaining(taskKeys::add);
+        assertEquals(List.of("total", "active", "done", "dead"), taskKeys, "tasks 子键集固定四键");
+
+        // 与 /tasks/counts 同口径（同一个 GROUP BY 语义）
+        JsonNode counts = M.readTree(send("GET", "/api/v1/tasks/counts", null, null).body());
+        assertEquals(counts.get("total").asLong(), s.get("tasks").get("total").asLong(), "stats.tasks.total == counts.total");
+        assertEquals(counts.get("done").asLong(), s.get("tasks").get("done").asLong(), "stats.tasks.done == counts.done");
+
+        assertTrue(s.get("duration_sec_total").asLong() >= 0);
+        // success_rate / avg_processing_ratio 允许 null（空库），非 null 必须在 [0,1] / >0
+        if (!s.get("success_rate").isNull()) {
+            double sr = s.get("success_rate").asDouble();
+            assertTrue(sr >= 0.0 && sr <= 1.0, "success_rate 必须在 [0,1]：" + sr);
+        }
+        if (!s.get("avg_processing_ratio").isNull()) {
+            assertTrue(s.get("avg_processing_ratio").asDouble() > 0.0, "处理倍速必须 >0");
+        }
+        assertTrue(s.get("tiers").isObject(), "tiers 是对象");
+    }
 }

@@ -30,6 +30,10 @@
       <div class="quota-item"><div class="skeleton skeleton-line" style="width:30%"></div><div class="skeleton quota-bar" style="margin-top:8px"></div></div>
     </div>
 
+    <h2>我的使用</h2>
+    <div id="usage"><div class="skeleton skeleton-line" style="width:55%"></div></div>
+    <p class="hint" style="margin-top:8px">平均处理倍速（含排队，近似值）：任务从提交到完成的耗时与音频时长之比，含排队等待，不等于语音处理 RTF。成功率为 DONE/(DONE+DEAD)。</p>
+
     <h2>AI 档位</h2>
     <div id="tier"><div class="skeleton skeleton-line" style="width:55%"></div><div class="skeleton skeleton-line" style="width:45%;margin-top:8px"></div></div>
     <p class="hint" style="margin-top:8px">会议/远场录音建议用 medium 语音模型（更准但更慢，需自备约 1.5GB 模型，配置 ASR_MODEL_NAME=medium 后重启 asr 服务）；清晰单人录音 small 足够。</p>
@@ -119,6 +123,29 @@
       '</div>';
   });
 
+  /* T4.25：我的使用卡（GET /api/v1/stats，只读；无数据写 —，不改既有卡） */
+  function usageRow(label, value) {
+    return '<div class="task-row"><span>' + label + '</span><span class="num">' + value + '</span></div>';
+  }
+
+  function renderUsage(s) {
+    var t = s.tasks || { total: 0, active: 0, done: 0, dead: 0 };
+    var tierText = '—';
+    if (s.tiers && Object.keys(s.tiers).length) {
+      tierText = Object.keys(s.tiers).map(function (k) {
+        return badge(k, k === 'CLOUD' ? 'done' : (k === 'LOCAL' ? 'busy' : 'plain')) + ' ' + s.tiers[k];
+      }).join(' ');
+    }
+    document.getElementById('usage').innerHTML =
+      usageRow('总任务（进行中 ' + t.active + '）', t.total) +
+      usageRow('总时长', fmtDuration(s.duration_sec_total)) +
+      usageRow('成功率（DONE/(DONE+DEAD)）', s.success_rate === null || s.success_rate === undefined
+        ? '—' : Math.round(s.success_rate * 1000) / 10 + '%') +
+      usageRow('平均处理倍速（含排队，近似值）', s.avg_processing_ratio === null || s.avg_processing_ratio === undefined
+        ? '—' : s.avg_processing_ratio.toFixed(2) + '×') +
+      usageRow('档位分布（DONE 任务）', tierText);
+  }
+
   getJson('api/v1/settings').then(function (data) {
     if (data.__httpStatus === 200) {
       renderQuota(data.quota);
@@ -128,6 +155,17 @@
         '<p class="error-text">配额/档位加载失败（HTTP ' + data.__httpStatus + '）。请稍后刷新重试。</p>';
       document.getElementById('tier').innerHTML = '';
     }
+  });
+  getJson('api/v1/stats').then(function (data) {
+    if (data.__httpStatus === 200) {
+      renderUsage(data);
+    } else {
+      document.getElementById('usage').innerHTML =
+        '<p class="error-text">统计加载失败（HTTP ' + data.__httpStatus + '）。请稍后刷新重试。</p>';
+    }
+  }, function () {
+    document.getElementById('usage').innerHTML =
+      '<p class="error-text">统计加载失败：服务暂时不可用。</p>';
   });
   getJson('api/v1/glossary').then(function (data) {
     renderGlossary(data.__httpStatus === 200 && Array.isArray(data) ? data : []);
