@@ -43,7 +43,8 @@
     return ERROR_TEXT[code] || ('未知错误码：' + code);
   }
 
-  var transcript = ''; /* T4.15⑧：详情逐字稿缓存（供关键词/依据定位），只读不回写 */
+  var transcript = ''; /* T4.15⑧：详情逐字稿缓存（供关键词/依据定位）；T4.18 起为**展示文本**（有 AI 标点则用标点文本），只读不回写 */
+  var displayText = ''; /* T4.18：页面实际展示文本（句子按行拼接），「复制全文」以它为准（复制==页面文本） */
 
   var TEMPLATE_TEXT = {
     meeting: '会议纪要', course: '课程纪要', interview: '访谈纪要',
@@ -134,7 +135,8 @@
     return html + '</div></div>';
   }
 
-  /* T4.15⑧⑨：逐字稿按句包 span（索引与 mnSplitSentences 对齐，供依据/关键词定位高亮）；「复制全文」入口 */
+  /* T4.18：转写优先用 AI 标点文本（transcript_punctuated），一句一行；无标点回退原始转写（旧渲染口径）。
+     展示文本 = mnSplitSentences(transcript)，定位/复制/依据都以它为准（normalize+bigram 口径不变） */
   function transcriptHtml(data) {
     var html = '<div class="section"><div class="section-head"><h2>转写</h2>' +
       '<span class="batch-actions"><button type="button" class="btn-secondary" id="copyTranscriptBtn">复制全文</button>' +
@@ -142,7 +144,8 @@
     if (data.transcript === '') {
       html += '<p class="empty-tip">未识别到语音内容：这段音频里没有可识别的人声（可能是纯音乐、静音或无人声）。</p>';
     } else {
-      var sents = mnSplitSentences(data.transcript);
+      var sents = mnSplitSentences(transcript);
+      displayText = sents.join('\n');
       html += '<div class="transcript">' + sents.map(function (s, i) {
         return '<span class="sent-target" data-sent="' + i + '">' + escapeHtml(s) + '</span>';
       }).join('\n') + '</div>';
@@ -150,19 +153,65 @@
     return html + '</div>';
   }
 
+  /* T4.18：导出勾选（摘要/关键词/要点/转写/待办 + 全选）。默认不含待办（观察期，D-109）；至少勾 1 项才能下载 */
+  var EXPORT_SECTIONS = [
+    { key: 'summary', label: '摘要' },
+    { key: 'keywords', label: '关键词' },
+    { key: 'keypoints', label: '要点' },
+    { key: 'transcript', label: '转写' },
+    { key: 'todos', label: '待办' }
+  ];
+  var exportSel = { summary: true, keywords: true, keypoints: true, transcript: true, todos: false };
+
   function exportHtml(data) {
+    var boxes = EXPORT_SECTIONS.map(function (s) {
+      return '<label class="export-opt"><input type="checkbox" class="export-check" data-key="' + s.key + '"' +
+        (exportSel[s.key] ? ' checked' : '') + '> ' + s.label + '</label>';
+    }).join('');
     return '<div class="section"><h2>导出</h2>' +
+      '<div class="export-opts">' + boxes +
+      '<button type="button" class="btn-secondary export-all" id="exportAllBtn">全选</button></div>' +
       '<button type="button" class="btn-secondary" id="exportBtn">下载 Markdown</button>' +
-      '<p class="hint" id="exportMsg" style="margin-top:8px">导出内容为 Markdown 纪要文件，由浏览器直接下载。</p></div>';
+      '<p class="hint" id="exportMsg" style="margin-top:8px">至少勾选一项；默认不含待办（观察期）。导出内容为 Markdown 纪要文件。</p></div>';
+  }
+
+  function selectedInclude() {
+    return EXPORT_SECTIONS.filter(function (s) { return exportSel[s.key]; })
+      .map(function (s) { return s.key; }).join(',');
+  }
+
+  function refreshExportBtn() {
+    var btn = document.getElementById('exportBtn');
+    if (!btn) return;
+    btn.disabled = selectedInclude() === '';
   }
 
   function bindExport(data) {
+    card.querySelectorAll('.export-check').forEach(function (box) {
+      box.addEventListener('change', function () {
+        exportSel[box.getAttribute('data-key')] = box.checked;
+        refreshExportBtn();
+      });
+    });
+    var allBtn = document.getElementById('exportAllBtn');
+    allBtn.addEventListener('click', function () {
+      card.querySelectorAll('.export-check').forEach(function (box) {
+        box.checked = true;
+        exportSel[box.getAttribute('data-key')] = true;
+      });
+      refreshExportBtn();
+    });
     var btn = document.getElementById('exportBtn');
-    if (!btn) return;
+    var msgEl = document.getElementById('exportMsg');
+    btn.disabled = selectedInclude() === '';
     btn.addEventListener('click', function () {
-      var msgEl = document.getElementById('exportMsg');
+      var include = selectedInclude();
+      if (!include) {
+        msgEl.textContent = '至少勾选一项才能导出。';
+        return;
+      }
       btn.disabled = true;
-      apiFetch('api/v1/tasks/' + data.task_id + '/export?format=md').then(function (resp) {
+      apiFetch('api/v1/tasks/' + data.task_id + '/export?format=md&include=' + encodeURIComponent(include)).then(function (resp) {
         if (resp.status !== 200) {
           return resp.json().then(function (err) {
             msgEl.textContent = '导出失败（' + (err.code || resp.status) + '）：' + (err.message || '未知错误');
@@ -208,7 +257,8 @@
       return false; /* 网络抖动继续轮询 */
     }
     var status = data.status;
-    transcript = data.transcript || '';
+    /* T4.18：展示/定位统一用标点文本（无则原始转写）；空转写仍以 data.transcript 为准判无语音 */
+    transcript = data.transcript_punctuated || data.transcript || '';
     var head = headHtml(data);
     var body = '';
     if (status === 'PENDING') {
@@ -349,7 +399,7 @@
     var hint = document.getElementById('copiedHint');
     if (!btn) return;
     btn.addEventListener('click', function () {
-      mnCopyText(transcript, function () {
+      mnCopyText(displayText || transcript, function () {
         hint.hidden = false;
         hint.textContent = '已复制';
         setTimeout(function () { hint.hidden = true; }, 2000);

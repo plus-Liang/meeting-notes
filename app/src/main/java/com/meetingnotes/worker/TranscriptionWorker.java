@@ -17,6 +17,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Map;
+import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -24,8 +25,8 @@ import java.util.concurrent.TimeUnit;
  * 状态机：PENDING/RETRYING → RUNNING → DONE；失败：重试未耗尽 → RETRYING 重新入队（队尾，FIFO 不插队），
  * 耗尽 → DEAD + dead_letter；兜底 catch 保证任务不永久卡 RUNNING（崩溃恢复属 T2.3）。
  * <p>管线：MinIO 拉文件 → ffmpeg 抽 16k 单声道 wav（D-010）→ {@link TranscriptionModel} 转写
- * （容器内 http://asr:8000，D-034）→ 写 transcript → 结构化（T3.3：摘要+关键词+待办一次调用、三档级联降级）
- * → 最后置 DONE（D-069：DONE 时结果必已落库）。
+ * （容器内 http://asr:8000，D-034）→ 写 transcript → 结构化（T3.3：摘要+关键词+待办+要点一次调用、三档级联降级）
+ * → AI 加标点（T4.18，结构化成功后追加一次独立调用，失败留 null 不影响 DONE）→ 最后置 DONE（D-069）。
  */
 @Component
 public class TranscriptionWorker implements SmartLifecycle {
@@ -37,6 +38,7 @@ public class TranscriptionWorker implements SmartLifecycle {
     private final S3Client s3;
     private final TranscriptionModel transcriptionModel;
     private final com.meetingnotes.ai.StructuringService structuringService;
+    private final com.meetingnotes.ai.TranscriptPunctuator punctuator;
     private final com.meetingnotes.webhook.WebhookDeliveryService webhookService;
     private final PasteTextReader pasteTextReader;
     private final MonoWavExtractor monoWavExtractor;
@@ -53,6 +55,7 @@ public class TranscriptionWorker implements SmartLifecycle {
                                S3Client s3,
                                TranscriptionModel transcriptionModel,
                                com.meetingnotes.ai.StructuringService structuringService,
+                               com.meetingnotes.ai.TranscriptPunctuator punctuator,
                                com.meetingnotes.webhook.WebhookDeliveryService webhookService,
                                PasteTextReader pasteTextReader,
                                MonoWavExtractor monoWavExtractor,
@@ -65,6 +68,7 @@ public class TranscriptionWorker implements SmartLifecycle {
         this.s3 = s3;
         this.transcriptionModel = transcriptionModel;
         this.structuringService = structuringService;
+        this.punctuator = punctuator;
         this.webhookService = webhookService;
         this.pasteTextReader = pasteTextReader;
         this.monoWavExtractor = monoWavExtractor;
@@ -198,11 +202,14 @@ public class TranscriptionWorker implements SmartLifecycle {
         }
     }
 
-    /** 结果收口（F-1/T3.2，D-069）：先写 transcript → 结构化（T3.3 F-7：摘要+关键词+待办**一次**调用）→
-     * **最后**置 DONE（AI 失败也 DONE）；外部读到 DONE 时 summary/todos 必已落库，不存在 DONE+null 窗口。 */
+    /** 结果收口（F-1/T3.2，D-069）：先写 transcript → 结构化（一次调用）→ 标点（T4.18，结构化成功才做）→
+     * **最后**置 DONE（AI 失败也 DONE）；外部读到 DONE 时结果必已落库，不存在 DONE+null 窗口。 */
     void finalizeResult(long taskId, String text) {
         saveTranscript(taskId, text);
-        runAiStep("结构化", () -> structuringService.structure(taskId, text));
+        boolean structured = runAiStep("结构化", () -> structuringService.structure(taskId, text));
+        if (structured) {
+            runAiStep("标点", () -> punctuator.punctuateAndPersist(taskId, text));
+        }
         jdbc.update("UPDATE task SET status = 'DONE', updated_at = now() WHERE id = ?", taskId);
         log.info("任务已置 DONE（transcript/摘要/待办均已收口）");
         webhookService.onTerminal(taskId, "DONE"); // T4.6：终态异步投递 Webhook（内部不抛、不阻塞）
@@ -218,12 +225,13 @@ public class TranscriptionWorker implements SmartLifecycle {
         log.info("转写结果已落库（transcript {} 字）", normalized.length());
     }
 
-    /** AI 单步兜底：异常只 WARN 不上抛（D-068，失败不阻塞任务完成）。 */
-    private void runAiStep(String name, Runnable step) {
+    /** AI 单步兜底：异常只 WARN 不上抛（D-068，失败不阻塞任务完成），返回步骤是否成功。 */
+    private boolean runAiStep(String name, Callable<Boolean> step) {
         try {
-            step.run();
-        } catch (RuntimeException e) {
+            return Boolean.TRUE.equals(step.call());
+        } catch (Exception e) {
             log.warn("{}生成异常（不影响任务完成）", name, e);
+            return false;
         }
     }
 

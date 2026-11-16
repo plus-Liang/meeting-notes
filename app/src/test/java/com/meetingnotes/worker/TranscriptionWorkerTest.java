@@ -51,6 +51,8 @@ class TranscriptionWorkerTest {
     @Mock
     private com.meetingnotes.ai.StructuringService structuringService;
     @Mock
+    private com.meetingnotes.ai.TranscriptPunctuator punctuator;
+    @Mock
     private PasteTextReader pasteTextReader;
     @Mock
     private MonoWavExtractor monoWavExtractor;
@@ -61,7 +63,7 @@ class TranscriptionWorkerTest {
 
     private TranscriptionWorker newWorker() {
         return new TranscriptionWorker(redis, jdbc, s3, transcriptionModel,
-                structuringService, webhookService, pasteTextReader, monoWavExtractor,
+                structuringService, punctuator, webhookService, pasteTextReader, monoWavExtractor,
                 "meetingnotes:task-queue", 10, "meetingnotes", 3);
     }
 
@@ -130,6 +132,44 @@ class TranscriptionWorkerTest {
         worker.finalizeResult(12L, "会议内容");
 
         verify(jdbc).update(contains("'DONE'"), eq(12L));
+    }
+
+    /* ---- T4.18：标点是结构化成功后的独立一步（失败留 null 不影响 DONE；结构化失败不做标点） ---- */
+
+    @Test
+    void punctuateRunsAfterSuccessfulStructuringAndBeforeDone() {
+        TranscriptionWorker worker = newWorker();
+        when(structuringService.structure(anyLong(), anyString())).thenReturn(true);
+        when(punctuator.punctuateAndPersist(anyLong(), anyString())).thenReturn(true);
+
+        worker.finalizeResult(40L, "会议明确了下一步安排");
+
+        InOrder order = inOrder(structuringService, punctuator, jdbc);
+        order.verify(structuringService).structure(40L, "会议明确了下一步安排");
+        order.verify(punctuator).punctuateAndPersist(40L, "会议明确了下一步安排");
+        order.verify(jdbc).update(contains("'DONE'"), eq(40L));
+    }
+
+    @Test
+    void punctuateSkippedWhenStructuringFails() {
+        TranscriptionWorker worker = newWorker();
+        when(structuringService.structure(anyLong(), anyString())).thenReturn(false);
+
+        worker.finalizeResult(41L, "会议内容");
+
+        verify(punctuator, never()).punctuateAndPersist(anyLong(), anyString());
+        verify(jdbc).update(contains("'DONE'"), eq(41L));
+    }
+
+    @Test
+    void punctuateFailureDoesNotBlockDone() {
+        TranscriptionWorker worker = newWorker();
+        when(structuringService.structure(anyLong(), anyString())).thenReturn(true);
+        when(punctuator.punctuateAndPersist(anyLong(), anyString())).thenThrow(new RuntimeException("标点超时"));
+
+        worker.finalizeResult(42L, "会议内容");
+
+        verify(jdbc).update(contains("'DONE'"), eq(42L));
     }
 
     /* ---- T3.7：PASTE/字幕任务走无音频分支（跳过 ffmpeg/ASR，管线仍守 F-1/D-069） ---- */

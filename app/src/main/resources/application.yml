@@ -124,6 +124,9 @@ app:
     timeout-sec: ${LLM_TIMEOUT_SEC:120}
     # 第三档兜底开关（D-020）
     fallback-extractive: ${EXTRACTIVE_FALLBACK_ENABLED:true}
+    # T4.18/D-109：转写 AI 加标点的长度上限（字）——transcript 非空且 ≤ 此值才追加独立标点调用；
+    # 0 = 关闭标点；超限/失败 → transcript_punctuated 留 null，任务仍 DONE
+    punctuate-max-chars: ${LLM_PUNCTUATE_MAX_CHARS:6000}
     # 第二档：本地 Ollama（可选）
     ollama:
       enabled: ${OLLAMA_ENABLED:false}

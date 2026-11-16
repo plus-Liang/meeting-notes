@@ -15,8 +15,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * T3.9 详情契约：GET /tasks/{id} 响应键序 = 原 11 键 + template（T3.9 第 12 键）+ keypoints（T4.17 第 13 键）
- * （不多不少、键序不变、历史/未生成 null——D-109 只增不改）。
+ * T3.9 详情契约：GET /tasks/{id} 响应键序 = 原 11 键 + template（第 12）+ keypoints（T4.17 第 13）
+ * + transcript_punctuated（T4.18 第 14）（不多不少、键序不变、历史/未生成 null——D-109 只增不改）。
  * 列表/POST/导出不在本记录，键集不受影响。
  */
 class TaskStatusResponseTest {
@@ -34,11 +34,11 @@ class TaskStatusResponseTest {
                 "摘要", List.of("关键词"), "CLOUD",
                 List.of(new TodoItemView("准备扩容方案", "运维组", null, false)),
                 List.of(new KeypointView("扩容计划", "与会人员讨论了数据库扩容的时间表。")),
-                template);
+                "与会人员讨论了，数据库扩容的时间表。", template);
     }
 
     @Test
-    void detailJsonHasExactlyThirteenKeysEndingWithTemplate() throws Exception {
+    void detailJsonHasExactlyFourteenKeysEndingWithTemplate() throws Exception {
         ObjectMapper mapper = productionMapper();
         JsonNode node = mapper.readTree(mapper.writeValueAsString(sample("course")));
 
@@ -49,8 +49,8 @@ class TaskStatusResponseTest {
         }
         assertEquals(List.of("task_id", "status", "duration_sec", "size_bytes", "created_at",
                         "transcript", "error_code", "summary", "keywords", "ai_tier", "todos",
-                        "keypoints", "template"),
-                keys, "键集 = 原 11 键 + template（第 12）+ keypoints（第 13），不许插在中间或改名");
+                        "keypoints", "transcript_punctuated", "template"),
+                keys, "键集 = 原 11 键 + template（第 12）+ keypoints（第 13）+ transcript_punctuated（第 14），不许插在中间或改名");
         assertEquals("course", node.get("template").asText(), "新任务 template 恒非空");
     }
 
@@ -74,6 +74,6 @@ class TaskStatusResponseTest {
         ObjectMapper mapper = productionMapper();
         JsonNode node = mapper.readTree(mapper.writeValueAsString(sample(null)));
         assertTrue(node.get("template").isNull(), "T3.9 之前的旧任务 template 必须是 null");
-        assertEquals(13, node.size(), "T4.17 起 = 13 键");
+        assertEquals(14, node.size(), "T4.18 起 = 14 键");
     }
 }

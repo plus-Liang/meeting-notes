@@ -45,7 +45,8 @@ class E2ETest {
 
     private static final List<String> DETAIL_KEYS = List.of(
             "task_id", "status", "duration_sec", "size_bytes", "created_at", "transcript",
-            "error_code", "summary", "keywords", "ai_tier", "todos", "keypoints", "template");
+            "error_code", "summary", "keywords", "ai_tier", "todos", "keypoints",
+            "transcript_punctuated", "template");
 
     private static String textA;
     private static long taskId;
@@ -190,7 +191,8 @@ class E2ETest {
 
     @Test
     @Order(3)
-    void c_exportHasThreeSectionsInFixedOrder() throws Exception {
+    void c_exportHonorsIncludeSelection() throws Exception {
+        // 默认（不传 include）：摘要→关键词→（要点）→转写，**不含待办**（T4.18 观察期，D-109）
         HttpResponse<String> resp = send("GET", "/api/v1/tasks/" + taskId + "/export?format=md", null, null);
         assertEquals(200, resp.statusCode(), "导出：" + abbreviate(resp.body()));
         assertTrue(resp.headers().firstValue("Content-Type").orElse("").startsWith("text/markdown"),
@@ -198,9 +200,35 @@ class E2ETest {
         String body = resp.body();
         int summary = body.indexOf("## 摘要");
         int keywords = body.indexOf("## 关键词");
-        int todos = body.indexOf("## 待办");
-        assertTrue(summary >= 0 && keywords > summary && todos > keywords,
-                "三节固定顺序 摘要→关键词→待办，实际：" + abbreviate(body));
+        int transcript = body.indexOf("## 转写");
+        assertTrue(summary >= 0 && keywords > summary && transcript > keywords,
+                "默认节固定顺序 摘要→关键词→（要点）→转写，实际：" + abbreviate(body));
+        assertFalse(body.contains("## 待办"), "默认（不传 include）不得输出待办节：" + abbreviate(body));
+        // 全选：5 节齐全（含待办），顺序 摘要→关键词→（要点）→转写→待办
+        HttpResponse<String> all = send("GET", "/api/v1/tasks/" + taskId + "/export?format=md"
+                + "&include=summary,keywords,keypoints,transcript,todos", null, null);
+        assertEquals(200, all.statusCode(), "全选导出：" + abbreviate(all.body()));
+        String allBody = all.body();
+        int todos = allBody.indexOf("## 待办");
+        assertTrue(allBody.contains("## 摘要") && allBody.contains("## 关键词")
+                        && allBody.contains("## 转写") && todos > allBody.indexOf("## 转写"),
+                "全选必须含摘要/关键词/转写/待办（要点仅在生成时出现），实际：" + abbreviate(allBody));
+        // 只选 transcript → 只 1 节
+        HttpResponse<String> only = send("GET", "/api/v1/tasks/" + taskId + "/export?format=md&include=transcript",
+                null, null);
+        assertEquals(200, only.statusCode(), "只选转写：" + abbreviate(only.body()));
+        String onlyBody = only.body();
+        assertTrue(onlyBody.startsWith("## 转写\n") && !onlyBody.contains("## 摘要") && !onlyBody.contains("## 待办"),
+                "include=transcript 只输出转写一节，实际：" + abbreviate(onlyBody));
+        // 非法 include → 400 INVALID_PARAM（消息列合法值）
+        HttpResponse<String> bad = send("GET", "/api/v1/tasks/" + taskId + "/export?format=md&include=foo",
+                null, null);
+        assertEquals(400, bad.statusCode(), "非法 include → 400：" + abbreviate(bad.body()));
+        assertTrue(M.readTree(bad.body()).get("message").asText().contains("include 只允许"),
+                "400 消息要列合法值：" + abbreviate(bad.body()));
+        // 空 include → 400
+        assertEquals(400, send("GET", "/api/v1/tasks/" + taskId + "/export?format=md&include=", null, null)
+                .statusCode(), "空 include → 400");
         assertEquals(400, send("GET", "/api/v1/tasks/" + taskId + "/export?format=pdf", null, null).statusCode(),
                 "format=pdf → 400 INVALID_PARAM");
     }
