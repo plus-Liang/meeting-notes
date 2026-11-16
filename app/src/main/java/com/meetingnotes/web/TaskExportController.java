@@ -24,6 +24,9 @@ import java.util.Set;
  * include 合法值固定 5 个；未知值 → 400 INVALID_PARAM（消息列合法值）；省略 → 默认
  * summary,keywords,keypoints,transcript（**默认不含待办**，观察期）；include 为空/全空 → 400。
  * format 目前只支持 md；任务不存在 → 404；无内容（未 DONE/transcript 空）→ 400。
+ *
+ * <p>T4.27：单条渲染抽为 {@link #render}（静态、无状态），{@link TaskZipExportController} 的
+ * zip 端点复用同一实现，保证 zip 内 md 与单条导出**逐字节一致**。
  */
 @RestController
 @RequestMapping("/api/v1")
@@ -53,28 +56,49 @@ public class TaskExportController {
         if (!"md".equals(format)) {
             throw new ApiException(400, "INVALID_PARAM", "format 目前只支持 md");
         }
-        Set<String> sections = parseInclude(include);
-        record ExportRow(String status, String transcript, String summary,
-                         String keywords, String todos, String keypoints, String transcriptPunctuated) {
+        RenderedExport rendered = render(id, DEFAULT_USER_ID, jdbc, mapper, parseInclude(include));
+        if (rendered.skipReason() != null) {
+            throw exportError(id, rendered.skipReason());
         }
+        return ResponseEntity.ok()
+                .contentType(new MediaType("text", "markdown", StandardCharsets.UTF_8))
+                .header("Content-Disposition", "attachment; filename=\"task-" + id + ".md\"")
+                .body(rendered.markdown());
+    }
+
+    /** 单条渲染结果：markdown 非空 = 成功（entryName 为 zip 条目名）；否则 skipReason ∈ NOT_FOUND / NO_CONTENT。 */
+    record RenderedExport(String markdown, String entryName, String skipReason) {
+    }
+
+    /** 导出行（T4.27 提升为类级：zip 测试可构造；source_uri 供 zip 条目名）。 */
+    record ExportRow(String status, String transcript, String summary,
+                     String keywords, String todos, String keypoints,
+                     String transcriptPunctuated, String sourceUri) {
+    }
+
+    /**
+     * T4.27：单条导出渲染——单条端点与 zip 端点**共用同一实现**，保证 zip 内 md 与单条导出逐字节一致。
+     * skipReason：NOT_FOUND（不存在/非本人）/ NO_CONTENT（未 DONE 或 transcript 空）。
+     */
+    static RenderedExport render(long id, long userId, JdbcTemplate jdbc, ObjectMapper mapper, Set<String> sections) {
         List<ExportRow> rows = jdbc.query("""
                 SELECT t.status,
                        CASE WHEN t.status = 'DONE' THEN r.transcript END AS transcript,
                        r.summary, r.keywords::text AS keywords, r.todos::text AS todos,
-                       r.keypoints::text AS keypoints, r.transcript_punctuated
+                       r.keypoints::text AS keypoints, r.transcript_punctuated, t.source_uri
                 FROM task t
                 LEFT JOIN task_result r ON r.task_id = t.id
                 WHERE t.id = ? AND t.user_id = ?
                 """, (rs, i) -> new ExportRow(rs.getString("status"), rs.getString("transcript"),
                 rs.getString("summary"), rs.getString("keywords"), rs.getString("todos"),
-                rs.getString("keypoints"), rs.getString("transcript_punctuated")),
-                id, DEFAULT_USER_ID);
+                rs.getString("keypoints"), rs.getString("transcript_punctuated"), rs.getString("source_uri")),
+                id, userId);
         if (rows.isEmpty()) {
-            throw new ApiException(404, "TASK_NOT_FOUND", "任务 " + id + " 不存在");
+            return new RenderedExport(null, null, "NOT_FOUND");
         }
         ExportRow row = rows.get(0);
         if (row.transcript() == null || row.transcript().isBlank()) {
-            throw new ApiException(400, "INVALID_PARAM", "任务没有可导出的内容（未完成或无转写文本）");
+            return new RenderedExport(null, null, "NO_CONTENT");
         }
         List<String> keywords = null;
         List<TodoItemView> todos = null;
@@ -100,10 +124,14 @@ public class TaskExportController {
         }
         String markdown = TaskMarkdownExporter.export(sections, row.summary(), keywords, keypoints,
                 transcriptForExport(row.transcriptPunctuated(), row.transcript()), todos);
-        return ResponseEntity.ok()
-                .contentType(new MediaType("text", "markdown", StandardCharsets.UTF_8))
-                .header("Content-Disposition", "attachment; filename=\"task-" + id + ".md\"")
-                .body(markdown);
+        return new RenderedExport(markdown, TaskZipExportController.zipEntryName(id, row.sourceUri()), null);
+    }
+
+    private static ApiException exportError(long id, String skipReason) {
+        if ("NOT_FOUND".equals(skipReason)) {
+            return new ApiException(404, "TASK_NOT_FOUND", "任务 " + id + " 不存在");
+        }
+        return new ApiException(400, "INVALID_PARAM", "任务没有可导出的内容（未完成或无转写文本）");
     }
 
     /**

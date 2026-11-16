@@ -20,6 +20,8 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -533,5 +535,77 @@ class E2ETest {
             assertTrue(s.get("avg_processing_ratio").asDouble() > 0.0, "处理倍速必须 >0");
         }
         assertTrue(s.get("tiers").isObject(), "tiers 是对象");
+    }
+
+    /** T4.27 场景 J：批量导出 zip——zip 内 md 与单条导出逐字节一致 + 跳过语义 + 400 矩阵。零新建任务（复用 A）。 */
+    @Test
+    @Order(11)
+    void j_zipExportMatchesSingleExportAndSkipsMissing() throws Exception {
+        // 单任务 zip（二进制 → ofByteArray；单条 md 仍走 ofString，UTF-8 由 Content-Type 声明）
+        java.net.http.HttpRequest zipReq = java.net.http.HttpRequest
+                .newBuilder(URI.create(base() + "/api/v1/tasks/export?ids=" + taskId))
+                .timeout(Duration.ofSeconds(30))
+                .header("Authorization", "Bearer " + token())
+                .GET().build();
+        HttpResponse<byte[]> zipResp = HTTP.send(zipReq, HttpResponse.BodyHandlers.ofByteArray());
+        assertEquals(200, zipResp.statusCode());
+        assertTrue(zipResp.headers().firstValue("Content-Type").orElse("").startsWith("application/zip"),
+                "Content-Type 必须是 application/zip");
+
+        HttpResponse<String> single = send("GET", "/api/v1/tasks/" + taskId + "/export?format=md", null, null);
+        assertEquals(200, single.statusCode());
+
+        List<String> names = new ArrayList<>();
+        String mdFromZip = null;
+        try (ZipInputStream zin = new ZipInputStream(
+                new java.io.ByteArrayInputStream(zipResp.body()))) {
+            ZipEntry entry;
+            while ((entry = zin.getNextEntry()) != null) {
+                names.add(entry.getName());
+                if (entry.getName().endsWith(".md")) {
+                    mdFromZip = new String(zin.readAllBytes(), StandardCharsets.UTF_8);
+                }
+            }
+        }
+        assertEquals(1, names.size(), "只请求一个任务 → 仅 1 个条目、无 _errors.txt：" + names);
+        assertTrue(names.get(0).startsWith(taskId + "-") && names.get(0).endsWith(".md"),
+                "条目名 <id>-<文件名>.md：" + names.get(0));
+        assertEquals(single.body(), mdFromZip, "zip 内 md 必须与单条导出逐字节一致");
+
+        // 跳过语义：真实 id + 不存在的 id → _errors.txt
+        java.net.http.HttpRequest zipReq2 = java.net.http.HttpRequest
+                .newBuilder(URI.create(base() + "/api/v1/tasks/export?ids=" + taskId + ",999999"))
+                .timeout(Duration.ofSeconds(30))
+                .header("Authorization", "Bearer " + token())
+                .GET().build();
+        HttpResponse<byte[]> zip2 = HTTP.send(zipReq2, HttpResponse.BodyHandlers.ofByteArray());
+        assertEquals(200, zip2.statusCode());
+        List<String> names2 = new ArrayList<>();
+        String errors2 = null;
+        try (ZipInputStream zin = new ZipInputStream(new java.io.ByteArrayInputStream(zip2.body()))) {
+            ZipEntry entry;
+            while ((entry = zin.getNextEntry()) != null) {
+                names2.add(entry.getName());
+                if ("_errors.txt".equals(entry.getName())) {
+                    errors2 = new String(zin.readAllBytes(), StandardCharsets.UTF_8);
+                }
+            }
+        }
+        assertEquals(2, names2.size(), "成功条 + _errors.txt：" + names2);
+        assertTrue(names2.contains("_errors.txt"));
+        assertEquals("999999: NOT_FOUND", errors2, "跳过原因逐条写入");
+
+        // 400 矩阵：非数字 / 缺失 / 超 20 / 全部不可导
+        assertEquals(400, send("GET", "/api/v1/tasks/export?ids=abc", null, null).statusCode());
+        assertEquals(400, send("GET", "/api/v1/tasks/export", null, null).statusCode());
+        StringBuilder many = new StringBuilder();
+        for (int i = 1; i <= 21; i++) {
+            if (i > 1) many.append(',');
+            many.append(i);
+        }
+        assertEquals(400, send("GET", "/api/v1/tasks/export?ids=" + many, null, null).statusCode(),
+                "21 个 id → 400");
+        assertEquals(400, send("GET", "/api/v1/tasks/export?ids=999999", null, null).statusCode(),
+                "全部不可导 → 400（不是空 zip）");
     }
 }

@@ -408,40 +408,46 @@
     }, 300);
   });
 
-  /* T4.15⑥：多选批量导出 md——浏览器端逐个 a.download，不做 zip（zip 属 T7.7 后端工作） */
+  /* ===== T4.27：多选批量导出 zip——一次请求下载 1 个 zip（后端流式打包，条内容与单条导出一致）；
+     >20 提示分批；失败就地提示 ===== */
   exportBtn.addEventListener('click', function () {
     var ids = Object.keys(state.checked).map(Number).sort(function (a, b) { return a - b; });
     if (!ids.length) return;
-    exportBtn.disabled = true;
-    var ok = 0, fail = 0, i = 0;
-    retryResult.textContent = '导出中… 0/' + ids.length;
-    function next() {
-      if (i >= ids.length) {
-        exportBtn.disabled = false;
-        retryResult.textContent = '已导出 ' + ok + '/' + ids.length + ' 个 Markdown 文件' + (fail ? '（失败 ' + fail + ' 个）' : '');
-        return;
-      }
-      var id = ids[i];
-      apiFetch('api/v1/tasks/' + id + '/export?format=md').then(function (resp) {
-        if (resp.status !== 200) { fail++; return; }
-        return resp.text().then(function (text) {
-          var blob = new Blob([text], { type: 'text/markdown;charset=utf-8' });
-          var a = document.createElement('a');
-          a.href = URL.createObjectURL(blob);
-          a.download = 'meeting-notes-' + id + '.md';
-          document.body.appendChild(a);
-          a.click();
-          a.remove();
-          URL.revokeObjectURL(a.href);
-          ok++;
-        });
-      }, function () { fail++; }).then(function () {
-        i++;
-        retryResult.textContent = '导出中… ' + (ok + fail) + '/' + ids.length;
-        setTimeout(next, 300); /* 逐个下载，间隔 300ms 避免浏览器拦截 */
-      });
+    if (ids.length > 20) {
+      retryResult.textContent = '一次最多导出 20 个任务（当前选了 ' + ids.length + ' 个），请分批勾选导出。';
+      return;
     }
-    next();
+    exportBtn.disabled = true;
+    retryResult.textContent = '打包导出中…（' + ids.length + ' 个任务）';
+    apiFetch('api/v1/tasks/export?ids=' + ids.join(',')).then(function (resp) {
+      if (resp.status !== 200) {
+        return resp.json().then(function (err) {
+          exportBtn.disabled = false;
+          retryResult.textContent = '导出失败（' + (err.code || resp.status) + '）：' + (err.message || '未知错误');
+        }, function () {
+          exportBtn.disabled = false;
+          retryResult.textContent = '导出失败（HTTP ' + resp.status + '）';
+        });
+      }
+      return resp.blob().then(function (blob) {
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        var stamp = new Date();
+        var pad = function (n) { return (n < 10 ? '0' : '') + n; };
+        a.download = 'meeting-notes-' + stamp.getFullYear() + pad(stamp.getMonth() + 1) + pad(stamp.getDate()) +
+          '-' + pad(stamp.getHours()) + pad(stamp.getMinutes()) + '.zip';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(a.href);
+        exportBtn.disabled = false;
+        retryResult.textContent = '已下载 zip（' + ids.length + ' 个任务' +
+          (ids.length < 20 ? '；不存在的任务会在 zip 内 _errors.txt 说明' : '') + '）。';
+      });
+    }, function () {
+      exportBtn.disabled = false;
+      retryResult.textContent = '导出失败：服务暂时不可用，请稍后重试。';
+    });
   });
 
   renderFilterBar();
