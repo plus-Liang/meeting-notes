@@ -77,10 +77,19 @@
     return '<p class="hint">AI 未启用或本次未生成，暂无内容。</p>';
   }
 
+  /* T4.15c：区分"没识别到语音"与"AI 没跑成"两种真实原因——
+     transcript===''（静音/纯音乐）时优先显示无语音文案，避免误导用户以为 AI 坏了（D-048：空转写仍是 DONE） */
+  function noSpeechHint(text) {
+    return '<p class="hint">' + text + '</p>';
+  }
+  var NO_SPEECH_SUMMARY = '这段音频未识别到语音（可能是纯音乐、静音或无人声），所以没有摘要、关键词和待办。';
+  var NO_SPEECH_TODOS = '这段音频未识别到语音，没有待办。';
+
   /* T4.15⑧：关键词 chip 可定位（命中有依据句才可点，点它跳到逐字稿高亮；未命中保持不可点） */
   function summaryHtml(data) {
     if (!data.summary && !data.keywords) {
-      return '<div class="section"><h2>摘要与关键词</h2>' + nullHint() + '</div>';
+      return '<div class="section"><h2>摘要与关键词</h2>' +
+        (transcript === '' ? noSpeechHint(NO_SPEECH_SUMMARY) : nullHint()) + '</div>';
     }
     var html = '<div class="section"><h2>摘要与关键词</h2>';
     html += data.summary
@@ -105,7 +114,7 @@
     var html = '<div class="section"><div class="section-head"><h2>待办</h2>' +
       '<span class="hint" id="todoMsg" hidden></span></div><div id="todoList">';
     if (data.todos === null || data.todos === undefined) {
-      html += nullHint();
+      html += transcript === '' ? noSpeechHint(NO_SPEECH_TODOS) : nullHint();
     } else if (!data.todos.length) {
       html += '<p class="hint" style="margin:0">本段内容没有待办事项。</p>';
     }
