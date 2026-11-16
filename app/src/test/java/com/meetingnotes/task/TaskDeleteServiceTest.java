@@ -169,6 +169,48 @@ class TaskDeleteServiceTest {
         verify(jdbc).update(contains("DELETE FROM task WHERE"), eq(11L));
     }
 
+    @Test
+    void deleteAllFailedPurgesObjectForEachDeletedTask() {
+        // T4.21b：清空失败任务删除成功后逐个 best-effort 清 MinIO 对象（三路径口径一致）
+        when(jdbc.query(contains("status = 'DEAD'"),
+                ArgumentMatchers.<RowMapper<Long>>any(), eq(1L)))
+                .thenReturn(List.of(20L, 21L));
+        stubStatus(20L, "DEAD");
+        stubSourceUri(20L, "s3://meetingnotes/tasks/20/a.mp3");
+        stubStatus(21L, "DEAD");
+        stubSourceUri(21L, "s3://meetingnotes/tasks/21/b.mp3");
+
+        int deleted = newService().deleteAllFailed();
+
+        assertEquals(2, deleted);
+        ArgumentCaptor<software.amazon.awssdk.services.s3.model.DeleteObjectRequest> req =
+                ArgumentCaptor.forClass(software.amazon.awssdk.services.s3.model.DeleteObjectRequest.class);
+        verify(s3, times(2)).deleteObject(req.capture());
+        assertEquals("tasks/20/a.mp3", req.getAllValues().get(0).key(), "sourceUri 解析成对象 key");
+        assertEquals("tasks/21/b.mp3", req.getAllValues().get(1).key());
+    }
+
+    @Test
+    void deleteAllFailedS3FailureStillDeletesAllAndReturnsCount() {
+        // T4.21b：S3 抛异常不向上抛、不回滚 DB——所有 DEAD 行照删、计数正确
+        when(jdbc.query(contains("status = 'DEAD'"),
+                ArgumentMatchers.<RowMapper<Long>>any(), eq(1L)))
+                .thenReturn(List.of(30L, 31L));
+        stubStatus(30L, "DEAD");
+        stubSourceUri(30L, "s3://meetingnotes/tasks/30/a.wav");
+        stubStatus(31L, "DEAD");
+        stubSourceUri(31L, "s3://meetingnotes/tasks/31/b.wav");
+        doThrow(new RuntimeException("MinIO 不可达")).when(s3)
+                .deleteObject(any(software.amazon.awssdk.services.s3.model.DeleteObjectRequest.class));
+
+        int deleted = newService().deleteAllFailed();
+
+        assertEquals(2, deleted, "S3 失败不影响删除计数");
+        verify(jdbc).update(contains("DELETE FROM task WHERE"), eq(30L));
+        verify(jdbc).update(contains("DELETE FROM task WHERE"), eq(31L));
+        verify(s3, times(2)).deleteObject(any(software.amazon.awssdk.services.s3.model.DeleteObjectRequest.class));
+    }
+
     private void verifyNoS3Calls() {
         verify(s3, never()).deleteObject(any(software.amazon.awssdk.services.s3.model.DeleteObjectRequest.class));
     }

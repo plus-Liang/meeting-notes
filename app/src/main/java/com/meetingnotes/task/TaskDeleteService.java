@@ -82,7 +82,11 @@ public class TaskDeleteService {
         return results;
     }
 
-    /** 清空当前用户全部 DEAD 任务（不限已加载行；RETRYING 不算失败不删）。@return 实际删除条数。 */
+    /** 清空当前用户全部 DEAD 任务（不限已加载行；RETRYING 不算失败不删）。@return 实际删除条数。
+     *
+     * <p>T4.21b 补口：删除成功的任务在**事务外**逐个 best-effort 清 MinIO 对象
+     * （口径同 controller：S3 失败只 WARN、不回滚 DB、不抛），三条删除路径口径一致。</p>
+     */
     public int deleteAllFailed() {
         List<Long> ids = jdbc.query(
                 "SELECT id FROM task WHERE user_id = ? AND status = 'DEAD' ORDER BY id",
@@ -91,6 +95,7 @@ public class TaskDeleteService {
         for (Long id : ids) {
             DeleteOutcome outcome = deleteOne(id);
             if (outcome.deleted()) {
+                purgeObjectBestEffort(id, outcome.sourceUri());
                 deleted++;
             }
         }
@@ -111,10 +116,11 @@ public class TaskDeleteService {
         }
     }
 
-    /** 事务内单条删除：状态判断与删除同事务（防 worker 竞态把 RUNNING 任务删成孤儿）。 */
+    /** 事务内单条删除：状态判断与删除同事务，且状态读加 FOR UPDATE 行锁
+     * （T4.21 验收 P3：读状态与删行同事务但无锁仍有毫秒级竞态窗口，加锁后读-删串行化）。 */
     private DeleteOutcome deleteOneInTx(long taskId) {
         String status = jdbc.query(
-                "SELECT status FROM task WHERE id = ? AND user_id = ?",
+                "SELECT status FROM task WHERE id = ? AND user_id = ? FOR UPDATE",
                 rs -> rs.next() ? rs.getString(1) : null, taskId, DEFAULT_USER_ID);
         if (status == null) {
             return new DeleteOutcome(taskId, false, "NOT_FOUND", null);
