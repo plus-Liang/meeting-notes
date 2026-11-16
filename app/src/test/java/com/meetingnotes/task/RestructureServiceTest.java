@@ -96,6 +96,41 @@ class RestructureServiceTest {
     }
 
     @Test
+    void pgNowaitConflictViaSqlStateReturns409() {
+        // K-79：生产实锤——PG NOWAIT 冲突抛的是 UncategorizedSQLException(SQLState 55P03)，不是 CannotAcquireLockException
+        when(jdbc.query(contains("FOR UPDATE NOWAIT"), ArgumentMatchers.<ResultSetExtractor<String>>any(),
+                eq(7L), eq(1L)))
+                .thenThrow(new org.springframework.jdbc.UncategorizedSQLException("SELECT ...",
+                        "SELECT status FROM task WHERE id = ? AND user_id = ? FOR UPDATE NOWAIT",
+                        new java.sql.SQLException("ERROR: could not obtain lock on row in relation \"task\"", "55P03")));
+
+        ApiException e = assertThrows(ApiException.class,
+                () -> newService().restructure(1L, 7L, "course"));
+
+        assertEquals(409, e.getStatus(), "SQLState 55P03 必须判为锁冲突 → 409");
+        assertEquals("TASK_BUSY", e.getCode());
+        verifyNoInteractions(structuringService);
+    }
+
+    @Test
+    void nonLockConflictSqlStateIsRethrownNotConvertedTo409() {
+        // 反例（K-79 反向纪律）：非锁冲突的 DataAccessException（如 42P01 表不存在）必须原样抛，禁止 catch-all 转 409
+        when(jdbc.query(contains("FOR UPDATE NOWAIT"), ArgumentMatchers.<ResultSetExtractor<String>>any(),
+                eq(7L), eq(1L)))
+                .thenThrow(new org.springframework.jdbc.UncategorizedSQLException("SELECT ...",
+                        "SELECT status FROM task WHERE id = ? AND user_id = ? FOR UPDATE NOWAIT",
+                        new java.sql.SQLException("ERROR: relation \"task\" does not exist", "42P01")));
+
+        org.springframework.dao.DataAccessException e = assertThrows(
+                org.springframework.dao.DataAccessException.class,
+                () -> newService().restructure(1L, 7L, "course"));
+
+        assertEquals(org.springframework.jdbc.UncategorizedSQLException.class, e.getClass(),
+                "非锁冲突必须原样抛出（保持 500），不得转成 409 ApiException");
+        verifyNoInteractions(structuringService);
+    }
+
+    @Test
     void blankTranscriptReturns400InvalidParam() {
         stubRowLock("DONE");
         stubTranscript("   ");
