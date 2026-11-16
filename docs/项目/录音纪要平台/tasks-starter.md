@@ -2526,6 +2526,22 @@ F-15 控制在 ≤30 行并集中一处；新增静态资源不引第三方库�
 >
 > **禁止**：重跑 ASR；扣配额/新建任务；失败时留下半截结果；删证据任务；多 commit。
 
+## T4.26b T4.26 收尾：并发锁冲突必须 409 `TASK_BUSY`（约 20–30min；**下一张卡开工前置**）
+
+> **要证明的事**（我在 T4.26 验收时用真并发探针实测）：同一任务同时发两个 `POST /tasks/{id}/restructure` → 稳定 **200 + 500 `INTERNAL_ERROR`**，而卡面要求 **409 `TASK_BUSY`**。根因（app 日志实锤）：PostgreSQL `SELECT … FOR UPDATE NOWAIT` 冲突报 `SQL state [55P03]`，Spring 抛 **`org.springframework.jdbc.UncategorizedSQLException`**，而代码只 catch `CannotAcquireLockException` → 漏 → 500。写码方单测 mock 的正是 `CannotAcquireLockException`，所以"绿但生产红"（K-79）。
+>
+> **改动**（只改 `task/RestructureService.java` + 对应单测）：
+> 1. 锁冲突识别按 **SQLState**：catch `DataAccessException`（含 `UncategorizedSQLException` / `PessimisticLockingFailureException` / `CannotAcquireLockException`），沿 `NestedExceptionUtils.getMostSpecificCause` 取 `SQLException.getSQLState()`；**`55P03`（lock_not_available）/`40001`/`40P01` → 409 `TASK_BUSY`**；**其他 DataAccessException 必须原样抛出（保持 500）——禁止 catch-all 吞异常**。
+> 2. 注释写清"为什么不能只认一个异常类（K-79）"。
+>
+> **测试**：单测 +2——① `UncategorizedSQLException`（cause `SQLException("could not obtain lock", "55P03")`）→ 409；② **非锁冲突 SQLState（如 42P01）→ 不得转 409**（反例，防误吞）；保留原 `CannotAcquireLockException` 用例。
+>
+> **判据**：`-UnitOnly` 全绿；先 commit → build/up → 全量 `scripts\test.ps1` 全绿（K-68/K-77，head.txt 记提交后 HEAD）；可维护性 0/0；**真机并发验证**：对同一 DONE 任务同时发 2 个 restructure（`Start-Job` 两路），**两轮都必须 200 + 409**，500 消失；再跑一轮非法模板 400 / 不存在 404 / 配额不变回归；单 commit `fix(T4.26)`；不 push。
+>
+> **禁止**：catch-all 把所有异常转 409；只改测试不改代码；改其它接口/表；多 commit。
+
+---
+
 ## T4.27 批量导出 zip（约 3h；改契约；用户清单 1.3）
 
 > **要证明的事**：现在多选导出是浏览器逐个 `a.download` 下载 N 个 md（`tasks.html:429` 注释明确 zip 属后端工作）。
