@@ -2557,6 +2557,22 @@ F-15 控制在 ≤30 行并集中一处；新增静态资源不引第三方库�
 >
 > **禁止**：把 zip 读进内存再返回（必须流式）；改单条导出契约；多 commit。
 
+## T4.27b T4.27 收尾：`ids` 超长数字 500 收口（约 10–15min；**T4.28 开工前置**；K-76 第二次复发）
+
+> **要证明的事**（我在 T4.27 验收时实测）：`GET /tasks/export?ids=99999999999999999999`、`9223372036854775808`、`1,99999999999999999999` → **500 `INTERNAL_ERROR`**，而契约要求非法 ids → **400 `INVALID_PARAM`**。根因：`parseIds` 用 `value.matches("\\d+")` 后直接 `Long.parseLong`——**与 T4.24b 的 K-76 完全同类**（超 64 位范围溢出未兜）。`ids=Long.MAX_VALUE`/`abc` 正常 400。
+>
+> **改动**（只改 `web/TaskZipExportController.parseIds` + 对应单测）：
+> 1. 纯数字后**安全解析**：能 `Long.parseLong` 才收；溢出/超长 → 直接 400 `INVALID_PARAM`（message 明确"ids 必须是数字任务 id"或"任务 id 超出范围"，二选一写清）。**禁止冒泡 500**。
+> 2. 注释写明 K-76 复发教训（同一类错误第二次）。
+>
+> **测试**：`TaskZipExportControllerTest` 补边界矩阵——`0`（不存在的 id 走 400"没有可导出"）、正常、`Long.MAX_VALUE`、`Long.MAX_VALUE+1`、`"9"*20`、`"0"*30+"42"`；断言全部 400 且 code=`INVALID_PARAM`，无 500。
+>
+> **判据**：`-UnitOnly` 全绿；先 commit → build/up → 全量 `scripts\test.ps1` 全绿（K-68/K-77）；可维护性 0/0；真机 4 个边界探针全 400（`"9"*20`/2^63/`"1,"+"9"*20`/MAX）且正常 zip 导出不回归；单 commit `fix(T4.27)`；不 push。
+>
+> **禁止**：只改测试不改代码；catch `NumberFormatException` 后静默当成"不存在 id"继续（必须明确 400）；多 commit。
+
+---
+
 ## T4.28 只读分享链接（约 3–4h；迁移 V5 + 认证面收窄；用户清单 1.5；K-46）
 
 > **要证明的事**：没有分享能力；匿名访问现在只认全局 `Bearer API_TOKEN`（一个 token 能读全部）。

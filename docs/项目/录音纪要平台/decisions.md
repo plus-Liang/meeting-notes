@@ -1658,6 +1658,27 @@
 - **依据**：D-131 P2-1；`tasks-starter.md` 新增 T4.26b 卡。
 - **已排除项**：与 T4.27 合并一个 commit（违反一卡一 commit）；只改单测不改代码（生产仍 500）。
 
+### D-133 T4.26b（并发 409 收口）验收通过；K-79 关闭，"按 SQLState 判锁冲突 + 非锁冲突不吞"定为并发类判据
+
+- **日期**：2026-11-16 23:40｜**决策人**：DSH（Lead 独立复核）
+- **结论**：
+  1. **T4.26b 通过**（`f2c2301`，2 文件 +68/−2，单 commit）。`RestructureService` 改为 `catch DataAccessException` → 取 most specific cause 的 `SQLException.getSQLState()`；`55P03/40001/40P01` → 409 `TASK_BUSY`；其余原样抛（保持 500）；`CannotAcquireLockException` 保留兼容。
+  2. 我独立复核：**真机两轮**双并发均 **200 + 409**（500 消失，证据 `concurrency-rounds.txt`）；单测用生产真实异常形状（`UncategorizedSQLException`+55P03），**42P01 反例断言原样抛、不转 409**；全量 **324/324** exit 0、可维护性 0/0、`tasks.html` sha256==工作区；重跑 0 配额（配额增量只来自全量 E2E）。
+  3. **判据固化**（并发/锁类）：①按 SQLState 判冲突，不只认异常类；②**反向纪律：非锁冲突必须原样抛**（禁止 catch-all 转 409）——卡里必须写反例；③真机双并发两轮是硬判据，不能只靠 mock；④mock 的异常类型必须与生产同源（K-79）。
+  4. 收尾：探针改动的任务 237 已恢复 `course`，证据任务状态与 T4.26 验收记录一致。
+- **依据**：`review/2026-11-16-T4.26b-T4.27验收.md` §一；`artifacts/T4.26b/lead-verify/`（concurrency-rounds.txt、full-test.log 324/324、maintainability.log）；`review/2026-11-16-T4.26验收.md` §一 P2-1（修复前证据）。
+- **已排除项**：catch-all 把所有 DataAccessException 转 409（会掩盖真故障，卡里已写明禁止）；只改测试不改代码（生产仍 500）；把并发 500 当 P3 放行。
+
+### D-134 T4.27（批量导出 zip）验收通过（附 P3-1）；K-76 同类复发 → 立 T4.27b 前置 + 规则写进 rules/dev.md
+
+- **日期**：2026-11-16 23:42｜**决策人**：DSH
+- **结论**：
+  1. **T4.27 通过（附 P3-1）**（`08033c0`，5 文件 +499/−40，单 commit）。我独立：API **19/19**（zip 合法/条目名/与单条导出**逐字节一致**/缺失 id 附 `_errors.txt`/400 矩阵/去重/401/0 配额）+ UI **12/12**（单请求下载真实 zip、失败就地提示、1280/390 零溢出）；全量 **324/324** exit 0、可维护性 0/0。
+  2. **P3-1（必修，前置）**：`ids` 超长纯数字（20 位）→ **500** 而非 400；根因与 **K-76 完全同类**（`matches("\\d+")` 后 `Long.parseLong` 溢出未兜）。这是 K-76 规则写成后**第二次复发** → 按 AGENTS §3"同一坑出现 ≥2 次写进 rules"，已在 `rules/dev.md` 增加"新增数字参数必须带边界矩阵"条目，并立 **T4.27b**（10–15min）作 T4.28 前置：解析失败 → 400 `INVALID_PARAM`；补 `0/正常/MAX/MAX+1/20 位/前导零超长` 单测；回归 zip 正常路径；单 commit `fix(T4.27)`。
+  3. 质量正向点：首版全量被 E2E 抓出 `_errors.txt` 漏预检剔除 id → 写码方 amend 修代码（未 push、保持单 commit），我复核 diff 确认遍历完整请求列表。
+- **依据**：`review/2026-11-16-T4.26b-T4.27验收.md` §二 P3-1；真实容器复现：`ids=99999999999999999999/9223372036854775808/1,99999999999999999999` → 500，`abc/MAX` → 400；`artifacts/T4.27/lead-verify/`（api.log 19/19、ui.log 12/12、ui-download.zip、full-test.log 324/324）。
+- **已排除项**：把 ids 溢出当"已知限制"不修（对外契约要求 400，且已有 K-76 先例）；与 T4.28 合并 commit（违反一卡一 commit）；只在文档写规则不再进 checklist（规则必须落到 rules/dev.md 并由每张卡复核）。
+
 ---
 
 ## 面试速查（由本文件派生，勿单独维护）
