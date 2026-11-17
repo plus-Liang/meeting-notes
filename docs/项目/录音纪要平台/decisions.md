@@ -1793,6 +1793,19 @@
 - **依据**：`review/2026-11-17-T4.32b验收.md`（第 58 份）；`artifacts/T4.32b/lead-verify/`（unitonly 404、full 420、maintainability 0/0、phaseA 10/10、phaseB1 13/13、phaseB2 stdout、e2e-ui-result 7/7 + e2e-e-console 归因、e2e-ui-c 5/5、serve.py、fake/fetch.sh、env-before/after）；DB/MinIO/配额复核（241 任务全 DONE、MinIO 247=241+历史 6 孤儿无新增、89 分钟/76 任务）。
 - **已排除项**：把我自己"直链第二次应 `reused=false`"的断言当产品失败（实际 201+reused=true 回历史任务 129，幂等正确）；把 BYOF stdout 首次 502 当产品缺陷（是我假抓取脚本默认分支漏了"stdout 模式无 `$2`"）；把宿主浏览器 502 封面当产品 bug（Docker 代理伪影，UI 用 data-URI 封面）；把"写码方文档写在生成副本"当内容错误（内容对，只是流程偏差，已回灌权威版）；把 preview 的 `image/png → unsupported` 当缺陷（卡面分类如此，给了可读 reason）。
 
+### D-144 T4.35a 通过：ASR 句子级 segments 落地（真语音数组 / 静音 [] / 旧任务 null 三态）；K-81 第二次复发 → 升级为 rules/dev.md 第 11 条铁律
+
+- **日期**：2026-11-17｜**决策人**：DSH
+- **结论**：
+  1. **T4.35a 通过**（`7cad12a`，16 文件 +636/−76，单 commit）：`infra/asr/server.py` 响应增 `segments[{start,end,text}]`（生成器只消费一次、`text` 拼接口径与旧版逐字一致、空白句丢弃、3 位小数），**旧三键 `text/duration/cost_sec` 逐字不变**；Java 侧因 Spring AI `TranscriptionModel` 拿不到时间戳，按卡新增 `asr/AsrClient`（RestClient 复用既有 base-url 与 900s 路由超时，**一次调用同取 text+segments，未二次调 ASR**）+ `AsrResponseParser` 纯函数；迁移 **V7** `task_result.segments jsonb`（可空不建索引）；worker 与 transcript **同一 upsert** 写 segments、**DONE 仍最后写**；详情 `GET /tasks/{id}` **只增第 15 键** `segments`（旧任务/PASTE = null，不是 []）。**15 张 ✅ → 16 张 ✅**。
+  2. 我独立验证：`-UnitOnly` **417/417 exit 0**（+13）、可维护性 **0/0**、全量 **435/435 exit 0**（E2E 16 场景）；**ASR 服务原始响应我独立实打**（容器内 python multipart，真中文语音 61s）：`text/duration/cost_sec/segments` 四键、**18 段**逐条 `0≤start<end≤duration+1` 且 text 非空已 strip；**API 端到端**：真语音 task 552 201→DONE、详情 15 键、segments 18 段有序；静音 task 553 → **`segments=[]`** 且 transcript 空仍 DONE；旧任务 237 与 PASTE 536 → **`segments=null`**；psql 直查：Flyway **V7 success=t**、列 `jsonb nullable`、三态统计 **NULL 243 / `[]` 4 / 非空 2**、历史任务零回填。
+  3. **K-81 第二次复发**（E2E 用默认列表 `limit=50` 取"历史任务"只拿到最近 50 条新任务 → 全量首跑红）：按沉淀阈值升级为 **`rules/dev.md §4.1` 第 11 条铁律**——依赖库内历史数据的断言必须用 `before_id` keyset/显式区间，不许用默认列表，且要在持续增长的库上连续两轮全量通过。**回归三连**（手册 §3.5）按三条"自主性"prompt 在下一张卡（T4.35b）的卡面与执行中观察：卡面已内置"先跑三行报给我"（自主执行）、"按卡执行不等确认"、"失败定位到文件行号"三项要求，观察结果记入 T4.35b 验收报告。
+  4. 新坑 **K-86**（环境）：ASR slim 镜像**没有 curl**（真机探针用容器内 python urllib 手拼 multipart）；Windows git-bash 的 MSYS 会把 `docker exec` 里的 `/tmp/...` 自动转 Windows 路径（`MSYS_NO_PATHCONV=1` 或改用 PowerShell）。
+  5. 残余（P3，接受）：`[]` 与 `null` 都表示"无播放器"（前端 35c 要同时处理）；segments 无索引/未做服务端排序校验（解析层已丢 `end<start`）；`AsrClient` 不再走 Spring AI（配置键仍复用）；ASR 默认分段未做句长合并（35c 可评估）；ASR 超时链路未注入故障验证。
+  6. **配额预警**：今日已用 **104 分钟 / 90 任务**（上限 200/100，**剩 10 任务**）；每轮全量 E2E 约 +4–6 任务，后续卡若不够，开发期临时调高日任务上限（`.env` 配额键）并记决策，不要靠删任务凑配额（证据行不删，D-073）。
+- **依据**：`review/2026-11-17-T4.35a验收.md`（第 59 份）；`artifacts/T4.35a/lead-verify/`（unitonly 417、full 435、maintainability 0/0、asr-probe.py + asr-raw.log 四键 18 段、api-probe.py + api-probe.log（552/553/237/536）、legacy237.json、task535.json）；DB 直查（V7/列定义/三态 243/4/2）；数据 255 任务全 DONE、MinIO 261=255+历史 6 孤儿无新增。
+- **已排除项**：把静音任务 `segments=[]` 当缺陷（卡面语义"有响应无内容"，与旧任务 null 区分）；把旧任务 null 当漏数据（迁移不回填，卡面要求）；把 ASR 返回 18 段当"少了"（我的 61s 素材 vs 写码方 90s 素材，段数天然不同，断言只校验有序/边界/非空）；把写码方 `af3750c`→`7cad12a` 的 amend 当违反单 commit（首跑红是测试断言窗口错误，产品代码零改动，amend 是同 commit 内修正，符合 K-77 精神）。
+
 ---
 
 ## 面试速查（由本文件派生，勿单独维护）

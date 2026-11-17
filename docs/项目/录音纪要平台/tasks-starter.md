@@ -2716,7 +2716,7 @@ F-15 控制在 ≤30 行并集中一处；新增静态资源不引第三方库�
 > - 残留清理（D-139）：临时任务/临时 MinIO 对象/override/脚本/容器 `/tmp` 逐条核对，回报写清"查了哪些、各是多少"。
 > **禁止**：把 yt-dlp 等平台解析器装进仓库；执行 JS/无头浏览器；带 cookie/伪造签名；改 32a `/tasks/link` 既有语义与错误码；默认开启 BYOF；多 commit。
 
-## T4.35a 前置：ASR segments 句子级时间戳（约 2–3 小时；D-122；**依赖 T4.32b 已通过 `4153891`**）
+## T4.35a 前置：ASR segments 句子级时间戳（约 2–3 小时；D-122；**依赖 T4.32b 已通过 `4153891`**）**✅ 已通过（2026-11-17，`7cad12a`，第 59 份报告，D-144；我独立 417/417 单元 + 435/435 全量 + ASR 原始响应四键 18 段 + 真语音 552/静音 553 三态 + 旧任务 237 null；K-81 复发→rules 第 11 条；K-86）**
 
 > **先跑三行报给我**：`git -C D:\new\projects\meeting-notes log --oneline -1`、`git -C D:\new\projects\meeting-notes status --short`、`Get-Content D:\new\artifacts\T4.32b\workbuddy\head.txt`——确认你在 `4153891` 上开工。**只看这张卡 + `handoff.md` 第 0–2 节 + `AGENT.md` §2/§4，不要整篇读长文档**（D-137 成本纪律）；证据落 `D:\new\artifacts\T4.35a\workbuddy\`；回报 ≤40 行。
 >
@@ -2738,6 +2738,33 @@ F-15 控制在 ≤30 行并集中一处；新增静态资源不引第三方库�
 > - `-UnitOnly` 全绿 → commit（单 commit `feat(T4.35a)`）→ **`docker compose build app asr && up -d app asr`**（两个镜像都在本卡内）→ 等 healthy → 全量（K-68）→ 可维护性 0/0；`head.txt` 记**提交后** HEAD。
 > - 残留清理（D-139）：临时任务/临时对象/容器 `/tmp` 逐条核对，回报写清"查了哪些、各是多少"；**本次 E2E 会消耗配额，控制在 1–2 个任务**。
 > **禁止**：改 `text`/`duration`/`cost_sec` 语义或删键；为拿时间戳二次调 ASR；给旧任务回填/伪造 segments；改播放器/前端（属 35b/35c）；改 ASR 模型或识别参数（除非返回 segments 必需）；多 commit。
+
+## T4.35b 播放器 API：短时签名音频流（Range/206）（约 2–3 小时；D-122；**依赖 T4.35a 已通过 `7cad12a`**）
+
+> **先跑三行报给我**：`git -C D:\new\projects\meeting-notes log --oneline -1`、`git -C D:\new\projects\meeting-notes status --short`、`Get-Content D:\new\artifacts\T4.35a\workbuddy\head.txt`——确认你在 `7cad12a` 上开工。**只看这张卡 + `handoff.md` 第 0–2 节 + `AGENT.md` §2/§4**；证据落 `D:\new\artifacts\T4.35b\workbuddy\`；回报 ≤40 行。**配额只剩约 10 任务：本卡不要建新任务**（除全量 E2E 自身），签发/播放都是只读。
+>
+> **要证明的事**：详情页的 `<audio>` 能**直接播放并 seek**（浏览器 Range → 206）；URL 里**不出现 API_TOKEN**（短时签名代替）；别人的/不存在的任务 → **404**；PASTE 等无音频任务 → 明确 4xx 不是 500；详情 15 键**一增一减都不许**。
+> 本卡**不做**：前端播放器 UI（T4.35c）、说话人（T4.36）、MinIO 桶公开化。
+>
+> **改动（后端 + 文档，单 commit）**：
+> 1. 新 `POST /api/v1/tasks/{id}/audio-token`（Bearer 由 `ApiTokenFilter` 覆盖）→ 200 `{"url":"/api/v1/tasks/{id}/audio?sig=…&exp=…","expires_at":…}`：
+>    - 签名 = **HMAC-SHA256(secret, taskId + "\n" + exp)**（十六进制/Base64URL 均可）；secret 用现有 `API_TOKEN` 派生（HMAC key = API_TOKEN）或新增 `AUDIO_SIGN_SECRET`（新增则三处同步）；TTL `app.audio.token-ttl-sec`（env `AUDIO_TOKEN_TTL_SEC`，默认 600）；
+>    - 任务不存在 / 不属于当前用户 → **404 `TASK_NOT_FOUND`**（不泄露存在性）；PASTE/无 `source_uri`/非 DONE → 400 `INVALID_PARAM`（或只增新码如 `AUDIO_NOT_AVAILABLE`，**码表只增**）；PASTE 的 `source_uri` 是 s3 文本对象——必须显式拒绝，别把文本当音频流出去。
+> 2. 新 `GET /api/v1/tasks/{id}/audio?sig=&exp=`（**免 Bearer，但必须验签 + 查过期 + 绑定 taskId**）：
+>    - 从 MinIO `GetObject` **流式转发**（不整文件进内存）；`Content-Type` 按对象/原始文件名后缀（audio/wav、audio/mpeg、audio/mp4、video/webm…，未知则 `application/octet-stream`）；
+>    - **支持 `Range: bytes=…` → 206 + `Content-Range: bytes a-b/total` + `Accept-Ranges: bytes`**（`<audio>` seek 必需）；无 Range → 200 全量；越界/非法 Range → **416**；`Content-Length` 与内容一致；
+>    - 验签失败/过期/`sig` 与 taskId 不匹配 → **401 或 404**（自己定一种并写进文档，推荐 404 不泄露）；**不得回退成"无签名也能下载"**。
+> 3. `ApiTokenFilter` 豁免**只加一条精确路径**（形如 `^/api/v1/tasks/\d+/audio$`），**禁止豁免整个 `/api/v1/tasks/`**（K-46 认证面收窄纪律）；单测断言 `/api/v1/tasks`, `/api/v1/tasks/{id}`, `/api/v1/tasks/{id}/audio-token` 仍 401（无 Bearer），只有带合法签名的那一条免 Bearer。
+> 4. 文档：权威版 `接入指南.md` 新增 §3.10「音频流（播放器用）」——签发/播放请求示例、Range 语义、错误码、安全边界（短时 URL 可分享但只读、签名绑定 taskId+exp、有效期默认 10 分钟）；`配置清单.md` 加 `AUDIO_TOKEN_TTL_SEC`（若新增 secret 也加）；码表如新增只增。
+>
+> **判据（缺一不可）**：
+> - 单测：签名矩阵（正确 / 改 taskId / 改 exp / 过期 / 空 sig / 长度异常 → 拒绝）；Range 解析矩阵（`bytes=0-9`、`bytes=10-`、`bytes=-10`、`bytes=0-999999999` 越界 → 416、无 Range）；`ApiTokenFilter` 只豁免精确一条路径；PASTE/非 DONE 签发被拒。
+> - **真机**（无 override；只读）：Bearer 签发 → 用 `curl` **不带 Bearer** 拉音频：200 + `Accept-Ranges: bytes` + `Content-Length == task.size_bytes`；`Range: bytes=0-1023` → **206** + `Content-Length: 1024` + `Content-Range: bytes 0-1023/<size>`；越界 → **416**；篡改 sig / 过期 → 拒绝；无 Bearer 签发 → 401；不存在任务 → 404；PASTE 任务（如 536）签发 → 400。
+> - **字节一致性**：拉回的前 1KB 的 sha256 与 MinIO 对象前 1KB 一致（对象在 `tasks/<id>/<name>`，可用 `docker compose exec minio` 或 app 容器内读对象比对；给命令与输出）。
+> - **浏览器路径**：在详情页用 `page.evaluate` 的 `fetch(audioUrl, {headers:{Range:'bytes=0-1023'}})` 验 **206**，并 `new Audio(url)` 绑 `canplay/loadedmetadata` 事件看 `duration` 是否 ≈ `duration_sec`（headless 若不解码则如实写"仅验 206/元数据不可得"）；**不造播放器 UI**（属 35c）。
+> - `-UnitOnly` 全绿 → commit（单 commit `feat(T4.35b)`）→ `docker compose build app && up -d app` → 全量（K-68）→ 可维护性 0/0；`head.txt` 记**提交后** HEAD。
+> - 残留清理（D-139）：本卡不建任务；核对容器 `/tmp`、MinIO 对象数不变、`.env` 未动。
+> **禁止**：把 `API_TOKEN` 放进 URL；豁免整个 `/api/v1/tasks/`；改详情 15 键；把 MinIO 桶/对象设为公开；改前端播放器（35c）；多 commit。
 
 ## 每张卡做完都要给你的回报
 
