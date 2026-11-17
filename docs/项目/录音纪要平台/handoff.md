@@ -2,7 +2,7 @@
 
 ## 0. 当前位置
 
-- 代码 HEAD **`641a6d1`**（T4.32a FETCH 直链 + SSRF **✅**），工作区干净；origin `a1e93b7`，本地 `641a6d1` + 本次验收文档提交待推；栈 5/5 healthy；ASR `small`。**D-122 批次已通过 14 张**（T4.23…T4.30 含收尾、T4.32a）。
+- 代码 HEAD **`a147933`**（T4.32a 验收文档；产品提交 `641a6d1`），工作区干净；**origin 已到 `a147933`（与本地一致，无待推）**；栈 5/5 healthy；ASR `small`。**D-122 批次已通过 14 张**（T4.23…T4.30 含收尾、T4.32a）。
 - 今日配额（11-17）已用 **67 分钟 / 61 任务**（上限 200/100）；任务总数 **226**（全 DONE、DEAD 0、LINK 2）；MinIO **232 前缀 = 226 + 历史 6 孤儿（74–79）**。
 - **下一张 = T4.32b 链接导入**：L1 页面链接确认卡（og:title/时长）、L2 Content-Type 探测走现有下载管线、BYOF `FETCHER_CMD`（不配返回 `FETCHER_UNAVAILABLE`）、前端入口；**依赖已就绪**的 `MediaFetcher` 接口与 `POST /api/v1/tasks/link`。之后 T4.35a/b/c 播放器（V7）→ T4.36 说话人 → T4.37 登录；不做 T4.31 PWA / T4.33 INBOX / T4.34 RSS。
 
