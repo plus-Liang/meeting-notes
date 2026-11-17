@@ -39,12 +39,18 @@ public class ApiTokenFilter extends OncePerRequestFilter {
 
     /** 只守 /api/v1/**：actuator、静态页、OpenAPI、Swagger 全部豁免（K：豁免面逐条实测）。
      *  T4.28（K-46）：匿名只读分享——额外放行 /api/v1/share/ 这**一条**前缀（GET share/{token}）；
-     *  其它 /api/v1/**（列表/详情/写操作）对匿名与分享 token 仍一律 401。 */
+     *  其它 /api/v1/**（列表/详情/写操作）对匿名与分享 token 仍一律 401。
+     *  T4.35b：匿名音频流——只放行 GET 且**精确**匹配 {@code ^/api/v1/tasks/\d+/audio$} 这一条
+     *  （自带 HMAC 短时签名验签；/tasks、/tasks/{id}、/tasks/{id}/audio-token 等仍一律 401，
+     *  K-46 认证面收窄：禁止豁免整个 /api/v1/tasks/ 前缀）。 */
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
         String uri = request.getRequestURI();
         if (uri.startsWith("/api/v1/share/")) {
             return true;
+        }
+        if ("GET".equals(request.getMethod()) && uri.matches("^/api/v1/tasks/\\d+/audio$")) {
+            return true; // T4.35b：音频流自带短时签名，验签在 controller（失败 404，绝不回退成无签名下载）
         }
         return !uri.startsWith("/api/v1");
     }

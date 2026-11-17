@@ -107,6 +107,11 @@ app:
     # T4.28：只读分享链接有效期（天）；token 明文永不落库（DB 只存 SHA256 hex）
     ttl-days: ${SHARE_TTL_DAYS:7}
 
+  audio:
+    # T4.35b：播放器短时签名音频 URL 有效期（秒）；签名 = HMAC-SHA256(key=API_TOKEN, taskId+"\n"+exp)，
+    # 绑定 taskId 与 exp；URL 可分享但只读、短时。GET /tasks/{id}/audio 免 Bearer 只认签名
+    token-ttl-sec: ${AUDIO_TOKEN_TTL_SEC:600}
+
   fetch:
     # T4.32a：链接导入（FETCH 直链），安全口径与已知限制见接入指南 §3.9
     max-redirects: ${FETCH_MAX_REDIRECTS:5}

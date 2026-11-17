@@ -29,6 +29,11 @@ class ApiTokenFilterTest {
         public String tasks() {
             return "ok";
         }
+
+        @GetMapping("/api/v1/tasks/5/audio")
+        public String audio() {
+            return "audio"; // T4.35b：真实验签在 AudioStreamController；filter 层只验豁免面
+        }
     }
 
     @BeforeEach
@@ -72,5 +77,43 @@ class ApiTokenFilterTest {
         org.junit.jupiter.api.Assertions.assertTrue(ApiTokenFilter.constantTimeEquals("Bearer a", "Bearer a"));
         org.junit.jupiter.api.Assertions.assertFalse(ApiTokenFilter.constantTimeEquals("Bearer a", "bearer a"));
         org.junit.jupiter.api.Assertions.assertFalse(ApiTokenFilter.constantTimeEquals("Bearer a", "Bearer ab"));
+    }
+
+    /* ---- T4.35b（K-46 认证面收窄）：只豁免 GET 且精确 ^/api/v1/tasks/\d+/audio$ 一条 ---- */
+
+    @Test
+    void audioPathIsExemptOnlyForGetWithoutBearer() throws Exception {
+        mvc.perform(get("/api/v1/tasks/5/audio"))
+                .andExpect(status().isOk()); // 免 Bearer（验签在 controller）
+    }
+
+    @Test
+    void audioTokenIssueStillRequiresBearer() throws Exception {
+        mvc.perform(get("/api/v1/tasks/5/audio-token"))
+                .andExpect(status().isUnauthorized());
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .post("/api/v1/tasks/5/audio-token"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void nearbyPathsAreNotExempt() throws Exception {
+        mvc.perform(get("/api/v1/tasks/5"))
+                .andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/v1/tasks"))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void audioPathNonNumericOrWrongMethodNotExempt() throws Exception {
+        mvc.perform(get("/api/v1/tasks/abc/audio"))
+                .andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/v1/tasks/5/audiox"))
+                .andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/v1/tasks/5/audio/extra"))
+                .andExpect(status().isUnauthorized());
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .post("/api/v1/tasks/5/audio"))
+                .andExpect(status().isUnauthorized()); // 只豁免 GET
     }
 }
