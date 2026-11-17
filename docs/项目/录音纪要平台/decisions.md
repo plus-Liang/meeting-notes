@@ -1743,6 +1743,19 @@
 
 ---
 
+### D-140 T4.30 前端通过、闭环被 P1 阻断：MediaRecorder webm 的 `format=duration=N/A` 直接 parseDouble → 500；修法选"包时间兜底 + 非数字不 500"（T4.30b）
+
+- **日期**：2026-11-17｜**决策人**：DSH
+- **结论**：
+  1. **T4.30 前端通过**（`54e3be6`，仅 2 个 static 文件 +239，无越界）：我自写 fake-mic 探针 **15/15**（录音中状态/计时走动/停止出面板/名称预填/防覆盖隐藏重录/**提交失败提示且 Blob 保留可二次重试**/权限拒绝可读提示且无未捕获异常/1280+390 零溢出/无意外 console）。
+  2. **P1-1 阻断（后端）**：MediaRecorder 产出的 webm 提交 `POST /api/v1/tasks` → **500**。我独立复现：容器内 `ffprobe -show_entries format=duration` 对该文件输出 **`N/A` 且 exit 0**（绕过 exit/空 检查）→ `AudioDurationProbe.java:53` `Double.parseDouble("N/A")` → `NumberFormatException` 未捕获 → 500；DB 任务数/配额不变、无 MinIO 孤儿（探测在事务前）。影响：**浏览器录音主链路不可用**；普通文件上传不受影响。
+  3. **修法选 A（推荐并采纳）**：`format=duration` 非数字/空/`N/A` → 不抛，先试**末音频包 `pts_time + duration_time`** 兜底；两路都拿不到 → 400 `INVALID_MEDIA`（不再 500）；每次 ffprobe 保留 30s 超时；"文本→时长"抽纯函数便于单测（宿主机无 ffmpeg，单测不能依赖真 ffprobe）；E2E 增加 webm fixture 用例（1–2s、≤30KB）断言 201→DONE→`duration_sec` 1–3。**排除**：方案 B 前端转 WAV（60min 内存压力大）；方案 C 每次 remux（多一次 IO 且对长录音更贵）。
+  4. **新坑 K-82**：**外部工具输出不许裸 parseDouble** —— ffprobe/ffmpeg 对"未知值"会输出 `N/A`/空/本地化小数且 **exit 0**，"命令成功"≠"输出可解析"；解析要"先判可解析再转"，失败走兜底或明确 4xx，绝不冒泡成 500。写码方按卡纪律**停机等确认、未擅动后端**，这一点正确（对照 K-40/D-089 的"停下来给证据链"）。
+- **依据**：`review/2026-11-17-T4.30验收.md`（第 55 份）；`artifacts/T4.30/lead-verify/`（lead-rec-probe.js + ui.log 15/15、ui-result.json、4 张截图、容器 ffprobe 实测输出、500 响应、app 日志 stack_trace 原文、DB/配额前后对照）；`artifacts/T4.30/workbuddy/recorded.webm`（EBML 头 + 128,751 字节）。
+- **已排除项**：把 500 当"前端没传对字段"（抓包与 curl 复核：multipart 正确、格式识别通过）；让前端重试消掉（根因在后端，重试必然 500）；把 webm 加入"不支持格式"直接 400（浏览器录音就废了，用户要的功能）；忽略"其他格式未来也会 500"的稳定性问题（顺带修）。
+
+---
+
 ## 面试速查（由本文件派生，勿单独维护）
 
 | 面试问题 | 取哪条 |

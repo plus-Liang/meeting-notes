@@ -2622,6 +2622,26 @@ F-15 控制在 ≤30 行并集中一处；新增静态资源不引第三方库�
 > - `-UnitOnly` 全绿 → commit（单 commit `fix(T4.29)`）→ `docker compose build app && up -d app` → 全量（K-68）**连续两轮都 347/347**（第 2 轮用于证明 E2E 断言不再数据依赖）；可维护性 0/0。
 > - 1280/390 无横向溢出；无 console/pageerror。
 > **禁止**：改后端 PATCH/POST 语义、改 V6 迁移、改详情 14 键、顺手改别的 UI、多 commit。
+## T4.30b T4.30 收尾：webm 时长解析兜底（约 40–60 分钟；D-140，必修）
+
+> **为什么（验收侧实测，不是推测）**：浏览器录音的 webm 提交 `POST /api/v1/tasks` 直接 **500**。我在容器内复现：`ffprobe -show_entries format=duration` 对 MediaRecorder 的流式 webm 输出 **`N/A` 且 exit 0**（绕过 exit/空检查）→ `AudioDurationProbe.java:53` `Double.parseDouble("N/A")` 抛 `NumberFormatException` → 全局兜底 500。DB 任务数/配额/MinIO 都无副作用（探测在事务之前），所以只修探测即可。普通 wav/mp3 上传不受影响——但「ffprobe 任何非数字输出都 500」本身是不稳定点，一并修。
+>
+> **改动（只动后端探测 + 测试 + 文档一句；不改对外契约、不碰前端）**：
+> 1. `upload/AudioDurationProbe`：
+>    - 主路径 `format=duration` 输出先判可解析；**空 / `N/A` / 非数字一律当"未知"**，不抛异常；
+>    - 兜底：`ffprobe -v error -select_streams a:0 -show_entries packet=pts_time,duration_time -of csv=p=0 <file>`，取**最后一行有数值的 `pts_time`（有 `duration_time` 就加上）**作为时长；webm 实测末包 `pts_time=7.92`，`ceil` 后 8 秒正确；
+>    - 两路都拿不到 → **400 `INVALID_MEDIA`**（文案说明无法解析时长），**不再 500**；每次 ffprobe 调用保留 30s 超时 + 非 0 退出按现有语义处理；
+>    - 把「文本→时长」抽成**纯函数**（如 `parseFormatDuration(String)` / `durationFromPackets(String)`），单测不依赖宿主机 ffprobe（规范：宿主机不装 ffmpeg）。
+> 2. 单测矩阵：`"12.5"`、`"N/A"`、`""`、`"   "`、`"12,5"`（本地化）、多行 pts（末行有效）、末行非数字、空输出、"只有 pts 无 duration_time"；并断言主路径可用时不走兜底。
+> 3. E2E 回归（关键：按真实产出格式测）：用容器 ffmpeg 从 `D:\new\artifacts\T4.30\workbuddy\recorded.webm` 裁一个 **1–2 秒、≤30KB** 的 webm（**用 `-c copy` 裁，保持"头部无 duration"这个特性**），放 `app/src/test/resources/media/recording.webm`；E2E 增加上传该 fixture → **201** → 轮询到 **DONE** → `duration_sec` 在 **1–3** 之间（不是 500、不是 null）。
+> 4. 权威 `接入指南.md` 上传节补一句：浏览器内录音产出 `webm/opus`，可直接上传，时长由容器元数据或音频包时间兜底解析。
+>
+> **判据（缺一不可）**：
+> - `-UnitOnly` 全绿 → commit（单 commit `fix(T4.30)`）→ `docker compose build app && up -d app` → 全量（K-68）全绿；可维护性 0/0；head.txt 记提交后 HEAD。
+> - **真机闭环**（不许只测探测函数）：用真 webm（`recorded.webm` 或现场用 Chrome fake mic 录一段）→ `POST /tasks` 得 **201** → 轮询 **DONE** → `GET /tasks/{id}` 的 `transcript` 非空、`duration_sec` 合理；普通 wav/mp3 上传回归不破。
+> - 残留清理（D-139 教训）：本次用到的临时任务/探针标签/MinIO 对象/容器 /tmp 文件逐条核对，回报里写"查了哪些、各是什么数"。
+> **禁止**：改 `duration_sec` 对外语义 / 把 webm 加入"不支持格式"黑名单 / 改前端 / 多 commit。
+
 ## 每张卡做完都要给你的回报
 
 ```text
