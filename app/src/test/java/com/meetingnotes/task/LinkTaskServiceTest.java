@@ -66,11 +66,13 @@ class LinkTaskServiceTest {
     @Mock
     private MediaFetcher fetcher;
     @Mock
+    private com.meetingnotes.fetch.ProcessMediaFetcher byofFetcher;
+    @Mock
     private ListOperations<String, String> listOps;
 
     private LinkTaskService newService() {
         return new LinkTaskService(jdbc, s3, probe, quotaService, redis, transactionTemplate, fetcher,
-                3600L, "meetingnotes", "meetingnotes:task-queue");
+                byofFetcher, 3600L, "meetingnotes", "meetingnotes:task-queue");
     }
 
     @SuppressWarnings("unchecked")
@@ -114,7 +116,7 @@ class LinkTaskServiceTest {
         when(probe.durationSeconds(any(Path.class))).thenReturn(2.0);
         when(redis.opsForList()).thenReturn(listOps);
 
-        TaskCreatedResponse resp = newService().createLink("http://example.com/a/sample.wav");
+        TaskCreatedResponse resp = newService().createLink("http://example.com/a/sample.wav", false);
 
         assertEquals(9L, resp.taskId());
         assertEquals("PENDING", resp.status());
@@ -137,10 +139,10 @@ class LinkTaskServiceTest {
     @Test
     void blankOrNullUrlRejectedBeforeAnySideEffect() {
         LinkTaskService service = newService();
-        ApiException blank = assertThrows(ApiException.class, () -> service.createLink("   "));
+        ApiException blank = assertThrows(ApiException.class, () -> service.createLink("   ", false));
         assertEquals(400, blank.getStatus());
         assertEquals("INVALID_PARAM", blank.getCode());
-        ApiException nullUrl = assertThrows(ApiException.class, () -> service.createLink(null));
+        ApiException nullUrl = assertThrows(ApiException.class, () -> service.createLink(null, false));
         assertEquals(400, nullUrl.getStatus());
         verify(fetcher, never()).fetch(anyString(), any(Path.class));
         verify(jdbc, never()).query(anyString(), ArgumentMatchers.<ResultSetExtractor<Object>>any());
@@ -151,7 +153,7 @@ class LinkTaskServiceTest {
         doAnswer(inv -> {
             throw new ApiException(400, "URL_BLOCKED", "目标地址指向被保护网段");
         }).when(fetcher).fetch(anyString(), any(Path.class));
-        ApiException e = assertThrows(ApiException.class, () -> newService().createLink("http://127.0.0.1/x.wav"));
+        ApiException e = assertThrows(ApiException.class, () -> newService().createLink("http://127.0.0.1/x.wav", false));
         assertEquals(400, e.getStatus());
         assertEquals("URL_BLOCKED", e.getCode());
         verify(jdbc, never()).query(anyString(), ArgumentMatchers.<ResultSetExtractor<Object>>any());
@@ -161,7 +163,7 @@ class LinkTaskServiceTest {
     @Test
     void nonMediaBytesRejectedAsInvalidMedia() {
         fetcherWrites("plain text, not media".getBytes(java.nio.charset.StandardCharsets.UTF_8));
-        ApiException e = assertThrows(ApiException.class, () -> newService().createLink("http://example.com/a/x.bin"));
+        ApiException e = assertThrows(ApiException.class, () -> newService().createLink("http://example.com/a/x.bin", false));
         assertEquals(400, e.getStatus());
         assertEquals("INVALID_MEDIA", e.getCode());
         verify(quotaService, never()).consume(anyLong(), anyInt());
@@ -171,7 +173,7 @@ class LinkTaskServiceTest {
     void overlongDurationRejected() {
         fetcherWrites(WAV);
         when(probe.durationSeconds(any(Path.class))).thenReturn(7200.0);
-        ApiException e = assertThrows(ApiException.class, () -> newService().createLink("http://example.com/a/x.wav"));
+        ApiException e = assertThrows(ApiException.class, () -> newService().createLink("http://example.com/a/x.wav", false));
         assertEquals(400, e.getStatus());
         assertEquals("DURATION_EXCEEDED", e.getCode());
         verify(quotaService, never()).consume(anyLong(), anyInt());
@@ -185,12 +187,45 @@ class LinkTaskServiceTest {
         stubExisting(new LinkTaskService.ExistingTask(9L, "DONE"));
         when(probe.durationSeconds(any(Path.class))).thenReturn(2.0);
 
-        TaskCreatedResponse resp = newService().createLink("http://example.com/a/sample.wav");
+        TaskCreatedResponse resp = newService().createLink("http://example.com/a/sample.wav", false);
 
         assertEquals(9L, resp.taskId());
         assertEquals("DONE", resp.status());
         assertTrue(resp.reused());
         verify(quotaService, never()).consume(anyLong(), anyInt());
         verify(redis, never()).opsForList();
+    }
+
+    /** T4.32b：use_byof=true 且未配置 FETCHER_CMD → 400 FETCHER_UNAVAILABLE（新码，码表只增）。 */
+    @Test
+    void byofRequestedButUnconfiguredRejectedWithFetcherUnavailable() {
+        when(byofFetcher.isConfigured()).thenReturn(false);
+        ApiException e = assertThrows(ApiException.class,
+                () -> newService().createLink("http://example.com/some/page", true));
+        assertEquals(400, e.getStatus());
+        assertEquals("FETCHER_UNAVAILABLE", e.getCode());
+        verify(fetcher, never()).fetch(anyString(), any(Path.class));
+        verify(byofFetcher, never()).fetch(anyString(), any(Path.class));
+        verify(quotaService, never()).consume(anyLong(), anyInt());
+    }
+
+    /** T4.32b：use_byof=true 时走 BYOF 抓取器（不是直链下载器），抓到的内容进同一条建任务管线。 */
+    @Test
+    void byofRequestedRoutesToByofFetcherAndCreatesTask() throws Exception {
+        when(byofFetcher.isConfigured()).thenReturn(true);
+        doAnswer(inv -> {
+            Files.write((Path) inv.getArgument(1), WAV);
+            return new MediaFetcher.FetchResult("application/octet-stream", WAV.length);
+        }).when(byofFetcher).fetch(anyString(), any(Path.class));
+        txExecutesCallback();
+        stubInsertInserts(9L);
+        when(probe.durationSeconds(any(Path.class))).thenReturn(2.0);
+        when(redis.opsForList()).thenReturn(listOps);
+
+        TaskCreatedResponse resp = newService().createLink("http://example.com/some/page", true);
+
+        assertEquals(9L, resp.taskId());
+        verify(byofFetcher).fetch(anyString(), any(Path.class));
+        verify(fetcher, never()).fetch(anyString(), any(Path.class));
     }
 }

@@ -115,6 +115,12 @@ app:
     max-bytes: ${FETCH_MAX_BYTES:209715200}
     # 逗号分隔主机白名单：命中则跳过内网 IP 拦截（SSRF 防护被绕过！）——仅自测/受信内网部署，生产必须留空
     allow-hosts: ${FETCH_ALLOW_HOSTS:}
+    # T4.32b：预览只读响应体前 N 字节（解析 og 元信息用），不整页进内存
+    preview-max-bytes: ${FETCH_PREVIEW_MAX_BYTES:2097152}
+    # T4.32b：BYOF 外部抓取工具命令（默认空 = 未配置，use_byof 请求 → 400 FETCHER_UNAVAILABLE）；
+    # 按空格拆 argv 不过 shell，{url} 必填（独立元素），{out} 可选；仓库不含平台解析器（D-027R）
+    fetcher-cmd: ${FETCHER_CMD:}
+    fetcher-timeout-ms: ${FETCHER_TIMEOUT_MS:120000}
 
   worker:
     # Redis 任务队列键（T1.5：LPUSH 生产 / BLPOP 消费）

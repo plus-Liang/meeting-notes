@@ -21,6 +21,8 @@ docker compose up -d
 
 **不填任何 API key 也能跑通全流程**（本地 ASR + 本地/抽取式摘要），详见 `docs/项目/录音纪要平台/spec.md` N15。
 
+**链接导入（T4.32）**：本仓库**不含任何平台解析器**（不集成 yt-dlp、不执行 JS、不带 cookie/签名）；贴直链可直接建任务，平台页面链接只做公开元信息预览（`POST /api/v1/link/preview`），BYOF（`FETCHER_CMD`）由使用者自装外部工具、自负合规责任——契约见 `docs/项目/录音纪要平台/接入指南.md` §3.9。
+
 ---
 
 ## 模型选择建议（ASR）

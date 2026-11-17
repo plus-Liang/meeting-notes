@@ -7,6 +7,7 @@ import com.meetingnotes.upload.AudioDurationProbe;
 import com.meetingnotes.upload.MediaMagic;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataAccessException;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -53,7 +54,8 @@ public class LinkTaskService {
     private final QuotaService quotaService;
     private final StringRedisTemplate redis;
     private final TransactionTemplate transactionTemplate;
-    private final MediaFetcher fetcher;
+    private final MediaFetcher httpFetcher;
+    private final MediaFetcher byofFetcher;
     private final long maxDurationSec;
     private final String bucket;
     private final String queueKey;
@@ -64,7 +66,8 @@ public class LinkTaskService {
                            QuotaService quotaService,
                            StringRedisTemplate redis,
                            TransactionTemplate transactionTemplate,
-                           MediaFetcher fetcher,
+                           @Qualifier("httpMediaFetcher") MediaFetcher httpFetcher,
+                           @Qualifier("processMediaFetcher") MediaFetcher byofFetcher,
                            @Value("${app.task.max-duration-sec}") long maxDurationSec,
                            @Value("${app.storage.bucket}") String bucket,
                            @Value("${app.worker.queue-key}") String queueKey) {
@@ -74,15 +77,28 @@ public class LinkTaskService {
         this.quotaService = quotaService;
         this.redis = redis;
         this.transactionTemplate = transactionTemplate;
-        this.fetcher = fetcher;
+        this.httpFetcher = httpFetcher;
+        this.byofFetcher = byofFetcher;
         this.maxDurationSec = maxDurationSec;
         this.bucket = bucket;
         this.queueKey = queueKey;
     }
 
-    public TaskCreatedResponse createLink(String url) {
+    /**
+     * T4.32b：useByof=true 时走 BYOF 外部抓取工具（{@code ProcessMediaFetcher}），
+     * 未配置 FETCHER_CMD → 400 FETCHER_UNAVAILABLE（码表只增）；false 走 T4.32a 直链下载，
+     * 既有语义与错误码不变。两条路入口都先过 UrlGuard（在各自 fetcher 内逐跳执行）。
+     */
+    public TaskCreatedResponse createLink(String url, boolean useByof) {
         if (url == null || url.isBlank()) {
             throw new ApiException(400, "INVALID_PARAM", "url 不能为空");
+        }
+        MediaFetcher fetcher = useByof ? byofFetcher : httpFetcher;
+        if (useByof && fetcher instanceof com.meetingnotes.fetch.ProcessMediaFetcher pmf
+                && !pmf.isConfigured()) {
+            // use_byof=true 且未配置 FETCHER_CMD → 400 FETCHER_UNAVAILABLE（新码，码表只增）
+            throw new ApiException(400, "FETCHER_UNAVAILABLE",
+                    "未配置外部抓取工具（FETCHER_CMD），无法抓取该页面；请把媒体导出成文件后上传（导出文件 → 打开本站 → 上传）");
         }
         Path tmp;
         try {
