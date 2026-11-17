@@ -107,6 +107,15 @@ app:
     # T4.28：只读分享链接有效期（天）；token 明文永不落库（DB 只存 SHA256 hex）
     ttl-days: ${SHARE_TTL_DAYS:7}
 
+  fetch:
+    # T4.32a：链接导入（FETCH 直链），安全口径与已知限制见接入指南 §3.9
+    max-redirects: ${FETCH_MAX_REDIRECTS:5}
+    connect-timeout-ms: ${FETCH_CONNECT_TIMEOUT_MS:5000}
+    read-timeout-ms: ${FETCH_READ_TIMEOUT_MS:10000}
+    max-bytes: ${FETCH_MAX_BYTES:209715200}
+    # 逗号分隔主机白名单：命中则跳过内网 IP 拦截（SSRF 防护被绕过！）——仅自测/受信内网部署，生产必须留空
+    allow-hosts: ${FETCH_ALLOW_HOSTS:}
+
   worker:
     # Redis 任务队列键（T1.5：LPUSH 生产 / BLPOP 消费）
     queue-key: ${TASK_QUEUE_KEY:meetingnotes:task-queue}
