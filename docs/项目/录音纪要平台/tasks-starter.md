@@ -2642,6 +2642,44 @@ F-15 控制在 ≤30 行并集中一处；新增静态资源不引第三方库�
 > - 残留清理（D-139 教训）：本次用到的临时任务/探针标签/MinIO 对象/容器 /tmp 文件逐条核对，回报里写"查了哪些、各是什么数"。
 > **禁止**：改 `duration_sec` 对外语义 / 把 webm 加入"不支持格式"黑名单 / 改前端 / 多 commit。
 
+## T4.32a FETCH 直链 + SSRF 防护（约 2–3 小时；D-127 单列卡；T4.32b 依赖）
+
+> **要证明的事**：贴一个**可直接下载的 http(s) 音视频直链**就能建任务；同时**打不了内网/云元数据**（SSRF 防护必须自己证明，不能只写代码）。
+> 本卡**不做**：页面链接的 og 卡片（L1）、BYOF 的 `FETCHER_CMD`（都在 T4.32b）、前端入口（32b 加）。
+>
+> **改动（后端 + 文档；不动现有上传契约与前端）**：
+> 1. 新 `fetch/UrlGuard`（纯逻辑、可单测）：`http/https` 之外一律拒；host 空/userinfo（`user:pass@`）拒；
+>    每跳都要校验——**DNS 解析出的每一个 IP** 都必须不是 loopback / 私有 / 链路本地 / 组播 / 未指定 /
+>    IPv6 ULA(fc00::/7) / IPv4 映射（显式覆盖 `169.254.169.254`）；十进制/八进制/十六进制缩写 IP
+>    （`2130706433`、`0177.0.0.1`、`0x7f.0.0.1`、`127.1`）按解析结果判；拒绝时统一 **400 `URL_BLOCKED`**。
+>    解析器通过接口注入（单测 stub，不依赖真实 DNS）。
+> 2. 新 `fetch/MediaFetcher` 接口（BYOF 扩展点，T4.32b 用）+ 默认 `HttpMediaFetcher`：
+>    **手动**跟随重定向、每跳重跑 UrlGuard、最多 `app.fetch.max-redirects`（默认 5）跳；
+>    连接超时 `app.fetch.connect-timeout-ms`（默认 5000）/读超时 `app.fetch.read-timeout-ms`（默认 10000）；
+>    流式写临时文件，超过 `app.fetch.max-bytes`（默认 200MB）→ 413 `SIZE_EXCEEDED`；
+>    网络失败/超时 → 502 `FETCH_FAILED`；只发 GET，不带 cookie/鉴权头。
+> 3. 新 `POST /api/v1/tasks/link`（Bearer 保护）body `{"url":"https://..."}`：
+>    fetch → 复用现有上传管线（magic 校验 / 时长探测（含 webm 兜底）/ 配额 / 幂等 / MinIO / worker），
+>    `source_type=LINK`（V1 无 CHECK 约束，无需迁移）；返回与上传同形 `TaskCreatedResponse`；
+>    **Content-Type 是 text/html（页面链接）→ 400 `NOT_DIRECT_MEDIA`**，文案给"请导出后上传"。
+> 4. 配置键 4 个（`app.fetch.*`）+ 自测用的 `app.fetch.allow-hosts`（**默认空**；仅自测/受信内网部署，文档写明风险）：
+>    yml / `.env.example` / 权威 `配置清单.md` 三处同步 + 配置快照（K-53）；新增错误码 `URL_BLOCKED`/`FETCH_FAILED`/`NOT_DIRECT_MEDIA` 记入 `接入指南`。
+> 5. 权威 `接入指南.md` 新增 §3.x「链接导入（T4.32a 直链）」：请求/响应/错误码/安全口径/已知限制（DNS rebinding TOCTOU 如实写）。
+>
+> **判据（缺一不可）**：
+> - 单测矩阵（UrlGuard 注入 stub 解析器）：`127.0.0.1`、`localhost`、`::1`、`10.x`、`172.16–31.x`、`192.168.x`、
+>   `169.254.169.254`、`0.0.0.0`、`fc00::1`、`fe80::1`、多 IP 里有一个内网、`2130706433`、`0177.0.0.1`、
+>   `0x7f.0.0.1`、`127.1`、`file:/gopher:/ftp:`、userinfo、空 host —— 全 400 `URL_BLOCKED`；
+>   重定向每跳校验（302 → 内网 → 400）、>5 跳 → 400；超时 → 502；超大小 → 413。
+> - **真机反例**（容器内 app 实打）：`http://127.0.0.1:8080`、`http://minio:9000`、`http://169.254.169.254/latest/meta-data/`、
+>   `file:///etc/passwd` → 全 400 `URL_BLOCKED`（无 500），日志里能看到被拒原因。
+> - **真机正例**：临时 compose override 开 `app.fetch.allow-hosts=<测试主机>`（验完**删除 override 并比对配置 hash 恢复**，K-44/D-096），
+>   自制一个 http 服务（或 MinIO 上的对象）提供 wav → `POST /tasks/link` → **201** → 轮询 **DONE** → transcript 非空、`duration_sec` 合理；
+>   再验"默认配置（allow-hosts 空）时同一地址被 400 拒"。
+> - `-UnitOnly` 全绿 → commit（单 commit `feat(T4.32a)`）→ build/up → 全量（K-68）→ 可维护性 0/0；head.txt 记提交后 HEAD。
+> - 残留清理（D-139）：临时任务/临时对象/override 文件/容器 /tmp 逐条核对，回报写清"查了哪些、各是多少"。
+> **禁止**：引入无头浏览器/平台解析器（D-027R）；带 cookie/伪造签名；默认开启 allow-hosts；改现有上传/详情契约；多 commit。
+
 ## 每张卡做完都要给你的回报
 
 ```text
