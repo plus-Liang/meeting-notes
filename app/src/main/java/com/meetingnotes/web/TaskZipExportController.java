@@ -2,6 +2,7 @@ package com.meetingnotes.web;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.meetingnotes.common.ApiException;
+import com.meetingnotes.task.TaskQueryService;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -76,7 +77,9 @@ public class TaskZipExportController {
                 .body(body);
     }
 
-    /** ids 解析：逗号分隔纯数字（去重保序）；缺失/空/含非数字/超 {@value #MAX_ZIP_IDS} → 400。 */
+    /** ids 解析：逗号分隔纯数字（去重保序）；缺失/空/含非数字/超 {@value #MAX_ZIP_IDS} → 400。
+     *  K-76 复发教训（第二次）：\d+ 通过不代表能装进 long——20 位数字 Long.parseLong 直接溢出 500。
+     *  因此 parseableAsId 安全判定在前，溢出/超长 → 明确 400，禁止冒泡 500（rules/dev.md 第 10 条边界矩阵）。 */
     static List<Long> parseIds(String ids) {
         if (ids == null || ids.isBlank()) {
             throw new ApiException(400, "INVALID_PARAM",
@@ -90,6 +93,9 @@ public class TaskZipExportController {
             }
             if (!value.matches("\\d+")) {
                 throw new ApiException(400, "INVALID_PARAM", "ids 必须是数字任务 id（逗号分隔）");
+            }
+            if (!TaskQueryService.parseableAsId(value)) {
+                throw new ApiException(400, "INVALID_PARAM", "任务 id 超出范围（64 位整数）");
             }
             raw.add(Long.parseLong(value));
         }

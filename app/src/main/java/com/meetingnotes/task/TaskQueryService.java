@@ -150,8 +150,9 @@ public class TaskQueryService {
         return new TaskListResponse(items, nextBeforeId);
     }
 
-    /** 纯数字串能否安全 parseLong：位数小于 MAX 或同位数字典序 ≤ MAX（全数字时字典序=数值序）。 */
-    static boolean parseableAsId(String digits) {
+    /** 纯数字串能否安全 parseLong：位数小于 MAX 或同位数字典序 ≤ MAX（全数字时字典序=数值序）。
+     *  public：T4.24b（q 溢出按关键词）与 T4.27b（ids 溢出明确 400）共用同一判定，防 K-76 第三次复发。 */
+    public static boolean parseableAsId(String digits) {
         return digits.length() < MAX_ID_LITERAL.length()
                 || (digits.length() == MAX_ID_LITERAL.length() && digits.compareTo(MAX_ID_LITERAL) <= 0);
     }

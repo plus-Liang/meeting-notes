@@ -67,6 +67,40 @@ class TaskZipExportControllerTest {
         assertEquals(List.of(5L), TaskZipExportController.parseIds("5,5,5"));
     }
 
+    /* ===== T4.27b：K-76 复发收口——ids 溢出/超长 → 明确 400，禁止冒泡 500 ===== */
+
+    @Test
+    void overflowIdsReturn400InvalidParamNot500() {
+        TaskZipExportController c = new TaskZipExportController(jdbc, new com.fasterxml.jackson.databind.ObjectMapper());
+        for (String bad : new String[]{"99999999999999999999", "9".repeat(20),
+                "0".repeat(30) + "42", "9223372036854775808", "1,99999999999999999999"}) {
+            ApiException e = assertThrows(ApiException.class, () -> c.exportZip(bad),
+                    "ids='" + bad + "' 必须 400（不冒泡 500）");
+            assertEquals(400, e.getStatus());
+            assertEquals("INVALID_PARAM", e.getCode());
+        }
+    }
+
+    @Test
+    void boundaryIdsParseThenHitNoExportable400() {
+        // 卡口径：0 / 正常 / MAX → 能安全解析 → 走预检 → 400「没有可导出」；
+        // MAX+1 / "9"*20 / "0"*30+"42"（前导零超长整串不按数值归约）→ 400「超出范围」——全部 400 无 500
+        assertEquals(List.of(0L), TaskZipExportController.parseIds("0"));
+        assertEquals(List.of(Long.MAX_VALUE), TaskZipExportController.parseIds(Long.toString(Long.MAX_VALUE)));
+        assertEquals(400, assertThrows(ApiException.class,
+                () -> TaskZipExportController.parseIds("0".repeat(30) + "42")).getStatus(),
+                "前导零超长整串 → 400 超出范围");
+
+        when(jdbc.query(contains("t.id IN ("), ArgumentMatchers.<RowMapper<Long>>any(),
+                ArgumentMatchers.any(Object[].class))).thenReturn(List.of());
+        TaskZipExportController c = new TaskZipExportController(jdbc, new com.fasterxml.jackson.databind.ObjectMapper());
+        for (String id : new String[]{"0", "7", Long.toString(Long.MAX_VALUE)}) {
+            ApiException e = assertThrows(ApiException.class, () -> c.exportZip(id), "ids=" + id);
+            assertEquals(400, e.getStatus());
+            assertEquals("INVALID_PARAM", e.getCode());
+        }
+    }
+
     /* ===== zip 条目名净化 ===== */
 
     @Test
