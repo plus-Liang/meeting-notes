@@ -1,54 +1,36 @@
-# 交接：录音纪要平台（更新 2026-11-17 20:30，给下一个会话 / 新会话 WorkBuddy）
+# 交接：录音纪要平台（更新 2026-11-17 21:40，给下一个会话 / 新会话 WorkBuddy）
 
 ## 0. 当前位置
 
-- 代码 HEAD **`efae735`**（T4.30b webm 时长兜底；**T4.30+T4.30b 均✅**），工作区干净；origin 已到 `6540eb0`，本地 `efae735` 待推；5 服务 healthy；ASR `small`；开发期配额 200 分钟/100 任务；今日（11-17 日切后）已用 **15 分钟 / 10 任务**（含我全量 +3）；任务总数 180（全 DONE、DEAD=0、最大 id 405）。
-- 批次进度（D-122，经 D-126/D-127 裁剪）：**10 张通过**（T4.23 / T4.23b / T4.24 / T4.24b / T4.25 / T4.26 / T4.26b / T4.27 / T4.27b / T4.28 ✅）；**T4.29+T4.29b ✅**；**T4.30+T4.30b ✅**（webm 时长兜底：主路径 `N/A` 不抛 → 末音频包 pts 兜底 → 都空 400；20 例纯函数单测 + E2E 场景 M webm fixture；我独立验：全量 368/368、API 13/13、端到端 UI 8/8，真录 webm 201→DONE→transcript 非空，坏 EBML → 400 非 500）。**下一张 = T4.32a FETCH 直链 + SSRF**。不做 T4.31 PWA / T4.33 INBOX / T4.34 RSS。**节奏复核（D-130）**：实测单卡"commit→验收报告"6–15 分钟，剩余张数估 2–4 个有效工作日 → **12-16 交付窗口可行、不再裁范围**；**第 1 档 6 项已全部完成（T4.23–T4.28）**，下次复核点 = T4.30 后。
-- **T4.27b ✅**：ids 溢出改共用 `parseableAsId` → 400（K-76 三防：共用判定/边界矩阵/rules 第 10 条）。**T4.28 ✅**：V5 share_link 迁移、token 只存 SHA256、匿名 12 键只读、认证豁免只放宽 `/api/v1/share/`（路径穿越探针无绕过）；**P3-1 文档缺口**（接入指南/配置清单未同步）已由 Lead 补齐 §3.8 + `SHARE_TTL_DAYS` 行（D-136）。
-- **T4.29 结论（D-138，第 53 份报告）**：API **44/44**、V6 结构/默认值/索引实查、列表 11 键只增、详情 14 键不动、可维护性 0/0、干净重跑全量 **347/347**；**P1-1**：`task.html` `updateMeta` 用 `postJson`（写死 POST）打 `PATCH /meta` → 实测 **405**，加标签/星标全坏（同页 `sendJson(...,'PATCH',...)` 手工发 → 200 反证后端正常）；**P2-1** 标签下拉只在 `renderFilterBar()` 更新（数据加载后不刷新，最多滞后 30s，filterLabel 可能卡住）；**P3-1** E2E `h` 断言「q=id 精确 1 条」依赖全库（我首轮 346/347 实抓：`q=420` 撞上 270/271 的 `t420-a/b.mp3`，契约本就允许 → 断言错）。三件并入 T4.29b。新坑 **K-80/K-81**。
-- 用户当前可看的成果：上传页模板选择器；列表服务端搜索 + 真计数徽章；详情页摘要依据块；设置页「我的使用」卡；详情页「按模板重新生成」；**列表多选导出 zip（单请求流式打包）**；模板徽章/chips/摘要首句；删除三件套；要点/一句一行/导出勾选。
-- **成本纪律（D-137，用户反馈单卡积分偏高）**：根因是长文档整篇进上下文（tasks-starter 26 万字符 / decisions 17 万），不是卡片长（卡片仅 1.0–1.7k 字符）。已改 `AGENT.md`：§1 每卡只读「卡片消息 + handoff + §2/§4」、新增 §1.1 七条（禁整篇读 / 输出落盘只贴末 15 行 / 定向 edit / 测试两遍 / 截图≤2 / 回报≤40 行）；`tasks-starter.md` 顶部与 `交付给WorkBuddy.md` §11 同步。**Lead 出卡不再要求「去读 tasks-starter 同名卡」。**
+- 代码 HEAD **`641a6d1`**（T4.32a FETCH 直链 + SSRF **✅**），工作区干净；origin `a1e93b7`，本地 `641a6d1` + 本次验收文档提交待推；栈 5/5 healthy；ASR `small`。**D-122 批次已通过 14 张**（T4.23…T4.30 含收尾、T4.32a）。
+- 今日配额（11-17）已用 **67 分钟 / 61 任务**（上限 200/100）；任务总数 **226**（全 DONE、DEAD 0、LINK 2）；MinIO **232 前缀 = 226 + 历史 6 孤儿（74–79）**。
+- **下一张 = T4.32b 链接导入**：L1 页面链接确认卡（og:title/时长）、L2 Content-Type 探测走现有下载管线、BYOF `FETCHER_CMD`（不配返回 `FETCHER_UNAVAILABLE`）、前端入口；**依赖已就绪**的 `MediaFetcher` 接口与 `POST /api/v1/tasks/link`。之后 T4.35a/b/c 播放器（V7）→ T4.36 说话人 → T4.37 登录；不做 T4.31 PWA / T4.33 INBOX / T4.34 RSS。
 
 ## 1. 下一步（按顺序）
 
-1. **T4.32a FETCH 直链 + SSRF（单列卡，D-127）**：先做 `MediaFetcher` 接口（T4.32b 依赖）；URL 校验拒绝内网/回环/链路本地/云元数据（169.254.169.254 等）→ 400 `URL_BLOCKED`；重定向**每跳**都校验且设上限；连接/读超时；响应体大小上限；判据：真机打本地/内网/云元数据地址全 400、正常 http 直链能下（或按卡的「接口 + 校验」范围）、K-68 顺序全量、反例矩阵入单测。
-2. **随后保留队列**：T4.30 浏览器录音 → **T4.32a FETCH+SSRF（单列卡）→ T4.32b 链接导入** → T4.35a/b/c 播放器（V7）→ T4.36 说话人 → T4.37 登录。
-3. **发布材料（T4.10 README+录屏 → T4.9 → T4.11）在批次之后**；发布前清 MinIO 历史孤儿对象 74–79。
+1. **T4.32b**：先看我给的卡片消息（每卡只读「卡片 + 本 handoff + AGENT.md §2/§4」，D-137 成本纪律）。
+2. 之后 T4.35a/b/c 播放器（V7 迁移）→ T4.36 说话人 → T4.37 登录。发布三件（T4.10/T4.9/T4.11）在批次之后；发布前清 MinIO 历史孤儿 74–79。
 
-## 2. 别踩的坑（最高频；全表见 `踩坑与复盘-面试用.md` K-01~K-79）
+## 2. 别踩的坑（最高频）
 
-1. **DONE 最后写**（D-069）；`transcript:""`=无语音仍 DONE（D-048）；`todos/keypoints` null vs `[]`（D-072/D-111）；`transcript_punctuated` null=未生成（D-112）；`ai_tier` 诚实；三档级联 CLOUD→LOCAL→EXTRACTIVE。
-2. **认证横切（K-46）**：`/api/v1/**` 全要 `Bearer <API_TOKEN>`；豁免=actuator/静态页/api-docs/swagger；空 token fail-closed。新增 `/stats`、T4.26 的 `/restructure` 同样要 token。
-3. **实验不改 `.env`**：外部 override + `docker compose -f` 叠加；改网络属性必须 `down` 再 `up`（K-44）；验完恢复并比 hash。
-4. **配置生效验在消费点**（K-51）；别只看 health 200（K-41）；新增键同步 `.env.example` + `配置清单.md`。
-5. **日志/输出落盘**（K-39/K-43）；exit code 用 `Start-Process -PassThru`（K-58）。
-6. **收尾数字最后一步查**（K-45）；全量 E2E 每轮固定 +3 任务（A 1 + G 2）+ 冒烟 1。
-7. **Lead 不写产品代码**（K-63）；验证前确认 `git status` 干净 + 服务端静态文件 sha256 == 工作区。
-8. **先 commit → 再 `docker compose build app && up -d app` → 再全量**（K-68 + **K-77**）；回报写"head.txt = 提交后 HEAD"；Lead 发现顺序不对就自己重做 K-68。
-9. **给 WorkBuddy 的卡别依赖 `cd`**（K-69）：写 `git -C <repo>` / `mvn -f <repo>\app\pom.xml`。
-10. **宿主访问容器服务用 `127.0.0.1`**（K-70）；手写 JSON POST 带 `Content-Type: application/json`（K-73）。
-11. **删除功能验收别只看 DB**（K-72）；重建/替换容器前先把旧日志落盘（K-74）。
-12. **视觉验收"看+量"**（K-56）；改 token 先 grep 全部使用点（K-59）。
-13. **上传幂等**：同字节重传 `reused:true` → A/B 必须换字节。**PS 细节**：含中文 `.ps1` 必须 UTF-8 BOM（K-54）；`D:\new` **不是** git 仓（只有代码仓是）。
-14. **证据字节保真（K-50）**：Windows 写盘 LF→CRLF，比较要归一化；PS 5.1 的 `Invoke-WebRequest.Content` 会按错误编码解码中文，比字节用 `-OutFile` + `Get-FileHash`。
-15. **字符串→数值分支测边界四件套**（K-76）；**前端写操作必须点一下再读 API**（K-80：只验渲染会漏 405）/ **E2E 断言不许依赖全库数据规模**（K-81）；**相似度/包含判断先挡空串**（**K-78**：`indexOf("")===0` 会把空/纯标点判成"完全匹配"）；psql 前 `SET TIME ZONE 'Asia/Shanghai'`；证据行不删（D-073）；单写者（D-079）；变异双向（K-40）。
+1. **DONE 最后写**（D-069）；`transcript:""` 也算正常 DONE（D-048）；`todos/keypoints` null≠[]（D-072/D-111）；`ai_tier` 必须诚实；三档级联 CLOUD→LOCAL→EXTRACTIVE。
+2. **认证是横切**（K-46）：`/api/v1/**` 全要 `Bearer <API_TOKEN>`，只豁免 `/api/v1/share/`；新增 `/tasks/link` 已被覆盖（匿名 401 验过）。
+3. **实验不改 `.env`**：临时 override + **用完删除并恢复**（K-44）；改 compose 网络属性必须 `down` 再 `up`；恢复后比 env diff。
+4. **配置判据打在消费点**（K-51）；新增配置键必须三处同步：`application.yml` / `.env.example` / `配置清单.md`。
+5. **先 commit → 再 `docker compose build app && up -d app` → 再全量**（K-68/K-77）；`head.txt` 记**提交后** HEAD；全量前文件 `git status` 必须干净。
+6. **Lead 不写产品代码**（K-63）；写码方单 commit、不 push。
+7. **SSRF/地址类**：数字字面量 IP 不能只靠系统解析器（K-84：JDK 21 把 `0177.0.0.1` 按十进制解析成公网，守卫内要按 inet_aton 自规范化）；重定向**每跳**都要校验；`FETCH_ALLOW_HOSTS` 默认空（命中即跳过 IP 拦截）。
+8. **前端写操作必须"点一下再读 API"**（K-80）；**E2E 断言不许依赖全库数据规模**（K-81）；**外部工具输出先判可解析、不只看 exit code**（K-82）。
+9. **全量 E2E 的 `ASR_SMOKE_AUDIO` 要用真实语音**：`D:\datasets\meeting-notes-samples\probe.wav`；拿 `artifacts\T4.14\probe-1s.wav`（1 秒测试音）会让 `AsrSmokeTest` 假红 389/390。
+10. **PS 细节**：含中文 `.ps1` 必须 UTF-8 BOM（K-54）；`D:\new` **不是** git 仓（只有代码仓是）；curl 拼 JSON 别用 PS 双引号（`\"` 不是转义），用 Python/here-string。
 
 ## 3. 关键文件
 
-`state.md`（权威状态）· `tasks.md`（T4.23/T4.23b/T4.24/T4.24b/T4.25 ✅ + T4.26–T4.29 待做）· `tasks-starter.md`（T4.21–T4.26 卡 + T4.24b/T4.23b 卡；提前功能批次表已按 D-126/D-127 更新）· `decisions.md`（**141 条**，最新 **D-141**：T4.30b 通过/T4.30 转通过、K-83）· `踩坑与复盘-面试用.md`（**K-01~K-81**）· `review\`（**56 份**，最新 `2026-11-17-T4.30b验收.md`）；`踩坑`（**K-01~K-83**）· `接入指南.md`（§3.3 `q` / §3.3a counts / **§3.3b stats** / §3.6a 删除三端点）· `配置清单.md` · `scripts\test.ps1`（全量 337 / `-UnitOnly` 323）· `tools\sync-docs-to-code.ps1`。
+`state.md`（权威状态）· `tasks.md`（T4.32a 已 ✅ 行）· `tasks-starter.md`（**T4.32b 卡已就绪**）· `decisions.md`（**142 条**，最新 D-142）· `踩坑与复盘-面试用.md`（**K-01~K-84**）· `review/`（**57 份**，最新 `2026-11-17-T4.32a验收.md`）· `接入指南.md`（**§3.9 链接导入** + §3.4 码表）· `配置清单.md`（`FETCH_*` 5 行）· `scripts/test.ps1`（全量 390 / `-UnitOnly` 374）· `tools/sync-docs-to-code.ps1`。
 
 ## 4. 未决
 
-- **T4.30/T4.30b 残余（已收口）**：60min/200MB 自动停与切后台未超长实测；`runFfprobe` 先 `readAllBytes` 再 `waitFor(30s)` 的既有阻塞风险（非本次引入）；兜底仅在主路径 exit 0 时触发（已知格式均可）；fake mic 音频为测试音，真实中文由真录 webm 覆盖。
-- **T4.29/T4.29b 残余（已收口）**：ACTIVE 三状态合并 + label/favorite 组合未真机断言；标签下拉来源=已加载行并集（跨页标签不在下拉，P3-3，v1 接受）；meta 对非 DONE 任务可编辑（后端无状态限制，UI 只在 DONE 有入口）；并发 PATCH 无乐观锁（v1 单用户）；partial 索引 EXPLAIN 未验；详情页 3s 轮询期间快速连点未压测；浏览器交互无自动化回归（P3-4）。
-- **T4.25 残余**：空库 null 语义仅单测覆盖（真机单用户有数据，无法造空库）；`success_rate` 当前 1.0（库里 0 DEAD）；`tiers` 新档位扩展未造数验证；设置页 stats 500 失败分支未注入故障；`avg_processing_ratio` 含排队已在界面/文档双声明（不是 RTF）。
-- **T4.23 残余**：真实数据命中率 0/5、0/3 是 CLOUD 改写型摘要的口径必然（D-125 维持 ≥0.5，不降阈）；命中→点击只在注入合成摘要上验过；长逐字稿性能 2000 句×2 句 ≈ 46.5ms（不设门槛）。
-- **T4.24b 残余**：20+ 位前导零数字按关键词处理（与文档字面略有出入，安全，不修）。
-- **审计断链**：T4.21b 少 6 条、T4.22 少 2 条旧 E2E 任务（旧容器日志随重建丢失，K-74；证据行全在）。
-- MinIO 桶内 6 个**早于删除功能上线**的历史孤儿对象（74–79）待发布前清理（可选）。
-- T4.22 残余：真实端到端模板消费未跑；拖拽路径未单独断言。T4.21b 残余：`FOR UPDATE` 未做并发压测。T4.18 残余 P3：导出切句只按 `。！？!?`；只勾"要点"且无要点时导出空文件。
-- 批量 413/429、Webhook SSRF、120s 读超时全链路、amr-wb 变体、跨机器恢复未验；**D-126/D-127 裁剪：T4.31 PWA / T4.33 INBOX / T4.34 RSS 不做（`app.inbox.*` 死配置保留为已知限制），T4.32a 保留单列卡**；**v1 余量 0**（D-032）。
-
-## 5. 存储纪律（D-088）
-
-样本/日志/override/缓存一律 **D 盘**（`D:\new\artifacts\`、`D:\cache\`、`D:\DockerData\`）；C 盘可用 ~41GB；模型在 `D:\huggingface`（medium 已补全；large-v3 仍是残片）。
+- **T4.32a P3 残余（接受）**：`100.64/10` CGNAT、`192.0.0.0/24`、`198.18/15`、IPv6 NAT64/6to4 未拦；DNS rebinding TOCTOU 未做连接后复核；链接导入不校验 `TASK_MAX_SIZE_BYTES`（只受 `FETCH_MAX_BYTES`）；allow-hosts 靠部署纪律。
+- T4.30 残余：60min/200MB 自动停与切后台未超长实测；`runFfprobe` 先读流再 waitFor 的既有阻塞风险。
+- T4.29 残余：ACTIVE 三状态合并 + label/favorite 组合未真机断言；标签下拉来源=已加载行并集；meta 对非 DONE 可改（后端无状态闸）；浏览器交互层无自动化回归（P3-4）。
+- MinIO 历史孤儿 74–79 发布前清理（可选）；`v1` 余量 0（D-032）。

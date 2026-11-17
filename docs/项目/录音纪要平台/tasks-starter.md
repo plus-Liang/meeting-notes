@@ -2642,7 +2642,7 @@ F-15 控制在 ≤30 行并集中一处；新增静态资源不引第三方库�
 > - 残留清理（D-139 教训）：本次用到的临时任务/探针标签/MinIO 对象/容器 /tmp 文件逐条核对，回报里写"查了哪些、各是什么数"。
 > **禁止**：改 `duration_sec` 对外语义 / 把 webm 加入"不支持格式"黑名单 / 改前端 / 多 commit。
 
-## T4.32a FETCH 直链 + SSRF 防护（约 2–3 小时；D-127 单列卡；T4.32b 依赖）
+## T4.32a FETCH 直链 + SSRF 防护（约 2–3 小时；D-127 单列卡；T4.32b 依赖）**✅ 已通过（2026-11-17，`641a6d1`，第 57 份报告，D-142；我独立 374/374 单元 + 390/390 全量 + 23/23 真机反例全 400 无 500 + 正例 task 500 201→DONE transcript 498 字；K-84）**
 
 > **要证明的事**：贴一个**可直接下载的 http(s) 音视频直链**就能建任务；同时**打不了内网/云元数据**（SSRF 防护必须自己证明，不能只写代码）。
 > 本卡**不做**：页面链接的 og 卡片（L1）、BYOF 的 `FETCHER_CMD`（都在 T4.32b）、前端入口（32b 加）。
@@ -2679,6 +2679,42 @@ F-15 控制在 ≤30 行并集中一处；新增静态资源不引第三方库�
 > - `-UnitOnly` 全绿 → commit（单 commit `feat(T4.32a)`）→ build/up → 全量（K-68）→ 可维护性 0/0；head.txt 记提交后 HEAD。
 > - 残留清理（D-139）：临时任务/临时对象/override 文件/容器 /tmp 逐条核对，回报写清"查了哪些、各是多少"。
 > **禁止**：引入无头浏览器/平台解析器（D-027R）；带 cookie/伪造签名；默认开启 allow-hosts；改现有上传/详情契约；多 commit。
+
+## T4.32b 链接导入（L1 确认卡 / L2 直链 / BYOF `FETCHER_CMD`）（约 3–4 小时；D-122；**依赖 T4.32a 已通过 `641a6d1`**）
+
+> **先跑三行报给我**：`git -C D:\new\projects\meeting-notes log --oneline -1`、`git -C D:\new\projects\meeting-notes status --short`、`Get-Content D:\new\artifacts\T4.32a\workbuddy\head.txt`——确认你在 `641a6d1` 上开工。**只看这张卡 + `handoff.md` 第 0–2 节 + `AGENT.md` §2/§4，不要整篇读长文档**（D-137 成本纪律）；证据落 `D:\new\artifacts\T4.32b\workbuddy\`；回报 ≤40 行。
+>
+> **要证明的事**：用户粘一个**平台页面链接** → 先看到"是这个视频吗？"的确认卡（标题/封面/公开时长），而不是直接 400；若它是直链、或用户配了 BYOF 外部工具，就能直接建任务；没配 BYOF 的页面链接明确给出"导出后上传"3 步指引。**仓库里不含任何平台解析器**（D-027R），不执行 JS、不带 cookie、不伪造签名。
+> 本卡**不做**：内置抖音/小红书/视频号等解析器（永不做，D-027R）；无头浏览器；登录态/cookie；改 T4.32a `/tasks/link` 的既有语义与错误码。
+>
+> **改动（后端 + 前端 + 文档，单 commit）**：
+> 1. 新 `POST /api/v1/link/preview`（Bearer 由 `ApiTokenFilter` 横切覆盖）body `{"url":"..."}`：
+>    - **先复用 T4.32a 的 `UrlGuard`**（不另写一套）：内网/回环/链路本地/云元数据 → 400 `URL_BLOCKED`；解析失败 → 502 `FETCH_FAILED`；
+>    - 匿名 GET（不带 cookie/鉴权头）、手动跟随重定向且**每跳重校**（对齐 `HttpMediaFetcher` 策略）、**只读响应体前 2MB**（新配置 `app.fetch.preview-max-bytes` 默认 2097152），**不整页读进内存**；
+>    - 响应：`{"kind":"direct"|"page"|"unsupported","final_url":…,"content_type":…,"title":…,"image":…,"duration_sec":…,"byof_available":true|false,"reason":…}`：
+>      - `audio/*`、`video/*`、`application/octet-stream` 等 → `kind=direct`；
+>      - `text/html` → `kind=page`：用**纯函数**从 `<head>` 解析 `og:title`/`og:image`/`og:video:duration`（兼容 `og:audio`、`itemprop="duration"`）；解析不到 og 标题回退 `<title>`；都没有 → `title=null`（不报错）；
+>      - 其它 → `kind=unsupported` + 可读 `reason`。
+> 2. BYOF：在 T4.32a 的 `MediaFetcher` 接口下新增 `fetch/ProcessMediaFetcher`：
+>    - 配置 `app.fetch.fetcher-cmd`（env `FETCHER_CMD`，**默认空**）、`app.fetch.fetcher-timeout-ms`（env `FETCHER_TIMEOUT_MS`，默认 120000）；
+>    - 命令**按空格拆分、不过 shell**（ProcessBuilder），支持 `{url}`（必填，作为独立 argv 元素传入，杜绝注入）与可选 `{out}`（媒体输出路径；无此占位则读命令 stdout 流式落盘）；输出同样受 `max-bytes` 限制；
+>    - 超时/非 0 退出 → 502 `FETCH_FAILED`（文案带 stderr 末 200 字）；
+>    - `POST /api/v1/tasks/link` 增**可选**字段 `"use_byof": true`（默认 false，**既有语义不变**）：为 true 时优先 BYOF；**未配置 `FETCHER_CMD` → 400 `FETCHER_UNAVAILABLE`**（新错误码，码表只增）；入口 URL **仍先过 UrlGuard**（安全兜底不外放）。
+> 3. 前端（`static/index.html`，vanilla JS、无 CDN、`apiFetch` 带 Bearer）上传卡下方加「从链接导入」：
+>    - 输入框 +「预览」→ 展示确认卡（封面 `image`、标题、时长、来源 host）；
+>    - `kind=direct` → 「直接转写」→ `POST /api/v1/tasks/link` → 201 跳详情页（复用现有跳转）；
+>    - `kind=page` 且 `byof_available=true` → 「用外部工具抓取」→ `POST /tasks/link {url, use_byof:true}`；
+>    - `kind=page` 且未配 BYOF → 灰按钮 + 3 步指引「导出文件 → 手机浏览器打开本站 → 上传」；
+>    - 400/502 → 就地可读提示（不白屏）；预览/提交期间按钮 loading + 禁用，防重复提交。
+> 4. 配置三处同步（`application.yml`/`.env.example`/`配置清单.md`）：`FETCHER_CMD`、`FETCHER_TIMEOUT_MS`、`FETCH_PREVIEW_MAX_BYTES`；`接入指南 §3.9` 补 preview 契约 + `FETCHER_UNAVAILABLE` 码表行 + BYOF 责任边界；`README` 一句：仓库不含平台解析器，BYOF 由使用者自装工具、自负合规责任（D-027R）。
+>
+> **判据（缺一不可）**：
+> - 单测：og 解析纯函数矩阵（完整 og / 只有 `<title>` / `og:image` 相对路径 / 时长变体如 `PT1M2S` 与纯秒数 / head 被 2MB 截断 / 非 HTML / 乱码不抛）；`ProcessMediaFetcher` 用本机脚本测成功/超时/非 0 三态；preview 对内网 URL 走 UrlGuard 400。
+> - **真机**（临时 compose override：`FETCH_ALLOW_HOSTS` + `FETCHER_CMD`，验完**删除 override 并比对 env 恢复**，K-44）：宿主 http 服务提供 ①媒体直链 ②带 og 的 HTML 页 ③无 og 的 HTML 页 ④内网地址；断言 `kind=direct` / `kind=page` 且 title/image 正确 / 标题回退 `<title>` / 400 `URL_BLOCKED`。BYOF：写一个只从本地文件拷出媒体的假抓取脚本 → `POST /tasks/link {use_byof:true}` → **201 → DONE → transcript 非空**；未配 `FETCHER_CMD` 时同一请求 **400 `FETCHER_UNAVAILABLE`**。
+> - **前端（Playwright，K-80 点→回读）**：粘直链 → 预览 → 卡片出现 → 点「直接转写」→ 跳详情 → 轮询 DONE；粘页面链接（未配 BYOF）→ 卡片出现且「用外部工具抓取」不可用 + 3 步指引可见；粘内网地址 → 可读错误；无 console/pageerror；1280/390 无横向溢出。
+> - `-UnitOnly` 全绿 → commit（单 commit `feat(T4.32b)`）→ `docker compose build app && up -d app` → 全量（K-68）→ 可维护性 0/0；`head.txt` 记**提交后** HEAD。
+> - 残留清理（D-139）：临时任务/临时 MinIO 对象/override/脚本/容器 `/tmp` 逐条核对，回报写清"查了哪些、各是多少"。
+> **禁止**：把 yt-dlp 等平台解析器装进仓库；执行 JS/无头浏览器；带 cookie/伪造签名；改 32a `/tasks/link` 既有语义与错误码；默认开启 BYOF；多 commit。
 
 ## 每张卡做完都要给你的回报
 

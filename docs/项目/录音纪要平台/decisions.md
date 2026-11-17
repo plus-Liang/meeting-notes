@@ -1768,6 +1768,19 @@
 - **依据**：`review/2026-11-17-T4.30b验收.md`（第 56 份）；`artifacts/T4.30b/lead-verify/`（lead-verify-upload.py + api.log 13/13、lead-verify-ui-e2e.js + ui-e2e.log 8/8、full-test.log 368/368、容器 ffprobe 实测输出、served-* sha256、ui-e2e-detail.png）；DB/MinIO/配额复核（215 任务 / 221 对象 = 历史 6 孤儿、无新增；34 分钟 / 50 任务）。
 - **已排除项**：把"真录 webm 应 reused=true"当产品问题（是我探针假设错：460/461 是另一次录制字节）；把"fixture 偏离 -c copy"当违规（实测 remux 会破坏关键特性，符合卡意图）；只测探测函数就当闭环（必须真 webm 201→DONE→transcript，已做）；把兜底失败也当 500（必须 400，已验坏 EBML）。
 
+### D-142 T4.32a 通过：FETCH 直链 + SSRF 防护落地（逐跳校验、数字缩写自规范化）；数字字面量 IP 依赖系统解析器会漏 → 记 K-84
+
+- **日期**：2026-11-17｜**决策人**：DSH
+- **结论**：
+  1. **T4.32a 通过**（`641a6d1`，14 文件 +1383/−4，单 commit）：新增 `fetch/UrlGuard`（纯逻辑 + 注入解析器）、`fetch/MediaFetcher`（BYOF 扩展点，T4.32b 依赖）+ 默认 `fetch/HttpMediaFetcher`（手动跟随重定向、**每跳重跑校验**、5 跳上限、connect/read 超时、流式写盘超限即删、`text/html` 拒、只发匿名 GET）、`task/LinkTaskService`（复用上传管线同构顺序）+ `POST /api/v1/tasks/link`；配置 `app.fetch.*` 5 键三处同步（默认 5/5000/10000/209715200/空）。**13 张 ✅ → 14 张 ✅**。
+  2. 我独立验证：`-UnitOnly` **374/374 exit 0**（+22）、可维护性 **0/0 exit 0**、全量 **390/390 exit 0**；真机反例矩阵 **23/23**（回环/私有/链路本地/云元数据/IPv6 ULA/IPv4 映射/数字缩写/宿主机网关/scheme/userinfo 全 400 `URL_BLOCKED`，解析失败 502 `FETCH_FAILED`，匿名 401，**无 500**）；**真机正例 task 500**：201 PENDING → **DONE**、`duration_sec=61`、`size_bytes=1920417`（与本地一致）、`source_type='LINK'`、MinIO `tasks/500/` 在、**transcript 498 字真中文**；同场景另验 `NOT_DIRECT_MEDIA`(400) 与 `SIZE_EXCEEDED`(413，无残留任务、无 `/tmp` 残file)；临时 override 用后删除并重建，**恢复后容器 env diff 仅 HOSTNAME 变化**、默认配置下原地址复归 400。
+  3. **卡面偏离（接受）**：`source_type='LINK'`（V1 schema 注释预留 `FETCH`，无 CHECK 约束，按卡面 D-127 逐字执行），`接入指南 §3.9` 已如实写明命名漂移；worker 走音频路径零改动。
+  4. **新坑 K-84**：**数字字面量形式的 IP 不能只靠系统解析器**——JDK 21 出于安全把前导 0 的数字段按十进制解析（`0177.0.0.1` → `177.0.0.1` 公网地址），系统解析器正则"按解析结果判"会漏；正确做法是在守卫内按 inet_aton 语义自己规范化（十进制/八进制/十六进制/缺段）再判，仍是"算出真正会连的地址再判"而非字符串黑名单。
+  5. 残余（P3，接受）：`100.64/10` CGNAT、`192.0.0.0/24`、`198.18/15`、IPv6 NAT64/6to4 未拦（卡面清单外，后续加固）；DNS rebinding TOCTOU 未做连接后复核（卡面已知限制，文档如实写）；链接导入不校验 `TASK_MAX_SIZE_BYTES`（只受 `FETCH_MAX_BYTES`，两键默认同为 200MB）；`FETCH_ALLOW_HOSTS` 本质是"关防护"开关，靠部署纪律。
+  6. 我改了一处**文档口径**（非产品）：§3.9 原写"缩写 IP 都被解析器归一化后拦截"不精确——实测 `0x7f.0.0.1`/`127.1` 是 JDK URI 直接判 host 非法、更早被拒；已改成两种路径都写明（结果同为 400 `URL_BLOCKED`）。
+- **依据**：`review/2026-11-17-T4.32a验收.md`（第 57 份）；`artifacts/T4.32a/lead-verify/`（negative.log 23/23、positive.log/json、size-413.log、full-2.log 390/390、unitonly.log 374/374、maintainability.log、env-before/after.txt、task500.json、httpserver.log）；DB/MinIO/配额复核（226 任务全 DONE、MinIO 232=226+历史 6 孤儿、67 分钟/61 任务）。
+- **已排除项**：把 `0177.0.0.1` 这类缩写形式当"已被系统解析器拦住"（实测 JDK 会按十进制归一化，必须自规范化）；把 `0x7f.0.0.1`/`127.1` 被 URI 提前拒当"没走守卫"（结果一致，只是路径不同，文档已改准）；把我自己的 `probe-1s.wav` 冒烟假红当产品回归（1 秒测试音 ASR 空文本，换真实样本即 390/390）；把 PowerShell 拼 JSON 的 `INVALID_PARAM` 当 413 缺失（PS 无 `\"` 转义，换 Python 即得 413）；把 `source_type=LINK vs FETCH` 当违规（无 CHECK 约束，按卡执行并写文档）。
+
 ---
 
 ## 面试速查（由本文件派生，勿单独维护）
