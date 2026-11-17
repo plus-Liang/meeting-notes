@@ -576,3 +576,20 @@ details.example[open] summary { margin-bottom: var(--sp-3); }
   .steps { grid-template-columns: 1fr; }
   .status-grid { grid-template-columns: repeat(2, 1fr); }
 }
+
+/* ===== T4.30 浏览器录音 ===== */
+.rec-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--danger); margin-right: var(--sp-2); animation: mn-rec-pulse 1.2s ease-in-out infinite; }
+@keyframes mn-rec-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
+#recTimer { font-weight: var(--fw-semibold); font-size: var(--fs-base); }
+#recName {
+  width: 100%;
+  max-width: 420px;
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  font-family: var(--font-stack);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
+  transition: border-color var(--dur-color) var(--ease);
+}
+#recName:focus { outline: none; border-color: var(--ink); box-shadow: 0 0 0 3px rgba(26, 26, 26, .12); }
