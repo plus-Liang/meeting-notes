@@ -49,7 +49,8 @@ public class TaskController {
     private static final long DEFAULT_USER_ID = 1L;
 
     /** T2.12：status 过滤只允许任务状态机的五个值，其它 → 400 INVALID_PARAM（不再静默空列表）。 */
-    private static final java.util.Set<String> ALLOWED_STATUS_FILTER =
+    /** 状态筛选白名单（包内共享：T4.29 起列表端点在 TaskListController）。 */
+    static final java.util.Set<String> ALLOWED_STATUS_FILTER =
             java.util.Set.of("PENDING", "RUNNING", "RETRYING", "DONE", "DEAD");
 
     private final TaskService taskService;
@@ -141,45 +142,6 @@ public class TaskController {
         return "forward:/index.html";
     }
 
-    /** 服务端任务列表（T2.10 / D-053）：keyset 分页（before_id 游标禁 OFFSET）、user_id 服务端过滤（D-040）；
-     *  limit 1..50、status 白名单、T4.24 只增可选 q（去空格/超长 400，见 TaskQueryService.normalizeQ）；非法 → 400。 */
-    @GetMapping("/tasks")
-    public TaskQueryService.TaskListResponse list(
-            @org.springframework.web.bind.annotation.RequestParam(required = false) String status,
-            @org.springframework.web.bind.annotation.RequestParam(required = false) String limit,
-            @org.springframework.web.bind.annotation.RequestParam(name = "before_id", required = false) String beforeId,
-            @org.springframework.web.bind.annotation.RequestParam(required = false) String q) {
-        int lim = TaskQueryService.DEFAULT_LIMIT;
-        if (limit != null) {
-            try {
-                lim = Integer.parseInt(limit.trim());
-            } catch (NumberFormatException e) {
-                throw new ApiException(400, "INVALID_PARAM", "limit 必须是数字");
-            }
-            if (lim < 1 || lim > TaskQueryService.MAX_LIMIT) {
-                throw new ApiException(400, "INVALID_PARAM",
-                        "limit 取值范围 1.." + TaskQueryService.MAX_LIMIT);
-            }
-        }
-        Long before = null;
-        if (beforeId != null && !beforeId.isBlank()) {
-            try {
-                before = Long.parseLong(beforeId.trim());
-            } catch (NumberFormatException e) {
-                throw new ApiException(400, "INVALID_PARAM", "before_id 必须是数字");
-            }
-        }
-        String statusFilter = null;
-        if (status != null && !status.isBlank()) {
-            statusFilter = status.trim();
-            if (!ALLOWED_STATUS_FILTER.contains(statusFilter)) {
-                throw new ApiException(400, "INVALID_PARAM",
-                        "status 只允许 PENDING/RUNNING/RETRYING/DONE/DEAD");
-            }
-        }
-        return taskQueryService.list(DEFAULT_USER_ID, statusFilter, lim, before,
-                TaskQueryService.normalizeQ(q));
-    }
 
     /** 查任务状态（前端轮询/接入方）。未到 DONE 时 transcript 恒 null；error_code 仅 RETRYING/DEAD 有值（S-3）；查询带 user_id（D-040），不存在时 404 TASK_NOT_FOUND。 */
     @GetMapping("/tasks/{id}")

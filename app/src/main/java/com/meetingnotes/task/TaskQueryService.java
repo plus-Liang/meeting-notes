@@ -52,7 +52,7 @@ public class TaskQueryService {
         return trimmed;
     }
 
-    /** 列表项：对外契约 snake_case（D-041，T2.10 六键 + T4.21 三键，只增不改）。 */
+    /** 列表项：对外契约 snake_case（D-041，T2.10 六键 + T4.21 三键 + T4.29 两键，只增不改）。 */
     public record TaskListItem(
             long id,
             String status,
@@ -62,7 +62,9 @@ public class TaskQueryService {
             String errorCode,
             List<String> keywords,
             String summaryHead,
-            String template) {
+            String template,
+            List<String> labels,
+            boolean favorite) {
     }
 
     /** 列表响应：items + next_before_id（还有下一页时为最后一项的 id，否则 null）。 */
@@ -91,12 +93,16 @@ public class TaskQueryService {
      * @param beforeId 可空；keyset 游标
      * @param q        可空；非空时 source_uri ILIKE 参数化匹配（%/_/\ 转义），纯数字 OR id 精确匹配；
      *                 已由 controller 去空格、校验长度（≤{@value #Q_MAX_CHARS}）
+     * @param label    可空；T4.29 单标签筛选——labels jsonb 包含匹配（@> ?::jsonb，参数化为
+     *                 {@code mapper.writeValueAsString(List.of(label))}，注入面同 q）
+     * @param favorite 可空；T4.29 收藏筛选（true/false）
      * @param limit    已由 controller 校验（1..MAX_LIMIT）
      */
-    public TaskListResponse list(long userId, String status, int limit, Long beforeId, String q) {
+    public TaskListResponse list(long userId, String status, int limit, Long beforeId, String q,
+                                 String label, Boolean favorite) {
         StringBuilder sql = new StringBuilder("""
                 SELECT t.id, t.status, t.source_uri, t.duration_sec, t.created_at, t.error_code,
-                       r.keywords, r.summary, r.template
+                       r.keywords, r.summary, r.template, t.labels::text AS labels, t.favorite
                 FROM task t
                 LEFT JOIN task_result r ON r.task_id = t.id
                 WHERE t.user_id = ?
@@ -124,6 +130,15 @@ public class TaskQueryService {
             }
             sql.append(")");
         }
+        if (label != null && !label.isBlank()) {
+            /* T4.29：jsonb 包含匹配——label 经 mapper 序列化成 jsonb 字面量参数化绑定（不拼字符串） */
+            sql.append(" AND t.labels @> ?::jsonb");
+            args.add(labelsJson(List.of(label)));
+        }
+        if (favorite != null) {
+            sql.append(" AND t.favorite = ?");
+            args.add(favorite);
+        }
         sql.append(" ORDER BY t.id DESC LIMIT ?");
         args.add(limit + 1); // 多取 1 行判断是否还有下一页
 
@@ -140,7 +155,9 @@ public class TaskQueryService {
                         rs.getString("error_code"),
                         keywordsOf(rs.getString("keywords")),
                         summaryHeadOf(rs.getString("summary")),
-                        rs.getString("template")));
+                        rs.getString("template"),
+                        labelsOf(rs.getString("labels")),
+                        rs.getBoolean("favorite")));
             } else {
                 hasMore[0] = true; // 第 limit+1 行存在 = 还有下一页
             }
@@ -148,6 +165,27 @@ public class TaskQueryService {
 
         Long nextBeforeId = hasMore[0] && !items.isEmpty() ? items.get(items.size() - 1).id() : null;
         return new TaskListResponse(items, nextBeforeId);
+    }
+
+    /** labels jsonb 文本 → List<String>（T4.29，坏 JSON/空 → []，口径同 keywords）。 */
+    private List<String> labelsOf(String labelsJsonText) {
+        if (labelsJsonText == null || labelsJsonText.isBlank()) {
+            return List.of();
+        }
+        try {
+            return mapper.readValue(labelsJsonText, new TypeReference<List<String>>() { });
+        } catch (Exception e) {
+            return List.of();
+        }
+    }
+
+    /** List<String> → jsonb 数组文本（写入/筛选共用，天然转义）。 */
+    private String labelsJson(List<String> labels) {
+        try {
+            return mapper.writeValueAsString(labels);
+        } catch (Exception e) {
+            return "[]";
+        }
     }
 
     /** 纯数字串能否安全 parseLong：位数小于 MAX 或同位数字典序 ≤ MAX（全数字时字典序=数值序）。

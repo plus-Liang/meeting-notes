@@ -532,6 +532,11 @@ details.example[open] summary { margin-bottom: var(--sp-3); }
 .ground-link:hover { color: var(--ink); }
 .ground-miss { color: var(--ink-3); }
 
+/* T4.29：标签 chips 删除钮 / 列表星标与标签行 */
+.chip-x { background: none; border: 0; padding: 0 0 0 4px; font: inherit; color: inherit; cursor: pointer; }
+.task-labels { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.fav-star { color: var(--accent); }
+
 /* T4.23：摘要依据块（观感复用 .ground-link/.ground-miss/.todo-ground 口径，逐句行可点定位） */
 .summary-ground { margin-top: var(--sp-3); padding: var(--sp-3); background: var(--surface-muted); border-radius: var(--r-sm); color: var(--ink-3); font-size: var(--fs-xs); line-height: var(--lh-xs); }
 .summary-ground-title { color: var(--ink-2); font-weight: var(--fw-medium); margin-bottom: var(--sp-1); }

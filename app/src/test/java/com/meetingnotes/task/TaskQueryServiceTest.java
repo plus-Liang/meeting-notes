@@ -87,7 +87,7 @@ class TaskQueryServiceTest {
                 new String[]{"会议讨论了AI对就业市场的影响，覆盖基础开发岗位缩减与初级程序员入口收窄两大议题，并给出行动建议。", null},
                 new String[]{"meeting", null});
 
-        TaskQueryService.TaskListResponse resp = newService().list(1L, null, 5, null, null);
+        TaskQueryService.TaskListResponse resp = newService().list(1L, null, 5, null, null, null, null);
 
         var first = resp.items().get(0);
         assertEquals(List.of("AI", "简历", "招聘", "扩容"), first.keywords(), "合法 JSON → 数组原样");
@@ -105,7 +105,7 @@ class TaskQueryServiceTest {
         // limit=2 但库里有 3 行 → 返回 2 项，next_before_id=4（本页最后一项 id）
         stubRows(3, 5L);
 
-        TaskQueryService.TaskListResponse resp = newService().list(1L, null, 2, null, null);
+        TaskQueryService.TaskListResponse resp = newService().list(1L, null, 2, null, null, null, null);
 
         assertEquals(2, resp.items().size());
         assertEquals(5L, resp.items().get(0).id());
@@ -119,7 +119,7 @@ class TaskQueryServiceTest {
         // 只有 2 行、limit=3 → 没有下一页，next_before_id 必须为 null
         stubRows(2, 9L);
 
-        TaskQueryService.TaskListResponse resp = newService().list(1L, null, 3, null, null);
+        TaskQueryService.TaskListResponse resp = newService().list(1L, null, 3, null, null, null, null);
 
         assertEquals(2, resp.items().size());
         assertNull(resp.nextBeforeId(), "总数未超过 limit 时不得给出翻页游标");
@@ -128,7 +128,7 @@ class TaskQueryServiceTest {
     @Test
     void statusAndBeforeIdFiltersLandInSqlAndArgs() {
         // 只验证 SQL 形状与参数（不喂行数据；jdbc.query 返回值在此模式下不被使用）
-        newService().list(1L, "DEAD", 20, 42L, null);
+        newService().list(1L, "DEAD", 20, 42L, null, null, null);
 
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
@@ -143,15 +143,19 @@ class TaskQueryServiceTest {
 
     @Test
     void controllerRejectsBadParamsWith400InvalidParam() {
-        com.meetingnotes.web.TaskController controller = newController();
+        com.meetingnotes.web.TaskListController controller = newListController();
 
-        assertEquals("INVALID_PARAM", assertThrows(ApiException.class, () -> controller.list(null, "51", null, null)).getCode());
-        assertEquals(400, assertThrows(ApiException.class, () -> controller.list(null, "0", null, null)).getStatus());
-        assertEquals("INVALID_PARAM", assertThrows(ApiException.class, () -> controller.list(null, "abc", null, null)).getCode());
-        assertEquals("INVALID_PARAM", assertThrows(ApiException.class, () -> controller.list(null, null, "not-a-number", null)).getCode());
+        assertEquals("INVALID_PARAM", assertThrows(ApiException.class, () -> controller.list(null, "51", null, null, null, null)).getCode());
+        assertEquals(400, assertThrows(ApiException.class, () -> controller.list(null, "0", null, null, null, null)).getStatus());
+        assertEquals("INVALID_PARAM", assertThrows(ApiException.class, () -> controller.list(null, "abc", null, null, null, null)).getCode());
+        assertEquals("INVALID_PARAM", assertThrows(ApiException.class, () -> controller.list(null, null, "not-a-number", null, null, null)).getCode());
     }
 
     /** T4.1 起构造器多了 retry/glossary 两个依赖，T4.7 再加 batch，这里统一补齐 mock。 */
+    private com.meetingnotes.web.TaskListController newListController() {
+        return new com.meetingnotes.web.TaskListController(newService());
+    }
+
     private com.meetingnotes.web.TaskController newController() {
         return new com.meetingnotes.web.TaskController(
                 org.mockito.Mockito.mock(com.meetingnotes.task.TaskService.class),
@@ -167,17 +171,16 @@ class TaskQueryServiceTest {
 
     @Test
     void controllerValidatesStatusFilterStrictly() throws Exception {
-        com.meetingnotes.task.TaskService taskService = org.mockito.Mockito.mock(com.meetingnotes.task.TaskService.class);
-        com.meetingnotes.web.TaskController controller = newController();
+        com.meetingnotes.web.TaskListController controller = newListController();
 
         // 非法 status → 400 INVALID_PARAM，不再静默空列表（T2.12）
-        ApiException e = assertThrows(ApiException.class, () -> controller.list("BOGUS", null, null, null));
+        ApiException e = assertThrows(ApiException.class, () -> controller.list("BOGUS", null, null, null, null, null));
         assertEquals(400, e.getStatus());
         assertEquals("INVALID_PARAM", e.getCode());
 
         // 合法 status 原样透传（ 不触发 400）
         stubRows(1, 3L);
-        com.meetingnotes.task.TaskQueryService.TaskListResponse resp = controller.list("DONE", null, null, null);
+        com.meetingnotes.task.TaskQueryService.TaskListResponse resp = controller.list("DONE", null, null, null, null, null);
         assertEquals(1, resp.items().size());
     }
 
@@ -197,7 +200,7 @@ class TaskQueryServiceTest {
     @Test
     void qLandsInSqlParameterizedWithLikeEscaping() {
         // %/_/\ 全部转义成字面量，且关键词只出现在参数里、绝不拼进 SQL 字符串
-        newService().list(1L, null, 20, null, "ab%_\\c");
+        newService().list(1L, null, 20, null, "ab%_\\c", null, null);
 
         CapturedSql c = captureLastQuery();
         assertTrue(c.sql().contains("ILIKE ? ESCAPE '\\'"), "必须声明 ESCAPE '\\'（反斜杠为转义符）");
@@ -208,8 +211,8 @@ class TaskQueryServiceTest {
 
     @Test
     void blankOrNullQAddsNoCondition() {
-        newService().list(1L, null, 20, null, null);
-        newService().list(1L, null, 20, null, "   ");
+        newService().list(1L, null, 20, null, null, null, null);
+        newService().list(1L, null, 20, null, "   ", null, null);
 
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
@@ -224,7 +227,7 @@ class TaskQueryServiceTest {
 
     @Test
     void pureNumericQAlsoMatchesIdExactly() {
-        newService().list(1L, null, 20, null, "42");
+        newService().list(1L, null, 20, null, "42", null, null);
 
         CapturedSql c = captureLastQuery();
         assertTrue(c.sql().contains("OR t.id = ?"), "纯数字 q 额外精确匹配任务 id");
@@ -234,7 +237,7 @@ class TaskQueryServiceTest {
 
     @Test
     void qCombinesWithStatusAndBeforeId() {
-        newService().list(1L, "DEAD", 20, 42L, "abc");
+        newService().list(1L, "DEAD", 20, 42L, "abc", null, null);
 
         CapturedSql c = captureLastQuery();
         assertTrue(c.sql().contains("AND t.status = ?"), "与 status 可组合");
@@ -245,17 +248,17 @@ class TaskQueryServiceTest {
 
     @Test
     void controllerRejectsOverLongQWith400AndTrimsQ() throws Exception {
-        com.meetingnotes.web.TaskController controller = newController();
+        com.meetingnotes.web.TaskListController controller = newListController();
 
         // q 超过 100 字符 → 400 INVALID_PARAM
         ApiException e = assertThrows(ApiException.class,
-                () -> controller.list(null, null, null, "x".repeat(101)));
+                () -> controller.list(null, null, null, "x".repeat(101), null, null));
         assertEquals(400, e.getStatus());
         assertEquals("INVALID_PARAM", e.getCode());
 
         // q 去空格 + 纯数字 → 透传到 SQL（id 精确匹配）
         stubRows(1, 3L);
-        controller.list(null, null, null, "  42  ");
+        controller.list(null, null, null, "  42  ", null, null);
         CapturedSql c = captureLastQuery();
         assertTrue(c.sql().contains("OR t.id = ?"), "q 去空格后纯数字仍精确匹配 id");
         assertEquals(List.of(1L, "%42%", 42L, 21), List.of(c.args()));
@@ -267,7 +270,7 @@ class TaskQueryServiceTest {
     void overLongNumericQOnlyGoesIlikeWithoutIdMatch() {
         // 20 位数字 > Long.MAX → 不加 OR t.id（防 NumberFormatException 打 500），只走 ILIKE，保持 200
         String q20 = "9".repeat(20);
-        newService().list(1L, null, 20, null, q20);
+        newService().list(1L, null, 20, null, q20, null, null);
 
         CapturedSql c = captureLastQuery();
         assertFalse(c.sql().contains("OR t.id = ?"), "超出 64 位范围的数字不得加 id 精确匹配");
@@ -278,7 +281,7 @@ class TaskQueryServiceTest {
     void longMaxValueQStillMatchesIdExactly() {
         // Long.MAX_VALUE（9223372036854775807）恰好能装进 long → 精确匹配保留，参数 = MAX
         String max = Long.toString(Long.MAX_VALUE);
-        newService().list(1L, null, 20, null, max);
+        newService().list(1L, null, 20, null, max, null, null);
 
         CapturedSql c = captureLastQuery();
         assertTrue(c.sql().contains("OR t.id = ?"), "Long.MAX 边界值仍走 id 精确匹配");
@@ -305,5 +308,27 @@ class TaskQueryServiceTest {
         assertEquals(3, c.done());
         assertEquals(2, c.dead());
         verify(jdbc).query(contains("GROUP BY status"), ArgumentMatchers.<RowCallbackHandler>any(), eq(1L));
+    }
+
+    /* ===== T4.29：label / favorite 筛选（与 status/q 组合，参数化） ===== */
+
+    @Test
+    void labelFilterUsesJsonbContainmentParameterized() {
+        newService().list(1L, null, 20, null, null, "课程", null);
+
+        CapturedSql c = captureLastQuery();
+        assertTrue(c.sql().contains("t.labels @> ?::jsonb"), "label 筛选走 jsonb 包含匹配");
+        assertFalse(c.sql().contains("课程"), "标签值绝不拼进 SQL 字符串（注入面同 q）");
+        assertEquals(List.of(1L, "[\"课程\"]", 21), List.of(c.args()),
+                "jsonb 参数由 mapper 序列化（值在绑定参数里）");
+    }
+
+    @Test
+    void favoriteFilterBindsBooleanParameterized() {
+        newService().list(1L, null, 20, null, null, null, true);
+
+        CapturedSql c = captureLastQuery();
+        assertTrue(c.sql().contains("t.favorite = ?"), "favorite 筛选参数化");
+        assertEquals(List.of(1L, true, 21), List.of(c.args()));
     }
 }

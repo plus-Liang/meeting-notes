@@ -105,6 +105,10 @@ class E2ETest {
             builder.GET();
         } else if ("DELETE".equals(method)) {
             builder.DELETE(); /* T4.28：撤销分享用真 DELETE（此前 helper 只支持 GET/POST） */
+        } else if ("PATCH".equals(method)) {
+            builder.method("PATCH", HttpRequest.BodyPublishers.ofString(
+                    body == null ? "" : body, StandardCharsets.UTF_8)); /* T4.29：meta 更新 */
+            builder.header("Content-Type", contentType == null ? "application/json" : contentType);
         } else {
             builder.POST(HttpRequest.BodyPublishers.ofString(
                     body == null ? "" : body, StandardCharsets.UTF_8));
@@ -657,5 +661,75 @@ class E2ETest {
         HttpResponse<String> afterRevoke = sendWithoutToken("GET", "/api/v1/share/" + shareToken, null, null);
         assertEquals(404, afterRevoke.statusCode());
         assertEquals("SHARE_NOT_FOUND", M.readTree(afterRevoke.body()).get("code").asText());
+    }
+
+    /** T4.29 场景 L：标签/收藏——PATCH 校验矩阵、列表只增字段与筛选、GET meta 读回。零新建任务（复用 A）。 */
+    @Test
+    @Order(13)
+    void l_labelsFavoriteMetaContract() throws Exception {
+        // PATCH 正常：trim + 去重保序 + favorite
+        HttpResponse<String> patch = send("PATCH", "/api/v1/tasks/" + taskId + "/meta",
+                "{\"labels\":[\" e2e \",\"重点\",\"e2e\"],\"favorite\":true}", "application/json");
+        assertEquals(200, patch.statusCode(), "PATCH meta：" + abbreviate(patch.body()));
+        JsonNode meta = M.readTree(patch.body());
+        assertEquals("[\"e2e\",\"重点\"]", meta.get("labels").toString(), "trim+去重保序");
+        assertTrue(meta.get("favorite").asBoolean());
+        List<String> metaKeys = new ArrayList<>();
+        meta.fieldNames().forEachRemaining(metaKeys::add);
+        assertEquals(List.of("task_id", "labels", "favorite"), metaKeys);
+
+        // GET meta 读回
+        HttpResponse<String> read = send("GET", "/api/v1/tasks/" + taskId + "/meta", null, null);
+        assertEquals(200, read.statusCode());
+        List<String> readKeys = new ArrayList<>();
+        M.readTree(read.body()).fieldNames().forEachRemaining(readKeys::add);
+        assertEquals(List.of("task_id", "labels", "favorite"), readKeys);
+
+        // 列表只增字段 + 筛选
+        HttpResponse<String> favList = send("GET", "/api/v1/tasks?favorite=true&limit=50", null, null);
+        assertEquals(200, favList.statusCode());
+        JsonNode favItems = M.readTree(favList.body()).get("items");
+        boolean found = false;
+        for (JsonNode item : favItems) {
+            assertTrue(item.has("labels") && item.has("favorite"), "列表键集只增 labels/favorite");
+            if (item.get("id").asLong() == taskId) {
+                found = true;
+                assertTrue(item.get("favorite").asBoolean());
+                assertEquals("[\"e2e\",\"重点\"]", item.get("labels").toString());
+            }
+        }
+        assertTrue(found, "favorite=true 必须命中打星任务");
+
+        HttpResponse<String> labelList = send("GET", "/api/v1/tasks?label=e2e&limit=50", null, null);
+        assertTrue(M.readTree(labelList.body()).toString().contains("\"id\":" + taskId),
+                "label 筛选命中");
+        HttpResponse<String> notFav = send("GET", "/api/v1/tasks?favorite=false&limit=50", null, null);
+        assertFalse(M.readTree(notFav.body()).toString().contains("\"id\":" + taskId),
+                "favorite=false 不得命中已打星任务");
+        assertEquals(400, send("GET", "/api/v1/tasks?favorite=yes", null, null).statusCode());
+
+        // 校验矩阵：全 400 INVALID_PARAM
+        String[][] bad = {
+                {"{\"labels\":[\"a\",\"b\",\"c\",\"d\",\"e\",\"f\",\"g\",\"h\",\"i\",\"j\",\"k\"]}", "11 个标签"},
+                {"{\"labels\":[\"" + "字".repeat(21) + "\"]}", "21 字"},
+                {"{\"labels\":\"课程\"}", "非数组"},
+                {"{\"labels\":[42]}", "非字符串元素"},
+                {"{\"favorite\":\"yes\"}", "favorite 非 bool"},
+                {"{}", "两键全缺"},
+        };
+        for (String[] b : bad) {
+            HttpResponse<String> resp = send("PATCH", "/api/v1/tasks/" + taskId + "/meta", b[0], "application/json");
+            assertEquals(400, resp.statusCode(), b[1] + " 必须 400：" + abbreviate(resp.body()));
+            assertEquals("INVALID_PARAM", M.readTree(resp.body()).get("code").asText());
+        }
+        HttpResponse<String> missing = send("PATCH", "/api/v1/tasks/999999/meta",
+                "{\"favorite\":true}", "application/json");
+        assertEquals(404, missing.statusCode());
+        assertEquals("TASK_NOT_FOUND", M.readTree(missing.body()).get("code").asText());
+
+        // 清理：恢复默认（本场景不留收藏/标签）
+        HttpResponse<String> cleanup = send("PATCH", "/api/v1/tasks/" + taskId + "/meta",
+                "{\"labels\":[],\"favorite\":false}", "application/json");
+        assertEquals(200, cleanup.statusCode());
     }
 }

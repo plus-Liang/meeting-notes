@@ -203,6 +203,83 @@
       '<p class="hint" id="deleteMsg" style="margin-top:8px">删除后不可恢复，已用配额不退还。进行中（排队/转写/重试）的任务不能删除。</p></div>';
   }
 
+  /* T4.29（D-137）：标签与收藏——GET /meta 取初值，PATCH 更新（labels <=10 个 1-20 字去重、favorite 布尔）；
+     详情 14 键不动，meta 走独立端点 */
+  var meta = { labels: [], favorite: false };
+
+  function metaHtml() {
+    return '<div class="section"><h2>标签与收藏</h2>' +
+      '<p style="margin:0 0 8px"><button type="button" class="btn-secondary" id="favToggleBtn"></button>' +
+      '<span id="metaMsg" class="hint" style="margin-left:8px"></span></p>' +
+      '<div id="labelChips"></div>' +
+      '<div class="tpl-pick"><input type="text" id="labelInput" maxlength="20" ' +
+      'placeholder="添加标签（1-20 字）" aria-label="新标签">' +
+      '<button type="button" class="btn-secondary" id="labelAddBtn">添加</button></div></div>';
+  }
+
+  function renderMeta() {
+    document.getElementById('favToggleBtn').textContent =
+      meta.favorite ? '★ 已收藏（点击取消）' : '☆ 收藏';
+    var chips = document.getElementById('labelChips');
+    chips.innerHTML = meta.labels.length
+      ? meta.labels.map(function (l) {
+          return '<span class="chip plain">' + escapeHtml(l) +
+            '<button type="button" class="chip-x" data-label="' + escapeHtml(l) +
+            '" aria-label="删除标签"> ×</button></span>';
+        }).join('')
+      : '<p class="hint" style="margin:0">暂无标签。</p>';
+    chips.querySelectorAll('.chip-x').forEach(function (x) {
+      x.addEventListener('click', function () {
+        var label = x.getAttribute('data-label');
+        updateMeta({ labels: meta.labels.filter(function (l) { return l !== label; }) });
+      });
+    });
+  }
+
+  function updateMeta(patch) {
+    var msg = document.getElementById('metaMsg');
+    var addBtn = document.getElementById('labelAddBtn');
+    var favBtn = document.getElementById('favToggleBtn');
+    addBtn.disabled = true;
+    favBtn.disabled = true;
+    postJson('api/v1/tasks/' + id + '/meta', patch).then(function (resp) {
+      addBtn.disabled = false;
+      favBtn.disabled = false;
+      if (resp.__httpStatus === 200) {
+        meta = { labels: resp.labels || [], favorite: !!resp.favorite };
+        renderMeta();
+        msg.textContent = '已保存。';
+      } else {
+        msg.textContent = '保存失败（' + (resp.code || resp.__httpStatus) + '）：' + (resp.message || '未知错误');
+      }
+    }, function () {
+      addBtn.disabled = false;
+      favBtn.disabled = false;
+      msg.textContent = '保存失败：服务暂时不可用。';
+    });
+  }
+
+  function initMeta(data) {
+    meta = { labels: [], favorite: false };
+    renderMeta();
+    getJson('api/v1/tasks/' + data.task_id + '/meta').then(function (resp) {
+      if (resp.__httpStatus === 200) {
+        meta = { labels: resp.labels || [], favorite: !!resp.favorite };
+        renderMeta();
+      }
+    }, function () { /* meta 读取失败不打扰主内容 */ });
+    document.getElementById('favToggleBtn').addEventListener('click', function () {
+      updateMeta({ favorite: !meta.favorite });
+    });
+    document.getElementById('labelAddBtn').addEventListener('click', function () {
+      var input = document.getElementById('labelInput');
+      var value = input.value.trim();
+      if (!value || meta.labels.indexOf(value) >= 0) { input.value = ''; return; }
+      updateMeta({ labels: meta.labels.concat([value]) });
+      input.value = '';
+    });
+  }
+
   /* T4.26（F-17）：换模板重跑——只用已存转写重跑结构化；二次确认覆盖语义，成功后整页刷新 */
   var TEMPLATE_NAMES = { meeting: '会议', course: '课程', interview: '访谈', podcast: '播客', shortvideo: '短视频' };
 
@@ -425,7 +502,7 @@
         '<p class="hint">请检查 ASR 服务是否正常后，可在<a href="tasks.html">任务列表</a>按"失败"筛选并批量重试。</p></div>';
     } else if (status === 'DONE') {
       body = summaryHtml(data) + keypointsHtml(data) + todosHtml(data) + transcriptHtml(data) +
-        restructureHtml(data) + shareHtml(data) + exportHtml(data) + deleteHtml(data);
+        metaHtml() + restructureHtml(data) + shareHtml(data) + exportHtml(data) + deleteHtml(data);
     } else {
       body = '<p class="hint">未知状态：' + escapeHtml(status) + '</p>';
     }
@@ -436,6 +513,7 @@
       initTodos(data);
       bindKeywordChips(data);
       bindSummaryGround(data);
+      initMeta(data);
       bindRestructure(data);
       bindShare(data);
       bindCopyTranscript(data);

@@ -66,7 +66,8 @@
   var searchInput = document.getElementById('searchInput'); /* T4.15④ */
   var timer = null;
   var lastRenderKey = null;
-  var state = { filter: '', cursor: null, items: [], checked: {}, checkedCount: 0, search: '' };
+  var state = { filter: '', cursor: null, items: [], checked: {}, checkedCount: 0, search: '',
+    filterFavorite: false, filterLabel: '' }; /* T4.29：收藏/标签筛选 */
   /* T4.24：状态计数改调 GET /tasks/counts（服务端真计数无上限；页面可见时 30s 刷新保留） */
   var countState = { total: null, active: 0, done: 0, dead: 0 };
 
@@ -115,12 +116,26 @@
   }
 
   function renderFilterBar() {
+    /* T4.29：追加收藏按钮 + 标签下拉（选项 = 当前已加载行的 labels 并集；值由 state 保持防重建丢失） */
+    var fav = '<button class="filter-btn' + (state.filterFavorite ? ' active' : '') +
+      '" id="favoriteFilterBtn" type="button" aria-pressed="' + state.filterFavorite + '">★ 收藏</button>';
+    var opts = ['<option value="">全部标签</option>'];
+    var seen = {};
+    state.items.forEach(function (i) {
+      (i.labels || []).forEach(function (l) {
+        if (seen[l]) return;
+        seen[l] = true;
+        opts.push('<option value="' + escapeHtml(l) + '"' +
+          (state.filterLabel === l ? ' selected' : '') + '>' + escapeHtml(l) + '</option>');
+      });
+    });
+    var labelSel = '<select id="labelFilterSel" aria-label="按标签筛选">' + opts.join('') + '</select>';
     filterBar.innerHTML = FILTERS.map(function (f) {
       var n = countFor(f.key);
       return '<button class="filter-btn' + (state.filter === f.key ? ' active' : '') +
         '" data-status="' + f.key + '">' + f.label +
         (n === null ? '' : '<span class="count-chip">' + n + '</span>') + '</button>';
-    }).join('');
+    }).join('') + fav + labelSel;
   }
 
   /* T4.24：各状态计数（服务端真计数；计数口径 = /tasks/counts 的 GROUP BY，无 200 上限） */
@@ -149,9 +164,12 @@
      T4.24：搜索关键词带 q 参数走服务端（不再本地过滤已加载行） */
   function fetchPage(cursor) {
     var q = state.search ? '&q=' + encodeURIComponent(state.search) : '';
+    /* T4.29：收藏/标签筛选参数化透传（与 status/q 可组合） */
+    var meta = (state.filterFavorite ? '&favorite=true' : '') +
+      (state.filterLabel ? '&label=' + encodeURIComponent(state.filterLabel) : '');
     if (state.filter === 'ACTIVE') {
       return Promise.all(['PENDING', 'RUNNING', 'RETRYING'].map(function (s) {
-        return getJson('api/v1/tasks?status=' + s + '&limit=50' + q);
+        return getJson('api/v1/tasks?status=' + s + '&limit=50' + q + meta);
       })).then(function (results) {
         var seen = {}, merged = [];
         results.forEach(function (r) {
@@ -164,13 +182,20 @@
       });
     }
     var url = 'api/v1/tasks?limit=20' +
-      (state.filter ? '&status=' + state.filter : '') + q +
+      (state.filter ? '&status=' + state.filter : '') + q + meta +
       (cursor ? '&before_id=' + cursor : '');
     return getJson(url);
   }
 
   function rowHtml(item) {
     var name = item.original_name || localName(item.id) || ('任务 ' + item.id);
+    /* T4.29：星标 + 标签 chips（favorite/labels 为列表接口只增字段） */
+    var star = item.favorite ? '<span class="fav-star" title="已收藏">★</span> ' : '';
+    var labelsHtml = (item.labels || []).length
+      ? '<span class="task-labels">' + item.labels.map(function (l) {
+          return '<span class="chip plain">' + escapeHtml(l) + '</span>';
+        }).join('') + '</span>'
+      : '';
     var checkbox = '<input type="checkbox" class="row-check" data-id="' + item.id + '"' +
       (state.checked[item.id] ? ' checked' : '') + '> '; /* T4.15⑥：勾选不再限于 DEAD（导出 md 也需要）；重试仍只对 DEAD 开放 */
     /* T4.14c⑤：时长 + 提交时间（列表接口 item 六键已含 duration_sec/created_at，纯前端渲染；null → '—'） */
@@ -178,7 +203,8 @@
       ' · ' + fmtDate(item.created_at) + '</span>';
     return '<div class="task-row" data-id="' + item.id + '">' +
       '<span class="task-name">' +
-      '<span class="task-title">' + checkbox + '#' + item.id + ' ' + escapeHtml(name) + '</span>' + meta +
+      '<span class="task-title">' + checkbox + star + '#' + item.id + ' ' + escapeHtml(name) + '</span>' + meta +
+      labelsHtml +
       summaryHtml(item) + '</span>' +
       '<span class="task-side">' + identityHtml(item) + ' ' + badgeHtml(item.status) + ' ' +
       '<a href="task.html?id=' + item.id + '" target="_blank" rel="noopener">详情</a></span></div>';
@@ -206,7 +232,8 @@
 
   /* 无变化不重绘（避免 3s 轮询整块闪烁）；勾选/重试等本地状态变化仍走 render() */
   function renderKey() {
-    return state.filter + '|' + state.items.map(function (i) { return i.id + ':' + i.status; }).join(',');
+    return state.filter + '|' + state.filterFavorite + '|' + state.filterLabel + '|' +
+      state.items.map(function (i) { return i.id + ':' + i.status; }).join(',');
   }
 
   /* T4.24：搜索改服务端（列表接口 q 参数），不再本地过滤已加载条目（matchSearch 已删） */
@@ -318,10 +345,27 @@
   filterBar.addEventListener('click', function (e) {
     var btn = e.target.closest('.filter-btn');
     if (!btn) return;
+    if (btn.id === 'favoriteFilterBtn') { /* T4.29：收藏开关（独立于状态筛选） */
+      state.filterFavorite = !state.filterFavorite;
+      state.checked = {}; state.checkedCount = 0;
+      retryResult.textContent = '';
+      renderFilterBar();
+      lastRenderKey = null;
+      loadFirst(false);
+      return;
+    }
     state.filter = btn.getAttribute('data-status');
     state.checked = {}; state.checkedCount = 0;
     retryResult.textContent = '';
     renderFilterBar();
+    lastRenderKey = null;
+    loadFirst(false);
+  });
+  /* T4.29：标签下拉切换（change 事件，值由 select 保持） */
+  filterBar.addEventListener('change', function (e) {
+    if (e.target.id !== 'labelFilterSel') return;
+    state.filterLabel = e.target.value;
+    state.checked = {}; state.checkedCount = 0;
     lastRenderKey = null;
     loadFirst(false);
   });
