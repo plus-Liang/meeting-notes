@@ -474,9 +474,18 @@ class E2ETest {
         // 纯数字 q 精确命中 A 场景任务（不依赖 source_uri 内容）
         HttpResponse<String> byId = send("GET", "/api/v1/tasks?q=" + taskId, null, null);
         assertEquals(200, byId.statusCode());
+        // 契约（接入指南 §3.3）：文件名模糊 + 纯数字额外精确匹配 id——结果必含目标任务，
+        // 且每条满足 id==taskId 或文件名含该数字串；条数不写死（历史文件名可能撞数字，K-80 同源教训）
         JsonNode idList = M.readTree(byId.body());
-        assertEquals(1, idList.get("items").size(), "q=任务id 必须精确命中一条：" + abbreviate(byId.body()));
-        assertEquals(taskId, idList.get("items").get(0).get("id").asLong());
+        boolean containsTarget = false;
+        for (JsonNode item : idList.get("items")) {
+            long id = item.get("id").asLong();
+            String name = item.has("original_name") ? item.get("original_name").asText("") : "";
+            assertTrue(id == taskId || name.contains(String.valueOf(taskId)),
+                    "每条必须 id 精确或文件名含数字串：" + id + " " + name);
+            if (id == taskId) containsTarget = true;
+        }
+        assertTrue(containsTarget, "q=任务id 的结果必含目标任务：" + abbreviate(byId.body()));
 
         // 随机 UUID → 0 条（模糊匹配走 ILIKE，不炸）
         HttpResponse<String> none = send("GET", "/api/v1/tasks?q=" + UUID.randomUUID(), null, null);

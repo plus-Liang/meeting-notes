@@ -242,7 +242,8 @@
     var favBtn = document.getElementById('favToggleBtn');
     addBtn.disabled = true;
     favBtn.disabled = true;
-    postJson('api/v1/tasks/' + id + '/meta', patch).then(function (resp) {
+    /* K-80：端点是 PATCH，postJson 写死 method:'POST' 会 405——必须 sendJson 指定方法 */
+    sendJson('api/v1/tasks/' + id + '/meta', 'PATCH', patch).then(function (resp) {
       addBtn.disabled = false;
       favBtn.disabled = false;
       if (resp.__httpStatus === 200) {

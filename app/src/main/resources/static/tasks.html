@@ -119,23 +119,34 @@
     /* T4.29：追加收藏按钮 + 标签下拉（选项 = 当前已加载行的 labels 并集；值由 state 保持防重建丢失） */
     var fav = '<button class="filter-btn' + (state.filterFavorite ? ' active' : '') +
       '" id="favoriteFilterBtn" type="button" aria-pressed="' + state.filterFavorite + '">★ 收藏</button>';
-    var opts = ['<option value="">全部标签</option>'];
-    var seen = {};
-    state.items.forEach(function (i) {
-      (i.labels || []).forEach(function (l) {
-        if (seen[l]) return;
-        seen[l] = true;
-        opts.push('<option value="' + escapeHtml(l) + '"' +
-          (state.filterLabel === l ? ' selected' : '') + '>' + escapeHtml(l) + '</option>');
-      });
-    });
-    var labelSel = '<select id="labelFilterSel" aria-label="按标签筛选">' + opts.join('') + '</select>';
+    var labelSel = '<select id="labelFilterSel" aria-label="按标签筛选"></select>'; /* 选项由 refreshLabelOptions() 填充 */
     filterBar.innerHTML = FILTERS.map(function (f) {
       var n = countFor(f.key);
       return '<button class="filter-btn' + (state.filter === f.key ? ' active' : '') +
         '" data-status="' + f.key + '">' + f.label +
         (n === null ? '' : '<span class="count-chip">' + n + '</span>') + '</button>';
     }).join('') + fav + labelSel;
+    refreshLabelOptions();
+  }
+
+  /* T4.29b（K-81）：标签下拉选项独立刷新——render() 数据加载后即调（不再等 renderFilterBar/30s）；
+     筛选中的标签不在当前页时保留占位 option，防「下拉显示全部标签但筛选仍生效」的卡死 */
+  function refreshLabelOptions() {
+    var sel = document.getElementById('labelFilterSel');
+    if (!sel) return;
+    var seen = {}, labels = [];
+    state.items.forEach(function (i) {
+      (i.labels || []).forEach(function (l) {
+        if (!seen[l]) { seen[l] = true; labels.push(l); }
+      });
+    });
+    if (state.filterLabel && labels.indexOf(state.filterLabel) < 0) {
+      labels.unshift(state.filterLabel);
+    }
+    sel.innerHTML = '<option value="">全部标签</option>' + labels.map(function (l) {
+      return '<option value="' + escapeHtml(l) + '"' +
+        (state.filterLabel === l ? ' selected' : '') + '>' + escapeHtml(l) + '</option>';
+    }).join('');
   }
 
   /* T4.24：各状态计数（服务端真计数；计数口径 = /tasks/counts 的 GROUP BY，无 200 上限） */
@@ -273,6 +284,7 @@
         render(true); /* 勾选影响操作条状态，强制重绘 */
       });
     });
+    refreshLabelOptions(); /* T4.29b：数据到位即刷新标签下拉（不等 30s 计数刷新） */
     scheduleRefresh();
   }
 
