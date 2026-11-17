@@ -2739,7 +2739,7 @@ F-15 控制在 ≤30 行并集中一处；新增静态资源不引第三方库�
 > - 残留清理（D-139）：临时任务/临时对象/容器 `/tmp` 逐条核对，回报写清"查了哪些、各是多少"；**本次 E2E 会消耗配额，控制在 1–2 个任务**。
 > **禁止**：改 `text`/`duration`/`cost_sec` 语义或删键；为拿时间戳二次调 ASR；给旧任务回填/伪造 segments；改播放器/前端（属 35b/35c）；改 ASR 模型或识别参数（除非返回 segments 必需）；多 commit。
 
-## T4.35b 播放器 API：短时签名音频流（Range/206）（约 2–3 小时；D-122；**依赖 T4.35a 已通过 `7cad12a`**）
+## T4.35b 播放器 API：短时签名音频流（Range/206）（约 2–3 小时；D-122；**依赖 T4.35a 已通过 `7cad12a`**）**✅ 已通过（2026-11-17，`f6d850f`，第 60 份报告，D-145；我独立 429/429 单元 + 447/447 全量 + 真机只读 24/24 + 浏览器 4/4，零新建任务；K-87）**
 
 > **先跑三行报给我**：`git -C D:\new\projects\meeting-notes log --oneline -1`、`git -C D:\new\projects\meeting-notes status --short`、`Get-Content D:\new\artifacts\T4.35a\workbuddy\head.txt`——确认你在 `7cad12a` 上开工。**只看这张卡 + `handoff.md` 第 0–2 节 + `AGENT.md` §2/§4**；证据落 `D:\new\artifacts\T4.35b\workbuddy\`；回报 ≤40 行。**配额只剩约 10 任务：本卡不要建新任务**（除全量 E2E 自身），签发/播放都是只读。
 >
@@ -2765,6 +2765,34 @@ F-15 控制在 ≤30 行并集中一处；新增静态资源不引第三方库�
 > - `-UnitOnly` 全绿 → commit（单 commit `feat(T4.35b)`）→ `docker compose build app && up -d app` → 全量（K-68）→ 可维护性 0/0；`head.txt` 记**提交后** HEAD。
 > - 残留清理（D-139）：本卡不建任务；核对容器 `/tmp`、MinIO 对象数不变、`.env` 未动。
 > **禁止**：把 `API_TOKEN` 放进 URL；豁免整个 `/api/v1/tasks/`；改详情 15 键；把 MinIO 桶/对象设为公开；改前端播放器（35c）；多 commit。
+
+## T4.35c 前端播放器：`<audio>` + 点句 seek + 当前句高亮（约 2–3 小时；D-122；**依赖 T4.35b 已通过 `f6d850f`**）
+
+> **先跑三行报给我**：`git -C D:\new\projects\meeting-notes log --oneline -1`、`git -C D:\new\projects\meeting-notes status --short`、`Get-Content D:\new\artifacts\T4.35b\workbuddy\head.txt`。
+> **会话说明**：这张卡请在 **T4.35b 同一个会话里继续做**（你刚写的 `audio-token`/`audio` 契约还在上下文里，省一次重读）；但这是**新卡 T4.35c**，不是继续改 T4.35b——先跑上面三行报给我再动手。**只看这张卡 + `handoff.md` 第 0–2 节 + `AGENT.md` §2/§4**；证据落 `D:\new\artifacts\T4.35c\workbuddy\`；回报 ≤40 行。
+> **配额红线：只剩 2 个任务，本卡禁止新建任务**——UI 验证用已有任务 **552（18 段）/535（35 段）** 与旧任务 **237（无 segments）**。
+>
+> **要证明的事**：详情页真的"能听能跟"——`<audio>` 播放 + 句子级列表；**点一句 → 音频跳到该句**（seek）；播放时**当前句高亮跟着走**；`segments` 为 `null` **或** `[]` → 不渲染播放器（原文展示与今天完全一致）；390 手机可操作；不新建任务、不动后端契约。
+> 本卡**不做**：后端改动（35b 契约已定，最多文档补一句）、说话人（T4.36）、分享页播放器（`share.html` 不动）、CDN/框架。
+>
+> **改动（只动 `static/` + 文档一句，单 commit）**：
+> 1. `static/task.html` 详情页：`segments` 为**非空数组**时新增「播放」卡：
+>    - `<audio controls preload="metadata">`，`src` 从 `POST api/v1/tasks/{id}/audio-token` 拿 `url`（用 `apiFetch` 带 Bearer 签发，**不要用 API_TOKEN 拼 src**）；同一任务只签发一次，加载失败/过期则重签一次；
+>    - 句子列表（每行 `mm:ss` + 句子文本，可滚动）；**点句子 → `audio.currentTime = seg.start`**（在用户手势内可同时 `play()`）；`timeupdate` 时按 `currentTime` 找当前句（`start <= t < end`，落在间隙用"最近的前一句"），**只给当前句加高亮 class**，并 `scrollIntoView({block:'nearest'})`（不要抢用户滚动）；
+>    - **`segments` 为 `null` 或 `[]` → 不创建 `<audio>`、不显示播放卡**，原文区照旧（双降级，卡面要求）；
+>    - audio-token 失败 → 播放卡内可读错误，**不阻塞原文/摘要/其它信息渲染、不白屏**。
+> 2. `static/style.css`：高亮/句子列表/390 布局（复用现有变量，不引 CDN）。
+> 3. 文档：权威版 `接入指南.md §3.10` 补一句前端用法（签发 URL → `<audio src>`；点句 seek 用 `currentTime`；`segments` 为 `null`/`[]` 时不渲染播放器），改完跑 `tools\sync-docs-to-code.ps1`（**只改权威版**）。
+>
+> **判据（缺一不可）**：
+> - **UI 用已有任务（禁新建任务）**：打开 task 552/535 详情 → 播放卡出现、句子列表条数 == `segments.length`（18/35）；打开 task 237（无 segments）→ **播放卡不出现**、`document.querySelectorAll('audio').length === 0`、原文正常。
+> - **K-80 点→回读（Playwright）**：点第 3 句 → 读 `audio.currentTime` ≈ 该句 `start`（±0.5s）；把 `currentTime` 推到第 5 句区间后等 `timeupdate`，高亮句的 `data-start` 应切到第 5 句；点播放/暂停 → `audio.paused` 正确切换；至少验证一次"高亮随播放推进变化"。
+> - 390×844 与 1280：无横向溢出、句子行可点、audio 控件不超出；无 console error / pageerror。
+> - **验证前后 `SELECT count(*) FROM task` 不变**（本卡零新建任务）、不触发 ASR/LLM。
+> - `-UnitOnly` 全绿 → commit（单 commit `feat(T4.35c)`，只 static + 文档）→ **`docker compose build app && up -d app`**（静态文件在镜像里，必须重建）→ 全量（K-68；若撞 429 见配额说明）→ 可维护性 0/0；`head.txt` 记提交后 HEAD。
+> - **配额说明**：当前 98/100、**00:00 日切重置**；若全量 E2E 撞 429 `QUOTA_EXCEEDED`，临时 override 提高 `QUOTA_TASKS_PER_DAY`（如 500）跑完整全量，**验完删 override**；不许改 `.env`、不许删任务证据行。
+> - 残留清理（D-139）：零新建任务；核对 `/tmp`、MinIO 对象数不变、无 override 残留、`.env` 未动。
+> **禁止**：改后端契约/详情 15 键；新建任务做 UI 验证；引 CDN/前端框架；改 `share.html`；用裸 API_TOKEN 拼 audio src（必须走签发）；多 commit。
 
 ## 每张卡做完都要给你的回报
 

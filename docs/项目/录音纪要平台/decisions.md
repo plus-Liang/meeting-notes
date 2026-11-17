@@ -1806,6 +1806,18 @@
 - **依据**：`review/2026-11-17-T4.35a验收.md`（第 59 份）；`artifacts/T4.35a/lead-verify/`（unitonly 417、full 435、maintainability 0/0、asr-probe.py + asr-raw.log 四键 18 段、api-probe.py + api-probe.log（552/553/237/536）、legacy237.json、task535.json）；DB 直查（V7/列定义/三态 243/4/2）；数据 255 任务全 DONE、MinIO 261=255+历史 6 孤儿无新增。
 - **已排除项**：把静音任务 `segments=[]` 当缺陷（卡面语义"有响应无内容"，与旧任务 null 区分）；把旧任务 null 当漏数据（迁移不回填，卡面要求）；把 ASR 返回 18 段当"少了"（我的 61s 素材 vs 写码方 90s 素材，段数天然不同，断言只校验有序/边界/非空）；把写码方 `af3750c`→`7cad12a` 的 amend 当违反单 commit（首跑红是测试断言窗口错误，产品代码零改动，amend 是同 commit 内修正，符合 K-77 精神）。
 
+### D-145 T4.35b 通过：短时签名音频流（HMAC 绑 taskId+exp、Range/206、过滤器精确豁免）；"MinIO 数据目录不是原始字节"入坑 K-87
+
+- **日期**：2026-11-17｜**决策人**：DSH
+- **结论**：
+  1. **T4.35b 通过**（`f6d850f`，10 文件 +581/−2，单 commit）：`POST /tasks/{id}/audio-token`（Bearer）签发**短时签名 URL**——签名 = HMAC-SHA256(key=`API_TOKEN`, `taskId+"\n"+exp`)，**URL 不含 API_TOKEN**（`AUDIO_TOKEN_TTL_SEC` 默认 600，三处同步）；`GET /tasks/{id}/audio?sig=&exp=` **免 Bearer 但必须验签+过期+绑定 taskId**，失败统一 404 不泄露、**绝不回退成无签名下载**；MinIO `GetObject` 流式转发（不整文件进内存），**Range 三形态 → 206 + Content-Range + Accept-Ranges: bytes**，无 Range → 200，越界/非法/多段 → **416 `RANGE_NOT_SATISFIABLE`**；`ApiTokenFilter` **只豁免 GET 且精确 `^/api/v1/tasks/\d+/audio$`**（K-46 认证面收窄，未放开 `/tasks` 前缀）；详情 **15 键不变**。**16 张 ✅ → 17 张 ✅**。
+  2. 我独立验证（**纯只读、零新建任务**）：`-UnitOnly` **429/429 exit 0**（+12）、可维护性 **0/0**、全量 **447/447 exit 0**；真机探针 **24/24**（签发 URL 不含 token；无 Bearer 全量 200 + `Content-Length==size_bytes` + `Accept-Ranges` + `RIFF`；`0-1023`/`100-`/`-100`/超尾 四形态 206 且 header 正确；6 条非法/越界全 416；篡改 sig/改 exp/缺 exp/过期假签名 全 404；无 Bearer 签发或详情/列表 401；不存在 404；PASTE 536 签发 400；**前 1KB sha256 与本地源文件逐字节一致**）；抽验老任务 237（`audio/mp4`）与 mp3 任务 270（`audio/mpeg`）均 200/206；浏览器路径 **4/4**（同源签发 200 无 token、页面内 Range→206、`new Audio` **真解码 duration=60.01≈61**、无 console error）。
+  3. **新坑 K-87**：**MinIO 数据目录里的 `part.1` 是 bitrot 编码，不是原始对象字节**——直接对它做 sha256 与 HTTP 响应比对会假红；字节比对必须走 **S3 API（`mc cat` / SDK）**，或与"上传源字节"直接比。
+  4. 残余（P3，接受）：**音频 GET 未绑 user_id**（当前单用户 D-040；**T4.37 多用户必须把 userId 绑进签名**，否则拿到他人签名 URL 即可播放）；PASTE 保护依赖签发闸（API_TOKEN 泄露=全权限，T4.37 一并收）；`HEAD /audio` 未实现、多段 Range 显式 416；MinIO 416 兜底分支未注入故障；签名无单次使用/吊销（无状态签名）。
+  5. **配额**：今日已用 **112 分钟 / 98 任务**（上限 100）→ **00:00 日切自动重置**；若零点前再跑全量会撞 429，必要时临时 override 提高 `QUOTA_TASKS_PER_DAY`（**别改 `.env`**）或等日切。T4.35c 的 UI 验证**必须用已有带 segments 的任务（552/535）与旧任务 237**，不新建任务。
+- **依据**：`review/2026-11-17-T4.35b验收.md`（第 60 份）；`artifacts/T4.35b/lead-verify/`（unitonly 429、full 447、maintainability 0/0、probe.py + probe.log 24/24、probe-result.json、e2e-browser.js + log 4/4、e2e-browser-result.json）；数据 263 任务全 DONE、MinIO 269=263+历史 6 孤儿无新增；配额 112/98。
+- **已排除项**：把老任务 237 的 `audio/mp4` 当 Content-Type 错误（其 source key 是 m4a/mp4，映射正确）；把 mp3 任务 270 的 200/206 当偶然（扩了第二种媒体类型）；把 `HEAD` 未实现当缺陷（卡面只要求 `<audio>` Range GET，已记 P3）；把"PASTE 签发 400"当 500（实测 400 `INVALID_PARAM`，符合卡面）。
+
 ---
 
 ## 面试速查（由本文件派生，勿单独维护）
