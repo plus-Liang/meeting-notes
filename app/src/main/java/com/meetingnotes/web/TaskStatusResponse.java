@@ -19,7 +19,9 @@ import java.util.List;
  * 不影响 summary/keywords/todos）；{@code transcript_punctuated} 为 AI 加标点转写全文（T4.18 第 14 键）：
  * 仅 CLOUD 档可用且未超长/未失败时非 null，否则 null（前端回退原始 transcript，任务不受影响）；
  * {@code template} 为摘要模板（T3.9）：新任务恒非空（meeting/course/interview/podcast/shortvideo 之一），
- * T3.9 之前的旧任务为 null。
+ * T3.9 之前的旧任务为 null；{@code segments} 为句子级时间戳（T4.35a 第 15 键，元素 start/end 秒 + text）：
+ * 新音频任务非空数组（空音频是 []，有响应无内容），旧任务 / PASTE 无音频任务为 null（不是 []），
+ * 前端据此隐藏播放器（T4.35c）。
  */
 public record TaskStatusResponse(
         long taskId,
@@ -35,5 +37,10 @@ public record TaskStatusResponse(
         List<TodoItemView> todos,
         List<KeypointView> keypoints,
         String transcriptPunctuated,
-        String template) {
+        String template,
+        List<SegmentView> segments) {
+
+    /** 句子级时间戳元素（T4.35a）：start/end 秒（double），text 去首尾空白后的句子文本。 */
+    public record SegmentView(double start, double end, String text) {
+    }
 }

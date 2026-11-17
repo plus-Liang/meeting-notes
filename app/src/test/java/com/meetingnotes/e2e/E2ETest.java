@@ -48,7 +48,7 @@ class E2ETest {
     private static final List<String> DETAIL_KEYS = List.of(
             "task_id", "status", "duration_sec", "size_bytes", "created_at", "transcript",
             "error_code", "summary", "keywords", "ai_tier", "todos", "keypoints",
-            "transcript_punctuated", "template");
+            "transcript_punctuated", "template", "segments");
 
     private static String textA;
     private static long taskId;
@@ -811,5 +811,63 @@ class E2ETest {
         assertTrue(detail.has("transcript") && !detail.get("transcript").isNull(),
                 "详情含 transcript 键（内容长短不做断言，1.5s 样本可能识别为空，D-048 仍 DONE）");
         assertEquals("meeting", detail.get("template").asText(), "显式 template=meeting 生效");
+    }
+
+    /* ---- T4.35a：真实语音上传 → DONE → 详情 segments 句子级时间戳（非空、有序、末段 end ≤ duration+2） ---- */
+
+    @Test
+    @Order(15)
+    void n_realVoiceUploadCarriesSentenceSegments() throws Exception {
+        byte[] wav;
+        try (var in = getClass().getResourceAsStream("/media/t435a-sample.wav")) {
+            assertTrue(in != null, "fixture /media/t435a-sample.wav 必须存在于 test resources");
+            wav = in.readAllBytes();
+        }
+        // 内容唯一（尾部追加标记）：不撞 (user_id, content_hash) 幂等，否则会 reused 回旧任务
+        // （旧任务建在 T4.35a 之前，segments 恒 null，E2E 会假红——K-64）
+        byte[] unique = new byte[wav.length + 16];
+        System.arraycopy(wav, 0, unique, 0, wav.length);
+        System.arraycopy(UUID.randomUUID().toString().substring(0, 8).getBytes(StandardCharsets.US_ASCII),
+                0, unique, wav.length, 8);
+        HttpResponse<String> resp = sendUpload("t435a-" + UUID.randomUUID() + ".wav", unique, "meeting");
+        assertEquals(201, resp.statusCode(), "真实语音上传：" + abbreviate(resp.body()));
+        assertFalse(M.readTree(resp.body()).get("reused").asBoolean(), "唯一内容不命中幂等");
+        long segTaskId = M.readTree(resp.body()).get("task_id").asLong();
+        JsonNode detail = waitTerminal(segTaskId);
+
+        assertTrue(detail.has("segments") && detail.get("segments").isArray()
+                        && !detail.get("segments").isEmpty(),
+                "DONE 详情 segments 必须是非空数组：" + abbreviate(String.valueOf(detail.get("segments"))));
+        long dur = detail.get("duration_sec").asLong();
+        double lastEnd = 0;
+        for (JsonNode seg : detail.get("segments")) {
+            double start = seg.get("start").asDouble();
+            double end = seg.get("end").asDouble();
+            assertTrue(start >= 0 && start < end, "每项 0 ≤ start < end：" + seg);
+            assertFalse(seg.get("text").asText().isBlank(), "每项 text 非空：" + seg);
+            lastEnd = Math.max(lastEnd, end);
+        }
+        assertTrue(lastEnd <= dur + 2, "末段 end ≤ duration_sec+2（宽松断言，别写死秒数）：lastEnd="
+                + lastEnd + " dur=" + dur);
+    }
+
+    /* ---- T4.35a：改造前的历史任务 segments==null（迁移不回填），且 500 不出现 ---- */
+
+    @Test
+    @Order(16)
+    void o_legacyDoneTaskSegmentsIsNullNotArray() throws Exception {
+        // K-81 教训：默认列表只回最近 50 条 DONE（全是 500+ 的新任务），拿不到历史任务——
+        // 必须用 keyset 游标 before_id=300 去老区间取"改造前"（T4.35a 提交前创建）的 DONE 任务
+        HttpResponse<String> listResp = send("GET", "/api/v1/tasks?status=DONE&limit=20&before_id=300", null, null);
+        assertEquals(200, listResp.statusCode());
+        JsonNode items = M.readTree(listResp.body()).get("items");
+        assertTrue(items.size() > 0 && items.get(0).get("id").asLong() < 300,
+                "id<300 区间应存在历史 DONE 任务（before_id keyset）");
+        long legacyId = items.get(0).get("id").asLong();
+        HttpResponse<String> resp = send("GET", "/api/v1/tasks/" + legacyId, null, null);
+        assertEquals(200, resp.statusCode(), "旧任务详情可读：");
+        JsonNode detail = M.readTree(resp.body());
+        assertTrue(detail.has("segments"), "详情含 segments 键（只增）");
+        assertTrue(detail.get("segments").isNull(), "改造前的历史任务 segments==null（不是 []，不回填）");
     }
 }

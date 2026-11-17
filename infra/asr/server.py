@@ -3,8 +3,11 @@
 Contract the Java side depends on — do not change without updating the spec:
   GET  /health                     -> {"status":"ok","model":"small","ready":true}
   GET  /v1/models                  -> {"object":"list","data":[{"id":"small","object":"model"}]}
-  POST /v1/audio/transcriptions    -> {"text":"...","duration":90.0,"cost_sec":9.5}
+  POST /v1/audio/transcriptions    -> {"text":"...","duration":90.0,"cost_sec":9.5,
+                                          "segments":[{"start":0.12,"end":3.45,"text":"..."}, ...]}
       multipart: file=<audio/video>, model=<optional>
+      segments（T4.35a）：句子级时间戳，start/end 秒（3 位小数）、text 去首尾空白；
+      空音频 -> segments: []；旧三键 text/duration/cost_sec 逐字不变。
 
 Pinned versions matter (see Dockerfile / README):
   - av==13.1.0         : av 19 breaks faster-whisper 1.2.1 (av.open(metadata_errors=...))
@@ -58,19 +61,33 @@ async def transcriptions(file: UploadFile = File(...), model_name: str = Form(de
 
     started = time.time()
     try:
-        segments, info = model.transcribe(
+        raw_segments, info = model.transcribe(
             tmp_path,
             language=LANGUAGE,
             vad_filter=VAD_FILTER,
             beam_size=BEAM_SIZE,
             initial_prompt=INITIAL_PROMPT or None,
         )
-        text = "".join(segment.text for segment in segments)
+        # 生成器只能消费一次：边遍历边收集句子级时间戳（T4.35a），
+        # text 的拼接口径与旧版逐字一致（segment.text 原样连接，不去空白）。
+        text_parts = []
+        segments_out = []
+        for segment in raw_segments:
+            text_parts.append(segment.text)
+            t = (segment.text or "").strip()
+            if t:
+                segments_out.append({
+                    "start": round(float(segment.start), 3),
+                    "end": round(float(segment.end), 3),
+                    "text": t,
+                })
+        text = "".join(text_parts)
     finally:
         os.unlink(tmp_path)
 
     cost = time.time() - started
     duration = float(info.duration or 0.0)
     rtf = cost / duration if duration > 0 else 0.0
-    print(f"[asr] audio={duration:.1f}s cost={cost:.1f}s RTF={rtf:.3f}", flush=True)
-    return JSONResponse({"text": text, "duration": round(duration, 1), "cost_sec": round(cost, 2)})
+    print(f"[asr] audio={duration:.1f}s cost={cost:.1f}s RTF={rtf:.3f} segments={len(segments_out)}", flush=True)
+    return JSONResponse({"text": text, "duration": round(duration, 1), "cost_sec": round(cost, 2),
+                         "segments": segments_out})

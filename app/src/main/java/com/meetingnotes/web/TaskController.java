@@ -151,7 +151,8 @@ public class TaskController {
                        CASE WHEN t.status = 'DONE' THEN r.transcript END AS transcript,
                        r.summary, r.keywords, r.ai_tier, r.todos, r.keypoints,
                        CASE WHEN t.status = 'DONE' THEN r.transcript_punctuated END AS transcript_punctuated,
-                       r.template
+                       r.template,
+                       CASE WHEN t.status = 'DONE' THEN r.segments::text END AS segments
                 FROM task t
                 LEFT JOIN task_result r ON r.task_id = t.id
                 WHERE t.id = ? AND t.user_id = ?
@@ -202,12 +203,31 @@ public class TaskController {
                             keypoints = null;
                         }
                     }
+                    // segments 列是 JSONB（T4.35a 第 15 键）：句子级时间戳数组；旧任务/PASTE/坏数据 → null（不是 []），不炸接口
+                    List<TaskStatusResponse.SegmentView> segments = null;
+                    String segmentsRaw = rs.getString("segments");
+                    if (segmentsRaw != null && !segmentsRaw.isBlank()) {
+                        try {
+                            JsonNode segArray = mapper.readTree(segmentsRaw);
+                            if (segArray.isArray()) {
+                                segments = new ArrayList<>();
+                                for (JsonNode seg : segArray) {
+                                    segments.add(new TaskStatusResponse.SegmentView(
+                                            seg.path("start").asDouble(),
+                                            seg.path("end").asDouble(),
+                                            seg.path("text").asText("")));
+                                }
+                            }
+                        } catch (Exception e) {
+                            segments = null;
+                        }
+                    }
                     return new TaskStatusResponse(rs.getLong("id"), rs.getString("status"),
                             duration, size,
                             rs.getObject("created_at", OffsetDateTime.class), rs.getString("transcript"),
                             rs.getString("error_code"), rs.getString("summary"), keywords,
                             rs.getString("ai_tier"), todos, keypoints,
-                            rs.getString("transcript_punctuated"), rs.getString("template"));
+                            rs.getString("transcript_punctuated"), rs.getString("template"), segments);
                 },
                 id, DEFAULT_USER_ID);
         if (resp == null) {

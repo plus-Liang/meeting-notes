@@ -2,10 +2,8 @@ package com.meetingnotes.worker;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.ai.audio.transcription.TranscriptionModel;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.SmartLifecycle;
-import org.springframework.core.io.FileSystemResource;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
@@ -24,8 +22,9 @@ import java.util.concurrent.TimeUnit;
  * 转写 worker（T1.5 / plan §7 步骤 6–8）。队列消费用 Redis BLPOP（阻塞取，不轮询空转）；单线程顺序处理。
  * 状态机：PENDING/RETRYING → RUNNING → DONE；失败：重试未耗尽 → RETRYING 重新入队（队尾，FIFO 不插队），
  * 耗尽 → DEAD + dead_letter；兜底 catch 保证任务不永久卡 RUNNING（崩溃恢复属 T2.3）。
- * <p>管线：MinIO 拉文件 → ffmpeg 抽 16k 单声道 wav（D-010）→ {@link TranscriptionModel} 转写
- * （容器内 http://asr:8000，D-034）→ 写 transcript → 结构化（T3.3：摘要+关键词+待办+要点一次调用、三档级联降级）
+ * <p>管线：MinIO 拉文件 → ffmpeg 抽 16k 单声道 wav（D-010）→ {@link com.meetingnotes.asr.AsrClient}
+ * 转写（T4.35a：一次调用同时拿 text + segments 句子级时间戳；容器内 http://asr:8000，D-034）→
+ * 写 transcript + segments → 结构化（T3.3：摘要+关键词+待办+要点一次调用、三档级联降级）
  * → AI 加标点（T4.18，结构化成功后追加一次独立调用，失败留 null 不影响 DONE）→ 最后置 DONE（D-069）。
  */
 @Component
@@ -36,7 +35,7 @@ public class TranscriptionWorker implements SmartLifecycle {
     private final StringRedisTemplate redis;
     private final JdbcTemplate jdbc;
     private final S3Client s3;
-    private final TranscriptionModel transcriptionModel;
+    private final com.meetingnotes.asr.AsrClient asrClient;
     private final com.meetingnotes.ai.StructuringService structuringService;
     private final com.meetingnotes.ai.TranscriptPunctuator punctuator;
     private final com.meetingnotes.webhook.WebhookDeliveryService webhookService;
@@ -53,7 +52,7 @@ public class TranscriptionWorker implements SmartLifecycle {
     public TranscriptionWorker(StringRedisTemplate redis,
                                JdbcTemplate jdbc,
                                S3Client s3,
-                               TranscriptionModel transcriptionModel,
+                               com.meetingnotes.asr.AsrClient asrClient,
                                com.meetingnotes.ai.StructuringService structuringService,
                                com.meetingnotes.ai.TranscriptPunctuator punctuator,
                                com.meetingnotes.webhook.WebhookDeliveryService webhookService,
@@ -66,7 +65,7 @@ public class TranscriptionWorker implements SmartLifecycle {
         this.redis = redis;
         this.jdbc = jdbc;
         this.s3 = s3;
-        this.transcriptionModel = transcriptionModel;
+        this.asrClient = asrClient;
         this.structuringService = structuringService;
         this.punctuator = punctuator;
         this.webhookService = webhookService;
@@ -158,7 +157,7 @@ public class TranscriptionWorker implements SmartLifecycle {
                 throw new ProcessingException("STORAGE_ERROR", "读取文本对象失败：" + e.getMessage(), e);
             }
             log.info("PASTE 文本已读取（{} 字），跳过 ASR", text == null ? 0 : text.length());
-            finalizeResult(taskId, text);
+            finalizeResult(taskId, text, null); // PASTE 无音频，segments 恒 null（不是 []）
             return;
         }
 
@@ -181,17 +180,22 @@ public class TranscriptionWorker implements SmartLifecycle {
             monoWavExtractor.extract(input, wav);
             log.info("ffmpeg 抽音轨完成（16k 单声道 wav）");
 
-            // 3) ASR 转写（复用 TranscriptionModel，容器内 http://asr:8000）
+            // 3) ASR 转写（T4.35a：AsrClient 一次调用同时拿 text + segments，绝不二次调 ASR；
+            //    失败语义不变：RuntimeException → ProcessingException("ASR_ERROR") 走既有重试/死信）
             String text;
+            java.util.List<com.meetingnotes.asr.AsrResponseParser.Segment> segments;
             try {
-                text = transcriptionModel.transcribe(new FileSystemResource(wav));
+                com.meetingnotes.asr.AsrClient.Transcription result = asrClient.transcribe(wav);
+                text = result.text();
+                segments = result.segments();
             } catch (RuntimeException e) {
                 throw new ProcessingException("ASR_ERROR", "ASR 转写调用失败：" + e.getMessage(), e);
             }
-            log.info("ASR 转写完成（{} 字）", text == null ? 0 : text.length());
+            log.info("ASR 转写完成（{} 字，{} 段）", text == null ? 0 : text.length(),
+                    segments == null ? 0 : segments.size());
 
-            // 4) 收口（finalizeResult）：写 transcript → 摘要/待办（AI 失败只 WARN 留空，T3.3 接管）→ 最后置 DONE；空文本照常（D-048）
-            finalizeResult(taskId, text);
+            // 4) 收口（finalizeResult）：写 transcript + segments → 摘要/待办（AI 失败只 WARN 留空，T3.3 接管）→ 最后置 DONE；空文本照常（D-048）
+            finalizeResult(taskId, text, segments);
         } finally {
             if (dir != null) {
                 deleteRecursively(dir);
@@ -202,27 +206,33 @@ public class TranscriptionWorker implements SmartLifecycle {
         }
     }
 
-    /** 结果收口（F-1/T3.2，D-069）：先写 transcript → 结构化（一次调用）→ 标点（T4.18，结构化成功才做）→
-     * **最后**置 DONE（AI 失败也 DONE）；外部读到 DONE 时结果必已落库，不存在 DONE+null 窗口。 */
-    void finalizeResult(long taskId, String text) {
-        saveTranscript(taskId, text);
+    /** 结果收口（F-1/T3.2，D-069）：先写 transcript + segments → 结构化（一次调用）→ 标点（T4.18，结构化成功才做）→
+     * **最后**置 DONE（AI 失败也 DONE）；外部读到 DONE 时结果必已落库，不存在 DONE+null 窗口。
+     * T4.35a：segments 与 transcript 同一语句写入（无音频/PASTE 传 null——旧任务与无音频任务都是 null，不是 []）。 */
+    void finalizeResult(long taskId, String text,
+                        java.util.List<com.meetingnotes.asr.AsrResponseParser.Segment> segments) {
+        saveTranscript(taskId, text, segments);
         boolean structured = runAiStep("结构化", () -> structuringService.structure(taskId, text));
         if (structured) {
             runAiStep("标点", () -> punctuator.punctuateAndPersist(taskId, text));
         }
         jdbc.update("UPDATE task SET status = 'DONE', updated_at = now() WHERE id = ?", taskId);
-        log.info("任务已置 DONE（transcript/摘要/待办均已收口）");
+        log.info("任务已置 DONE（transcript/segments/摘要/待办均已收口）");
         webhookService.onTerminal(taskId, "DONE"); // T4.6：终态异步投递 Webhook（内部不抛、不阻塞）
     }
 
-    /** D-048：null/空白归一化为空串落 task_result（不算失败不重试，DONE 由 finalizeResult 统一置）。 */
-    void saveTranscript(long taskId, String text) {
+    /** D-048：null/空白归一化为空串落 task_result（不算失败不重试，DONE 由 finalizeResult 统一置）。
+     * T4.35a：segments（jsonb）与 transcript 同一 upsert 写入；null 不建索引、旧任务恒 null。 */
+    void saveTranscript(long taskId, String text,
+                        java.util.List<com.meetingnotes.asr.AsrResponseParser.Segment> segments) {
         String normalized = text == null ? "" : text;
         jdbc.update("""
-                INSERT INTO task_result (task_id, transcript) VALUES (?, ?)
-                ON CONFLICT (task_id) DO UPDATE SET transcript = EXCLUDED.transcript, created_at = now()
-                """, taskId, normalized);
-        log.info("转写结果已落库（transcript {} 字）", normalized.length());
+                INSERT INTO task_result (task_id, transcript, segments) VALUES (?, ?, ?::jsonb)
+                ON CONFLICT (task_id) DO UPDATE SET transcript = EXCLUDED.transcript,
+                    segments = EXCLUDED.segments, created_at = now()
+                """, taskId, normalized, com.meetingnotes.asr.AsrResponseParser.toJson(segments));
+        log.info("转写结果已落库（transcript {} 字，segments {}）", normalized.length(),
+                segments == null ? "null" : segments.size() + " 段");
     }
 
     /** AI 单步兜底：异常只 WARN 不上抛（D-068，失败不阻塞任务完成），返回步骤是否成功。 */
@@ -260,16 +270,6 @@ public class TranscriptionWorker implements SmartLifecycle {
             }
         } catch (RuntimeException e) {
             log.error("任务 {} 写回失败状态时出错（可能卡在 RUNNING，待 T2.3 恢复）", taskId, e);
-        }
-    }
-
-    /** 处理失败携带稳定错误码（task.error_code VARCHAR(64) 只放得下码，原因进 dead_letter）。 */
-    static final class ProcessingException extends RuntimeException {
-        final String code;
-
-        ProcessingException(String code, String message, Throwable cause) {
-            super(message, cause);
-            this.code = code;
         }
     }
 

@@ -10,7 +10,24 @@
 |---|---|---|
 | GET | `/health` | `{"status":"ok","model":"small","ready":true}` |
 | GET | `/v1/models` | `{"object":"list","data":[{"id":"small","object":"model"}]}` |
-| POST | `/v1/audio/transcriptions` | multipart `file`（音视频）；返回 `{"text":"…","duration":90.0,"cost_sec":9.5}` |
+| POST | `/v1/audio/transcriptions` | multipart `file`（音视频）；返回 `{"text":"…","duration":90.0,"cost_sec":9.5,"segments":[{"start":0.12,"end":3.45,"text":"…"},…]}` |
+
+**segments（T4.35a 起，句子级时间戳）**：直接取 faster-whisper 的 `segment.start/end/text`——
+`start`/`end` 秒（3 位小数）、`text` 去首尾空白（空白句丢弃）；`text`/`duration`/`cost_sec` 三键
+逐字不变（旧客户端兼容）；空音频 → `segments: []`（有响应无内容，与 Java 侧旧任务的 `null` 是两回事）。
+
+```json
+POST /v1/audio/transcriptions
+→ {
+  "text": "大家好，我们开始。今天讲第三章。",
+  "duration": 90.0,
+  "cost_sec": 9.5,
+  "segments": [
+    { "start": 0.12, "end": 3.45, "text": "大家好，我们开始。" },
+    { "start": 3.5,  "end": 9.4,  "text": "今天讲第三章。" }
+  ]
+}
+```
 
 ## 环境变量
 
