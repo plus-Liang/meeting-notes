@@ -1756,6 +1756,20 @@
 
 ---
 
+### D-141 T4.30b 通过、T4.30 转通过：webm 时长兜底落地（方案 A）；"程序名漏进参数列表"入坑 K-83
+
+- **日期**：2026-11-17｜**决策人**：DSH
+- **结论**：
+  1. **T4.30b 通过**（`efae735`，6 文件 +337/−11，单 commit）：`AudioDurationProbe` 主路径不可解析（`N/A`/空/本地化小数/多行/非有限）不抛 → 兜底末音频包 `pts_time(+duration_time)` → 两路都空才 **400 `INVALID_MEDIA`**；解析抽 3 个纯函数 + **20 例单测**；E2E 新增**场景 M**（webm fixture 24KB → 201→DONE→`duration_sec` 1–3）；`接入指南` 补 webm/opus 说明。**T4.30 浏览器录音随之转通过**（13 张 ✅）。
+  2. 我独立验证：全量 **368/368 exit 0**、可维护性 0/0、静态 sha256 一致；**API 13/13**（fixture 201→DONE `duration_sec=2`；真录 8s webm → DONE transcript 非空 `duration_sec=8`；**同字节二次上传回同 task_id 且 reused=true**；wav 回归 `duration_sec=1`；**坏 EBML → 400 而非 500**）；**端到端 UI 8/8**（fake 麦克风录 3.5s → 提交 → 自动跳详情 → DONE task 476 `duration_sec=4`，无 console 错误）；fixture 实查 `format=duration=N/A` + 末包 1.44+0.06=1.50 + 解码 exit 0。
+  3. **卡面允许的偏离（接受）**：卡上写 fixture 用 `ffmpeg -c copy` 裁，写码方实测 remux 会**回填 duration**、fixture 就走不到兜底路径，改用**字节截断**（保留"头部无 duration"）。我实查该 fixture 确为 `N/A` 且可解码、能触发兜底 → 符合卡的意图，记录并让其写进代码注释。
+  4. **新坑 K-83**：**重构外部命令调用时，程序名也是参数列表的第一个元素** —— 把 `ProcessBuilder(List.of(ffprobeBin, "-v", ...))` 重构成兜底两段命令时漏掉了 `ffprobeBin`，变成 `Cannot run program "-v"`，**所有格式上传全 500**（不止 webm）；由全量 E2E 的 wav 场景抓出。配套改进：把底层 `IOException` 带进 `PROBE_UNAVAILABLE` 文案（运维可判定，不是吞栈）。
+  5. 残余（接受）：60min/200MB 自动停与切后台未实测；`runFfprobe` 先 `readAllBytes` 再 `waitFor(30s)` 的**既有**阻塞风险（非本次引入，记为后续改进项）；兜底仅在主路径 exit 0 时触发。
+- **依据**：`review/2026-11-17-T4.30b验收.md`（第 56 份）；`artifacts/T4.30b/lead-verify/`（lead-verify-upload.py + api.log 13/13、lead-verify-ui-e2e.js + ui-e2e.log 8/8、full-test.log 368/368、容器 ffprobe 实测输出、served-* sha256、ui-e2e-detail.png）；DB/MinIO/配额复核（215 任务 / 221 对象 = 历史 6 孤儿、无新增；34 分钟 / 50 任务）。
+- **已排除项**：把"真录 webm 应 reused=true"当产品问题（是我探针假设错：460/461 是另一次录制字节）；把"fixture 偏离 -c copy"当违规（实测 remux 会破坏关键特性，符合卡意图）；只测探测函数就当闭环（必须真 webm 201→DONE→transcript，已做）；把兜底失败也当 500（必须 400，已验坏 EBML）。
+
+---
+
 ## 面试速查（由本文件派生，勿单独维护）
 
 | 面试问题 | 取哪条 |
