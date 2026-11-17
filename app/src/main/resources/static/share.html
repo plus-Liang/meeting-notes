@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="只读分享：查看一条转写纪要的摘要、关键词、待办与转写全文。">
+<meta name="robots" content="noindex">
+<title>只读分享 · 录音纪要平台</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Ctext y=%2713%27 font-size=%2713%27%3E%F0%9F%8E%99%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<nav>
+  <span class="brand">录音纪要平台 · 只读分享</span>
+</nav>
+<main>
+  <div class="card" id="shareCard">
+    <div class="skeleton skeleton-line" style="width:50%"></div>
+    <div class="skeleton skeleton-block" style="width:100%;margin-top:12px"></div>
+  </div>
+  <p class="hint" style="margin-top:8px">本页为只读分享视图：不能编辑、不能删除，也不展示其它任务。</p>
+</main>
+<footer class="site-footer">
+  <span class="version-tag">v0.1.0</span>
+  <span>以 MIT 许可证开源发布</span>
+</footer>
+<script src="auth.js"></script>
+<script src="app.js"></script>
+<script>
+(function () {
+  var card = document.getElementById('shareCard');
+  var params = new URLSearchParams(window.location.search);
+  var token = (params.get('token') || '').trim();
+
+  function escapeHtml(s) {
+    return String(s === undefined || s === null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  function errorHtml(title) {
+    return '<h1>' + title + '</h1><p class="hint">链接无效、已被撤销或已过期。请联系分享者重新生成；' +
+      '本页不会区分具体原因。</p>';
+  }
+
+  /* 只读待办：纯文本行（复选框 disabled 且不可交互，无任何写入口） */
+  function todosHtml(todos) {
+    if (!todos || !todos.length) return '';
+    return '<h2>待办</h2><ul class="keypoints">' + todos.map(function (t) {
+      return '<li>' + escapeHtml(t.action || '') +
+        (t.owner ? '（负责人：' + escapeHtml(t.owner) + '）' : '') +
+        (t.deadline ? '（截止：' + escapeHtml(t.deadline) + '）' : '') + '</li>';
+    }).join('') + '</ul>';
+  }
+
+  if (!token) {
+    card.innerHTML = errorHtml('缺少分享 token');
+    return;
+  }
+
+  getJson('api/v1/share/' + encodeURIComponent(token)).then(function (data) {
+    if (data.__httpStatus !== 200) {
+      card.innerHTML = errorHtml(data.__httpStatus === 404 ? '链接无效或已过期' : '加载失败');
+      return;
+    }
+    var html = '<h1>' + escapeHtml(data.original_name || ('任务 #' + data.task_id)) + '</h1>' +
+      '<p class="hint">时长 ' + fmtDuration(data.duration_sec) + ' · 创建于 ' + fmtDate(data.created_at) +
+      ' · 档位 ' + escapeHtml(data.ai_tier || '—') + ' · 模板 ' + escapeHtml(data.template || '—') + '</p>';
+    html += data.summary
+      ? '<h2>摘要</h2><p style="margin:0 0 8px">' + escapeHtml(data.summary) + '</p>'
+      : '<h2>摘要</h2><p class="hint" style="margin:0 0 8px">无摘要。</p>';
+    if (data.keywords && data.keywords.length) {
+      html += '<div>' + data.keywords.map(function (k) {
+        return '<span class="chip plain">' + escapeHtml(k) + '</span>';
+      }).join('') + '</div>';
+    }
+    if (data.keypoints && data.keypoints.length) {
+      html += '<h2>要点</h2><ol class="keypoints">' + data.keypoints.map(function (kp) {
+        return '<li><strong>' + escapeHtml(kp.title) + '</strong>：' + escapeHtml(kp.detail) + '</li>';
+      }).join('') + '</ol>';
+    }
+    html += todosHtml(data.todos);
+    if (data.transcript) {
+      var source = data.transcript_punctuated || data.transcript;
+      html += '<h2>转写</h2><div class="transcript">' +
+        source.split(/(?<=[。！？!?；;\n])/).map(function (s) { return s.trim(); })
+          .filter(function (s) { return s; })
+          .map(function (s) { return '<span class="sent-target">' + escapeHtml(s) + '</span>'; })
+          .join('\n') + '</div>';
+    } else {
+      html += '<h2>转写</h2><p class="empty-tip">未识别到语音内容。</p>';
+    }
+    card.innerHTML = html;
+  }, function () {
+    card.innerHTML = errorHtml('加载失败');
+  });
+})();
+</script>
+</body>
+</html>

@@ -103,6 +103,10 @@ app:
     # worker 抽音轨用（容器内 ffmpeg 8.0.1）
     ffmpeg-bin: ${FFMPEG_BIN:ffmpeg}
 
+  share:
+    # T4.28：只读分享链接有效期（天）；token 明文永不落库（DB 只存 SHA256 hex）
+    ttl-days: ${SHARE_TTL_DAYS:7}
+
   worker:
     # Redis 任务队列键（T1.5：LPUSH 生产 / BLPOP 消费）
     queue-key: ${TASK_QUEUE_KEY:meetingnotes:task-queue}

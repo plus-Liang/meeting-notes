@@ -103,6 +103,8 @@ class E2ETest {
         }
         if ("GET".equals(method)) {
             builder.GET();
+        } else if ("DELETE".equals(method)) {
+            builder.DELETE(); /* T4.28：撤销分享用真 DELETE（此前 helper 只支持 GET/POST） */
         } else {
             builder.POST(HttpRequest.BodyPublishers.ofString(
                     body == null ? "" : body, StandardCharsets.UTF_8));
@@ -607,5 +609,53 @@ class E2ETest {
                 "21 个 id → 400");
         assertEquals(400, send("GET", "/api/v1/tasks/export?ids=999999", null, null).statusCode(),
                 "全部不可导 → 400（不是空 zip）");
+    }
+
+    /** T4.28 场景 K：只读分享——匿名可读 12 键子集、分享 token 不得越权（列表仍 401）、撤销/伪造 404。零新建任务。 */
+    @Test
+    @Order(12)
+    void k_shareAnonymousReadonlyContract() throws Exception {
+        // 创建分享（需 API token；body 空对象即可）
+        HttpResponse<String> createResp = send("POST", "/api/v1/tasks/" + taskId + "/share", "{}", "application/json");
+        assertEquals(200, createResp.statusCode(), "创建分享：" + abbreviate(createResp.body()));
+        JsonNode created = M.readTree(createResp.body());
+        List<String> createKeys = new ArrayList<>();
+        created.fieldNames().forEachRemaining(createKeys::add);
+        assertEquals(List.of("task_id", "token", "url", "expires_at"), createKeys, "创建响应键集固定四键");
+        String shareToken = created.get("token").asText();
+        assertTrue(created.get("url").asText().startsWith("/share.html?token="), "url 指向只读页");
+        assertEquals(43, shareToken.length(), "32B base64url 无填充 = 43 字符");
+
+        // 匿名读（无 Authorization）→ 200，12 键只读子集
+        HttpResponse<String> anon = sendWithoutToken("GET", "/api/v1/share/" + shareToken, null, null);
+        assertEquals(200, anon.statusCode(), "匿名必须可读：" + abbreviate(anon.body()));
+        JsonNode view = M.readTree(anon.body());
+        List<String> viewKeys = new ArrayList<>();
+        view.fieldNames().forEachRemaining(viewKeys::add);
+        assertEquals(List.of("task_id", "original_name", "duration_sec", "created_at", "summary",
+                "keywords", "keypoints", "todos", "transcript", "transcript_punctuated", "ai_tier", "template"),
+                viewKeys, "匿名视图键集固定 12 键（不多不少）");
+        assertEquals(taskId, view.get("task_id").asLong());
+
+        // 分享 token 不是 API token：拿它访问列表 → 401（认证面未放大）
+        java.net.http.HttpRequest smuggledReq = java.net.http.HttpRequest
+                .newBuilder(URI.create(base() + "/api/v1/tasks?limit=1"))
+                .header("Authorization", "Bearer " + shareToken)
+                .GET().build();
+        HttpResponse<String> smuggled = HTTP.send(smuggledReq, HttpResponse.BodyHandlers.ofString());
+        assertEquals(401, smuggled.statusCode(), "分享 token 不得当 API token 用");
+
+        // 伪造 token → 404 SHARE_NOT_FOUND（不区分原因，防探测）
+        HttpResponse<String> forged = sendWithoutToken("GET", "/api/v1/share/totally-forged-token", null, null);
+        assertEquals(404, forged.statusCode());
+        assertEquals("SHARE_NOT_FOUND", M.readTree(forged.body()).get("code").asText());
+
+        // 撤销 → 匿名再读 → 404 SHARE_NOT_FOUND
+        HttpResponse<String> revoke = send("DELETE", "/api/v1/tasks/" + taskId + "/share", null, null);
+        assertEquals(200, revoke.statusCode(), "撤销：" + abbreviate(revoke.body()));
+        assertTrue(M.readTree(revoke.body()).get("revoked").asInt() >= 1, "至少撤销本场景创建的那条");
+        HttpResponse<String> afterRevoke = sendWithoutToken("GET", "/api/v1/share/" + shareToken, null, null);
+        assertEquals(404, afterRevoke.statusCode());
+        assertEquals("SHARE_NOT_FOUND", M.readTree(afterRevoke.body()).get("code").asText());
     }
 }

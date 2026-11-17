@@ -37,10 +37,16 @@ public class ApiTokenFilter extends OncePerRequestFilter {
         this.mapper = mapper;
     }
 
-    /** 只守 /api/v1/**：actuator、静态页、OpenAPI、Swagger 全部豁免（K：豁免面逐条实测）。 */
+    /** 只守 /api/v1/**：actuator、静态页、OpenAPI、Swagger 全部豁免（K：豁免面逐条实测）。
+     *  T4.28（K-46）：匿名只读分享——额外放行 /api/v1/share/ 这**一条**前缀（GET share/{token}）；
+     *  其它 /api/v1/**（列表/详情/写操作）对匿名与分享 token 仍一律 401。 */
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
-        return !request.getRequestURI().startsWith("/api/v1");
+        String uri = request.getRequestURI();
+        if (uri.startsWith("/api/v1/share/")) {
+            return true;
+        }
+        return !uri.startsWith("/api/v1");
     }
 
     @Override

@@ -243,6 +243,62 @@
     });
   }
 
+  /* T4.28（K-46）：只读分享——生成（token 明文只出现一次）+ 复制 + 撤销全部；
+     链接有效期 SHARE_TTL_DAYS（默认 7 天），拿到链接的人只能只读看这一条任务 */
+  function shareHtml(data) {
+    return '<div class="section"><h2>分享</h2>' +
+      '<button type="button" class="btn-secondary" id="shareCreateBtn">生成只读分享链接</button>' +
+      '<div id="shareResult" hidden style="margin-top:8px">' +
+      '<p style="margin:0 0 4px"><span class="num" id="shareUrl"></span></p>' +
+      '<p style="margin:0"><button type="button" class="btn-secondary" id="shareCopyBtn">复制链接</button>' +
+      ' <button type="button" class="btn-danger" id="shareRevokeBtn">撤销全部链接</button></p>' +
+      '<p class="hint" id="shareMsg" style="margin:4px 0 0"></p></div>' +
+      '<p class="hint" style="margin-top:8px">拿到链接的人无需登录，只能只读查看这一条任务（摘要/关键词/待办/要点/转写），' +
+      '不能编辑或删除；链接默认 7 天有效，可随时撤销全部。</p></div>';
+  }
+
+  function bindShare(data) {
+    var createBtn = document.getElementById('shareCreateBtn');
+    var result = document.getElementById('shareResult');
+    var urlEl = document.getElementById('shareUrl');
+    var msg = document.getElementById('shareMsg');
+    var fullUrl = null;
+    createBtn.addEventListener('click', function () {
+      createBtn.disabled = true;
+      postJson('api/v1/tasks/' + data.task_id + '/share', {}).then(function (resp) {
+        createBtn.disabled = false;
+        result.hidden = false;
+        if (resp.__httpStatus === 200) {
+          fullUrl = window.location.origin + resp.url;
+          urlEl.textContent = fullUrl;
+          msg.textContent = '有效期至 ' + String(resp.expires_at || '').replace('T', ' ').slice(0, 16) +
+            '（UTC）。token 明文只在本次显示，请立即复制保存。';
+        } else {
+          msg.textContent = '生成失败（' + (resp.code || resp.__httpStatus) + '）：' + (resp.message || '未知错误');
+        }
+      }, function () {
+        createBtn.disabled = false;
+        result.hidden = false;
+        msg.textContent = '生成失败：服务暂时不可用，请稍后重试。';
+      });
+    });
+    document.getElementById('shareCopyBtn').addEventListener('click', function () {
+      mnCopyText(fullUrl || '', function () { msg.textContent = '已复制链接。'; },
+        function () { msg.textContent = '复制失败，请手动选择链接复制。'; });
+    });
+    document.getElementById('shareRevokeBtn').addEventListener('click', function () {
+      if (!window.confirm('撤销该任务的全部分享链接？撤销后所有已分享出去的链接立即失效。')) return;
+      sendJson('api/v1/tasks/' + data.task_id + '/share', 'DELETE').then(function (resp) {
+        if (resp.__httpStatus === 200) {
+          msg.textContent = '已撤销 ' + (resp.revoked || 0) + ' 条链接。';
+          result.hidden = true;
+        } else {
+          msg.textContent = '撤销失败（' + (resp.code || resp.__httpStatus) + '）：' + (resp.message || '未知错误');
+        }
+      }, function () { msg.textContent = '撤销失败：服务暂时不可用。'; });
+    });
+  }
+
   function bindDelete(data) {
     var btn = document.getElementById('deleteTaskBtn');
     var msgEl = document.getElementById('deleteMsg');
@@ -369,7 +425,7 @@
         '<p class="hint">请检查 ASR 服务是否正常后，可在<a href="tasks.html">任务列表</a>按"失败"筛选并批量重试。</p></div>';
     } else if (status === 'DONE') {
       body = summaryHtml(data) + keypointsHtml(data) + todosHtml(data) + transcriptHtml(data) +
-        restructureHtml(data) + exportHtml(data) + deleteHtml(data);
+        restructureHtml(data) + shareHtml(data) + exportHtml(data) + deleteHtml(data);
     } else {
       body = '<p class="hint">未知状态：' + escapeHtml(status) + '</p>';
     }
@@ -381,6 +437,7 @@
       bindKeywordChips(data);
       bindSummaryGround(data);
       bindRestructure(data);
+      bindShare(data);
       bindCopyTranscript(data);
     }
     return status === 'DONE' || status === 'DEAD';
