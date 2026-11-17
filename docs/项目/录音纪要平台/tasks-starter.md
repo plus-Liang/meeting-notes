@@ -2606,6 +2606,22 @@ F-15 控制在 ≤30 行并集中一处；新增静态资源不引第三方库�
 >
 > **禁止**：用逗号拼字符串存标签（用 jsonb）；改详情 14 键；多 commit。
 
+## T4.29b T4.29 收尾：详情页写路径 405 + 标签下拉刷新 + E2E 断言（约 20–30 分钟；D-138）
+
+> **为什么加这张卡（验收实测，不是猜测）**：T4.29 后端全过，但**详情页「标签与收藏」写入整体不可用**——前端调 `postJson(...)`（`app.js` 里写死 `method:'POST'`）打 `PATCH /api/v1/tasks/{id}/meta`，浏览器实测 **405 METHOD_NOT_ALLOWED**，加标签和点星标全部失败。我在同一页面用已有 `sendJson(url,'PATCH',body)` 手工发一次 → 200，所以后端无问题，只有前端调错方法。
+> **另两个必修**：标签下拉只在 `renderFilterBar()` 时更新（数据加载后的 `render()` 不调用它）→ 最多滞后 30s；E2E `h` 场景断言「q=id 精确命中 1 条」依赖全库，数据一长就误红（本轮实测 346/347）。
+>
+> **改动（只动 3 个文件，禁止改后端/契约/迁移）**：
+> 1. `static/task.html`：`updateMeta()` 里 `postJson('api/v1/tasks/' + id + '/meta', patch)` → `sendJson('api/v1/tasks/' + id + '/meta', 'PATCH', patch)`（`sendJson` 已存在于 `app.js`，返回结构同样带 `__httpStatus`）。grep 一遍 `api/v1/tasks/*/meta`，确认**没有第二处** POST 调用。
+> 2. `static/tasks.html`：数据渲染后刷新标签下拉——把下拉选项生成逻辑拆成 `refreshLabelOptions()`，在 `render()` 末尾调用（**不要整块重建 `filterBar`**，避免按钮闪烁/焦点丢失）；当 `state.filterLabel` 不在选项里时，保留一个 `<option selected value="<当前值>">` 占位项，防止"下拉显示全部标签但筛选仍在"的卡死。
+> 3. `app/src/test/java/com/meetingnotes/e2e/E2ETest.java` `h` 场景：把「精确命中 1 条」改成——结果**必含 `taskId`**、且**每条**都满足 `id==taskId 或 source_uri 原始名含该数字串`（契约见 `接入指南 §3.3`：文件名模糊 + 纯数字额外精确 id）；不要写死条数。
+>
+> **判据（缺一不可）**：
+> - **真机点击证据（K-80）**：浏览器打开详情页 → 点「添加」标签 → **再 GET `/tasks/{id}/meta` 核对已落库**；点星标 → 再核对 favorite 翻转；点 chip 的 × → 核对删除。必须给出"点击后回读"的原始响应，不许只截渲染图。
+> - 列表页：刚加载完（不点任何按钮）标签下拉里就能选到当前页存在的标签；选完后筛选生效；清空（全部标签）恢复。
+> - `-UnitOnly` 全绿 → commit（单 commit `fix(T4.29)`）→ `docker compose build app && up -d app` → 全量（K-68）**连续两轮都 347/347**（第 2 轮用于证明 E2E 断言不再数据依赖）；可维护性 0/0。
+> - 1280/390 无横向溢出；无 console/pageerror。
+> **禁止**：改后端 PATCH/POST 语义、改 V6 迁移、改详情 14 键、顺手改别的 UI、多 commit。
 ## 每张卡做完都要给你的回报
 
 ```text
