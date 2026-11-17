@@ -2680,7 +2680,7 @@ F-15 控制在 ≤30 行并集中一处；新增静态资源不引第三方库�
 > - 残留清理（D-139）：临时任务/临时对象/override 文件/容器 /tmp 逐条核对，回报写清"查了哪些、各是多少"。
 > **禁止**：引入无头浏览器/平台解析器（D-027R）；带 cookie/伪造签名；默认开启 allow-hosts；改现有上传/详情契约；多 commit。
 
-## T4.32b 链接导入（L1 确认卡 / L2 直链 / BYOF `FETCHER_CMD`）（约 3–4 小时；D-122；**依赖 T4.32a 已通过 `641a6d1`**）
+## T4.32b 链接导入（L1 确认卡 / L2 直链 / BYOF `FETCHER_CMD`）（约 3–4 小时；D-122；**依赖 T4.32a 已通过 `641a6d1`**）**✅ 已通过（2026-11-17，`4153891`，第 58 份报告，D-143；我独立 404/404 单元 + 420/420 全量 + 真机 Phase A 10/10 + B1 13/13（BYOF 201→DONE task 522）+ B2 stdout task 525 + Playwright 7/7 + 未配 BYOF 5/5；K-85）**
 
 > **先跑三行报给我**：`git -C D:\new\projects\meeting-notes log --oneline -1`、`git -C D:\new\projects\meeting-notes status --short`、`Get-Content D:\new\artifacts\T4.32a\workbuddy\head.txt`——确认你在 `641a6d1` 上开工。**只看这张卡 + `handoff.md` 第 0–2 节 + `AGENT.md` §2/§4，不要整篇读长文档**（D-137 成本纪律）；证据落 `D:\new\artifacts\T4.32b\workbuddy\`；回报 ≤40 行。
 >
@@ -2715,6 +2715,29 @@ F-15 控制在 ≤30 行并集中一处；新增静态资源不引第三方库�
 > - `-UnitOnly` 全绿 → commit（单 commit `feat(T4.32b)`）→ `docker compose build app && up -d app` → 全量（K-68）→ 可维护性 0/0；`head.txt` 记**提交后** HEAD。
 > - 残留清理（D-139）：临时任务/临时 MinIO 对象/override/脚本/容器 `/tmp` 逐条核对，回报写清"查了哪些、各是多少"。
 > **禁止**：把 yt-dlp 等平台解析器装进仓库；执行 JS/无头浏览器；带 cookie/伪造签名；改 32a `/tasks/link` 既有语义与错误码；默认开启 BYOF；多 commit。
+
+## T4.35a 前置：ASR segments 句子级时间戳（约 2–3 小时；D-122；**依赖 T4.32b 已通过 `4153891`**）
+
+> **先跑三行报给我**：`git -C D:\new\projects\meeting-notes log --oneline -1`、`git -C D:\new\projects\meeting-notes status --short`、`Get-Content D:\new\artifacts\T4.32b\workbuddy\head.txt`——确认你在 `4153891` 上开工。**只看这张卡 + `handoff.md` 第 0–2 节 + `AGENT.md` §2/§4，不要整篇读长文档**（D-137 成本纪律）；证据落 `D:\new\artifacts\T4.35a\workbuddy\`；回报 ≤40 行。
+>
+> **要证明的事**：转写结果带**句子级时间戳**（为播放器点句跳转/高亮用），**旧三键 `text/duration/cost_sec` 逐字不变**（老客户端兼容），**旧任务无 segments 时详情返回 `null` 而不是 `[]`**（前端据此隐藏播放器）。
+> 本卡**不做**：播放器 API（T4.35b）、前端播放器（T4.35c）、说话人（T4.36）；不给旧任务回填 segments。
+>
+> **改动（ASR 服务 + 后端 + 迁移 + 文档，单 commit）**：
+> 1. `infra/asr/server.py`：响应增 `segments: [{"start": <秒,float 3 位>, "end": <秒,float 3 位>, "text": <去首尾空白>}]`（faster-whisper 的 `segment.start/end/text` 直接可用，别自己猜时间）；**`text`/`duration`/`cost_sec` 三键逐字不变**；空音频 → `segments: []`（有响应但没内容，与"旧任务 null"是两回事）。
+> 2. Java 侧取 segments：**一次 ASR 调用同时拿到 `text` + `duration` + `segments`**——若 Spring AI `TranscriptionModel.transcribe(Resource)` 只回字符串（拿不到 segments），允许新增 `asr/AsrClient`（Spring `RestClient`/`HttpClient`，复用 `config/AsrHttpClientConfig` 的 base-url 与 900s 读超时、路径常量 `/v1/audio/transcriptions`，multipart 与现有请求同形），并让 `TranscriptionWorker` 改用它；**不许为了拿时间戳再调一次 ASR**（成本/时长翻倍）。失败语义保持：ASR 失败 → 现有 `ProcessingException("ASR_ERROR")` → 重试/死信路径不变。
+> 3. 迁移 **V7**：`ALTER TABLE task_result ADD COLUMN segments jsonb;`（可空、不建索引；FlywayV7 命名 `V7__task_result_segments.sql`）。
+> 4. worker 落库：与 transcript 同一事务/同一时机写入 segments；**DONE 仍最后写**（D-069）。
+> 5. 详情 API：`GET /api/v1/tasks/{id}` **只增** `segments` 键（数组或 `null`），元素键 `start`/`end`/`text`；列表/导出/其它端点**不动**；无 segments 的旧任务返回 `null`。
+> 6. 文档：权威 `接入指南.md` 的 `GET /tasks/{id}` 键表补 `segments`（含 null 语义 + 一个响应示例）；`infra/asr/README.md` 补响应示例；配置清单无新键（如加了 ASR 调参再同步三处）。
+>
+> **判据（缺一不可）**：
+> - 单测：ASR 响应解析**纯函数矩阵**（正常 segments / 响应无 segments 键 → null / segments 空数组 → [] / 负数或乱序 / 空 text / 非 JSON / 老响应只有三键 / end<start 不采信），断言**不抛、不 500**；worker 落库断言 segments 写入（沿用现有测试手法）。
+> - **ASR 服务实打**（容器内）：`curl -F file=@<1s 真语音> http://localhost:8000/v1/audio/transcriptions` → 给出**原始 JSON**，确认三键仍在、`segments` 元素有 `start/end/text` 且数值合理（0 ≤ start < end ≤ duration+1）。
+> - **E2E**（容器内 app，真语音 fixture）：上传 → 201 → DONE → `GET /tasks/{id}` 的 `segments` 非空、每项 `start<end`、`text` 非空、末段 `end ≤ duration_sec + 2`（宽松断言，别写死秒数）；**旧任务兼容**：取一个改造前的历史任务（如 `id=237` 或任一旧 DONE 任务）→ `segments == null` 且不 500。
+> - `-UnitOnly` 全绿 → commit（单 commit `feat(T4.35a)`）→ **`docker compose build app asr && up -d app asr`**（两个镜像都在本卡内）→ 等 healthy → 全量（K-68）→ 可维护性 0/0；`head.txt` 记**提交后** HEAD。
+> - 残留清理（D-139）：临时任务/临时对象/容器 `/tmp` 逐条核对，回报写清"查了哪些、各是多少"；**本次 E2E 会消耗配额，控制在 1–2 个任务**。
+> **禁止**：改 `text`/`duration`/`cost_sec` 语义或删键；为拿时间戳二次调 ASR；给旧任务回填/伪造 segments；改播放器/前端（属 35b/35c）；改 ASR 模型或识别参数（除非返回 segments 必需）；多 commit。
 
 ## 每张卡做完都要给你的回报
 

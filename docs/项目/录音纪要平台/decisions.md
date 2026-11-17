@@ -1781,6 +1781,18 @@
 - **依据**：`review/2026-11-17-T4.32a验收.md`（第 57 份）；`artifacts/T4.32a/lead-verify/`（negative.log 23/23、positive.log/json、size-413.log、full-2.log 390/390、unitonly.log 374/374、maintainability.log、env-before/after.txt、task500.json、httpserver.log）；DB/MinIO/配额复核（226 任务全 DONE、MinIO 232=226+历史 6 孤儿、67 分钟/61 任务）。
 - **已排除项**：把 `0177.0.0.1` 这类缩写形式当"已被系统解析器拦住"（实测 JDK 会按十进制归一化，必须自规范化）；把 `0x7f.0.0.1`/`127.1` 被 URI 提前拒当"没走守卫"（结果一致，只是路径不同，文档已改准）；把我自己的 `probe-1s.wav` 冒烟假红当产品回归（1 秒测试音 ASR 空文本，换真实样本即 390/390）；把 PowerShell 拼 JSON 的 `INVALID_PARAM` 当 413 缺失（PS 无 `\"` 转义，换 Python 即得 413）；把 `source_type=LINK vs FETCH` 当违规（无 CHECK 约束，按卡执行并写文档）。
 
+### D-143 T4.32b 通过：链接预览确认卡（L1）+ 直链（L2）+ BYOF 外部抓取通道落地；"容器里 host.docker.internal 可能是 IPv6"入坑 K-85；写码方改了生成副本 → 我回灌权威版
+
+- **日期**：2026-11-17｜**决策人**：DSH
+- **结论**：
+  1. **T4.32b 通过**（`4153891`，17 文件 +1353/−21，单 commit）：新增 `POST /api/v1/link/preview`（**复用 32a `UrlGuard`**、匿名 GET、逐跳重校、只读前 2MB 不整页进内存、`kind=direct|page|unsupported`、og 解析纯函数 `OgMetaParser` 兼容 ISO/纯秒数、相对封面按 final_url 补全）；新增 BYOF `ProcessMediaFetcher`（`FETCHER_CMD` 按空格拆 argv **不过 shell**、`{url}` 必须独立 token、`{out}` 可选、stdout 流式落盘受 `max-bytes`、**看门狗从进程启动起算**、stderr 尾部 200 字、非 0/超时/启动失败 → 502）；`/tasks/link` 增**可选** `use_byof`（默认 false，32a 语义与错误码零改动，未配 → 400 `FETCHER_UNAVAILABLE` 且在建临时文件前短路）；前端「从链接导入」卡四分支；配置 3 键三处同步；码表**只增**到 10 个业务码；README 写明仓库不含平台解析器、BYOF 自负合规责任（D-027R）。**14 张 ✅ → 15 张 ✅**。
+  2. 我独立验证：`-UnitOnly` **404/404 exit 0**（+30）、可维护性 **0/0**、全量 **420/420 exit 0**；真机 Phase A（默认配置）**10/10**（匿名 401、空 url、回环/元数据/容器内服务/file 全 400、解析失败 502、`use_byof` 未配 400 `FETCHER_UNAVAILABLE`、32a 内网回归 400）；Phase B1（override `{out}` 模式 + 超时 2s）**13/13**：preview 四分类 + 相对封面补全 + 时长 62 + 白名单下回环仍拦；**BYOF 页面链接 201→DONE（task 522，transcript 498 字）**、BYOF 不绕过 UrlGuard、无 `use_byof` 仍 `NOT_DIRECT_MEDIA`、**超时看门狗 502**、**非 0 退出 502 带 stderr 尾部**、直链二次提交回 task 129 且 `reused=true`（幂等未破）；Phase B2 stdout 模式 **task 525 201→DONE**。Playwright：A 直链预览→直接转写→详情 DONE（526）、B og 卡→用外部工具抓取→DONE（527）、E 内网 → 页内可读错误不露提交、F 1280/390 零溢出、G pageerror 0（唯一 console error 已单独归因为**E 场景预期 400 的资源日志**）；会话 C（仅 allow-hosts、未配 BYOF）**5/5**：灰按钮「外部抓取未启用」+ 3 步指引、unsupported 原因可见不给提交。
+  3. **文档方向偏差（P3，已修正）**：写码方把 `接入指南`/`配置清单` 改在**代码仓生成副本**上（与权威版 hash 不一致，违反"生成副本勿手改"）。内容正确；我已回灌 `D:\new\docs\...` 权威版并重跑 `sync-docs-to-code.ps1`。下次卡面要再强调"只改权威版"。
+  4. **新坑 K-85**：容器里 `host.docker.internal` 在 Docker Desktop 下可能解析成 **IPv6**（本次 `fdc4:f303:9324::254`），宿主测试服务只听 IPv4 → 连接拒绝；测试服务要**双栈监听**，且 Windows 上 `IPV6_V6ONLY=0` 必须在 `bind` **之前**设置。配套纪律：宿主自检 200 ≠ 容器内可达，先在容器里 curl 同一 URL 再判。
+  5. 残余（P3，接受）：`{out}` 模式不读子进程 stdout（工具狂写 stdout 可能塞管道到超时）；预览 2MB 截断会漏极靠后的 og 标签；无 `Content-Type` 的直链会被判 unsupported（UI 无入口，`/tasks/link` 仍可用）；`FETCHER_CMD` 路径含空格不可用；BYOF 工具侧自行访问地址的 SSRF/合规责任在工具；BYOF 413 与"exit 0 无产物"未真机验（单测覆盖）；预览抓取逻辑与 `HttpMediaFetcher` 有重复（v1 接受）。
+- **依据**：`review/2026-11-17-T4.32b验收.md`（第 58 份）；`artifacts/T4.32b/lead-verify/`（unitonly 404、full 420、maintainability 0/0、phaseA 10/10、phaseB1 13/13、phaseB2 stdout、e2e-ui-result 7/7 + e2e-e-console 归因、e2e-ui-c 5/5、serve.py、fake/fetch.sh、env-before/after）；DB/MinIO/配额复核（241 任务全 DONE、MinIO 247=241+历史 6 孤儿无新增、89 分钟/76 任务）。
+- **已排除项**：把我自己"直链第二次应 `reused=false`"的断言当产品失败（实际 201+reused=true 回历史任务 129，幂等正确）；把 BYOF stdout 首次 502 当产品缺陷（是我假抓取脚本默认分支漏了"stdout 模式无 `$2`"）；把宿主浏览器 502 封面当产品 bug（Docker 代理伪影，UI 用 data-URI 封面）；把"写码方文档写在生成副本"当内容错误（内容对，只是流程偏差，已回灌权威版）；把 preview 的 `image/png → unsupported` 当缺陷（卡面分类如此，给了可读 reason）。
+
 ---
 
 ## 面试速查（由本文件派生，勿单独维护）
