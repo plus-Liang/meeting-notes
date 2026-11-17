@@ -300,10 +300,15 @@ class E2ETest {
 
     /** multipart/form-data 请求体：同名 part（files）重复携带多个文件。 */
     private static byte[] multipartBody(List<String> filenames, List<byte[]> contents) {
+        return multipartBody(filenames, contents, "files");
+    }
+
+    /** multipart/form-data 请求体：part 名可指定（batch 用 files，单文件上传用 file，T4.30b）。 */
+    private static byte[] multipartBody(List<String> filenames, List<byte[]> contents, String partName) {
         try (ByteArrayOutputStream out = new ByteArrayOutputStream()) {
             for (int i = 0; i < filenames.size(); i++) {
                 out.writeBytes(("--" + BOUNDARY + "\r\n"
-                        + "Content-Disposition: form-data; name=\"files\"; filename=\"" + filenames.get(i) + "\"\r\n"
+                        + "Content-Disposition: form-data; name=\"" + partName + "\"; filename=\"" + filenames.get(i) + "\"\r\n"
                         + "Content-Type: application/octet-stream\r\n\r\n").getBytes(StandardCharsets.UTF_8));
                 out.writeBytes(contents.get(i));
                 out.writeBytes("\r\n".getBytes(StandardCharsets.UTF_8));
@@ -325,6 +330,38 @@ class E2ETest {
             builder.header("Authorization", "Bearer " + t);
         }
         return HTTP.send(builder.build(), HttpResponse.BodyHandlers.ofString());
+    }
+
+    /** T4.30b：multipart 单文件上传（part 名 file + 可选 template，与前端 index.html 录音提交同写法）。 */
+    private static HttpResponse<String> sendUpload(String filename, byte[] content, String template) throws Exception {
+        byte[] head = (("--" + BOUNDARY + "\r\n"
+                + "Content-Disposition: form-data; name=\"file\"; filename=\"" + filename + "\"\r\n"
+                + "Content-Type: application/octet-stream\r\n\r\n").getBytes(StandardCharsets.UTF_8));
+        byte[] afterFile = "\r\n".getBytes(StandardCharsets.UTF_8); /* multipart：文件内容后必须换行再接下一 part/结尾 */
+        byte[] templatePart = (template == null || template.isBlank()) ? new byte[0]
+                : ("--" + BOUNDARY + "\r\n"
+                + "Content-Disposition: form-data; name=\"template\"\r\n\r\n"
+                + template + "\r\n").getBytes(StandardCharsets.UTF_8);
+        byte[] closing = ("--" + BOUNDARY + "--\r\n").getBytes(StandardCharsets.UTF_8);
+        HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(base() + "/api/v1/tasks"))
+                .timeout(Duration.ofSeconds(60))
+                .header("Content-Type", "multipart/form-data; boundary=" + BOUNDARY)
+                .POST(HttpRequest.BodyPublishers.ofByteArray(
+                        /* 顺序：file 头 → 文件内容 → 换行 → 可选 template part → 结尾 boundary */
+                        concat(concat(head, content),
+                                concat(afterFile, concat(templatePart, closing)))));
+        String t = token();
+        if (!t.isEmpty()) {
+            builder.header("Authorization", "Bearer " + t);
+        }
+        return HTTP.send(builder.build(), HttpResponse.BodyHandlers.ofString());
+    }
+
+    private static byte[] concat(byte[] a, byte[] b) {
+        byte[] all = new byte[a.length + b.length];
+        System.arraycopy(a, 0, all, 0, a.length);
+        System.arraycopy(b, 0, all, a.length, b.length);
+        return all;
     }
 
     /**
@@ -740,5 +777,39 @@ class E2ETest {
         HttpResponse<String> cleanup = send("PATCH", "/api/v1/tasks/" + taskId + "/meta",
                 "{\"labels\":[],\"favorite\":false}", "application/json");
         assertEquals(200, cleanup.statusCode());
+    }
+
+    /**
+     * T4.30b 场景 M：浏览器录音 webm 上传回归（K-82）。MediaRecorder 产出的流式 webm
+     * EBML 头部无 duration，ffprobe format=duration 输出 N/A 且 exit 0——修复前
+     * AudioDurationProbe 裸 parseDouble 未捕获 → 500；修复后兜底取末音频包
+     * pts_time(+duration_time) → 201 → DONE、duration_sec 合理。
+     *
+     * <p>fixture {@code /media/recording.webm}：验收侧 fake 麦克风真录 8s（recorded.webm，
+     * 128,751 B）按字节截断的 1.5s 片段（24,576 B）。不用 {@code ffmpeg -c copy} 裁：实测
+     * remux 会把 duration 回填（fixture 失去「头部无 duration」特性，走不到兜底）；字节截断
+     * 保留该特性，且容器实测 worker 式解码 exit 0、末包 1.44+0.06=1.50。内容各次运行相同
+     * → 重跑命中幂等（reused），仍 201/DONE，断言不受影响。
+     */
+    @Test
+    @Order(14)
+    void m_browserRecordingWebmUploadsAndCompletes() throws Exception {
+        byte[] webm;
+        try (var in = getClass().getResourceAsStream("/media/recording.webm")) {
+            assertTrue(in != null, "fixture /media/recording.webm 必须存在于 test resources");
+            webm = in.readAllBytes();
+        }
+        HttpResponse<String> resp = sendUpload("recording.webm", webm, "meeting");
+        assertEquals(201, resp.statusCode(), "webm 上传必须 201（修复前 500 INTERNAL_ERROR）："
+                + abbreviate(resp.body()));
+        JsonNode created = M.readTree(resp.body());
+        assertTrue(created.get("task_id").asLong() > 0, "响应含 task_id：" + resp.body());
+        JsonNode detail = waitTerminal(created.get("task_id").asLong());
+        long dur = detail.get("duration_sec").asLong();
+        assertTrue(dur >= 1 && dur <= 3, "兜底时长 ceil(1.50)=2，应在 1–3 秒（不是 0/null/异常）："
+                + detail.get("duration_sec"));
+        assertTrue(detail.has("transcript") && !detail.get("transcript").isNull(),
+                "详情含 transcript 键（内容长短不做断言，1.5s 样本可能识别为空，D-048 仍 DONE）");
+        assertEquals("meeting", detail.get("template").asText(), "显式 template=meeting 生效");
     }
 }
