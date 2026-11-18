@@ -45,14 +45,13 @@ class AuthServiceTest {
         return e;
     }
 
-    /* ---- 注册：管理员认领 ---- */
+    /* ---- 注册：管理员认领（T4.37a-fix：条件更新原子闸） ---- */
 
     @Test
     void firstRegisterClaimsAdminId1AdminRole() {
-        when(jdbc.query(contains("SELECT password_hash FROM app_user WHERE id = 1"),
-                any(ResultSetExtractor.class))).thenReturn("!");
-        when(jdbc.query(contains("id <> 1 AND lower(username) = lower(?)"),
-                any(ResultSetExtractor.class), eq("Boss"))).thenReturn(null);
+        // 条件更新影响 1 行 = 认领成功
+        when(jdbc.update(contains("WHERE id = 1 AND password_hash = ?"),
+                anyString(), anyString(), anyString(), anyString())).thenReturn(1);
 
         AuthService.AuthSession s = newService(true).register("Boss", "password123");
 
@@ -60,16 +59,16 @@ class AuthServiceTest {
         assertEquals("ADMIN", s.role());
         assertEquals("Boss", s.username());
         assertNotNull(s.token());
-        verify(jdbc).update(contains("UPDATE app_user SET username"), eq("Boss"),
-                anyString(), eq("ADMIN"), anyString(), eq(1L));
+        verify(jdbc).update(contains("WHERE id = 1 AND password_hash = ?"), eq("Boss"),
+                anyString(), anyString(), eq("!"));
     }
 
     @Test
-    void claimAdminStillBlockedByTakenUsername409() {
-        when(jdbc.query(contains("SELECT password_hash FROM app_user WHERE id = 1"),
-                any(ResultSetExtractor.class))).thenReturn("!");
-        when(jdbc.query(contains("id <> 1 AND lower(username) = lower(?)"),
-                any(ResultSetExtractor.class), eq("admin"))).thenReturn(7L);
+    void claimUsernameConflictingWithOtherUserIs409() {
+        // 认领请求的用户名撞其它用户 → 唯一索引 DuplicateKeyException → 409
+        when(jdbc.update(contains("WHERE id = 1 AND password_hash = ?"),
+                anyString(), anyString(), anyString(), anyString()))
+                .thenThrow(new org.springframework.dao.DuplicateKeyException("ux_app_user_username"));
 
         ofCode(() -> newService(true).register("admin", "password123"), "USERNAME_TAKEN");
     }
@@ -78,8 +77,9 @@ class AuthServiceTest {
 
     @Test
     void secondRegisterCreatesUserIdRole() {
-        when(jdbc.query(contains("SELECT password_hash FROM app_user WHERE id = 1"),
-                any(ResultSetExtractor.class))).thenReturn(hasher.hash("admin-real-pass"));
+        // 认领条件更新影响 0 行（admin 已被认领）→ 走普通注册
+        when(jdbc.update(contains("WHERE id = 1 AND password_hash = ?"),
+                anyString(), anyString(), anyString(), anyString())).thenReturn(0);
         when(jdbc.query(contains("WHERE lower(username) = lower(?)"),
                 any(ResultSetExtractor.class), eq("bob"))).thenReturn(null);
         when(jdbc.queryForObject(contains("INSERT INTO app_user"), eq(Long.class),
@@ -93,28 +93,42 @@ class AuthServiceTest {
 
     @Test
     void duplicateUsernameCaseInsensitive409() {
-        when(jdbc.query(contains("SELECT password_hash FROM app_user WHERE id = 1"),
-                any(ResultSetExtractor.class))).thenReturn(hasher.hash("admin-real-pass"));
+        when(jdbc.update(contains("WHERE id = 1 AND password_hash = ?"),
+                anyString(), anyString(), anyString(), anyString())).thenReturn(0);
         when(jdbc.query(contains("WHERE lower(username) = lower(?)"),
                 any(ResultSetExtractor.class), eq("BOB"))).thenReturn(5L);
 
         ofCode(() -> newService(true).register("BOB", "password123"), "USERNAME_TAKEN");
     }
 
+    /** 卡面判据①：并发窗口下 INSERT 撞唯一索引（DuplicateKeyException）→ 409，绝不 500。 */
+    @Test
+    void concurrentInsertUniqueViolationIs409Not500() {
+        when(jdbc.update(contains("WHERE id = 1 AND password_hash = ?"),
+                anyString(), anyString(), anyString(), anyString())).thenReturn(0);
+        when(jdbc.query(contains("WHERE lower(username) = lower(?)"),
+                any(ResultSetExtractor.class), eq("bob"))).thenReturn(null);
+        when(jdbc.queryForObject(contains("INSERT INTO app_user"), eq(Long.class),
+                eq("bob"), anyString(), eq("USER"), anyString()))
+                .thenThrow(new org.springframework.dao.DuplicateKeyException("ux_app_user_username"));
+
+        ApiException e = ofCode(() -> newService(true).register("bob", "password123"), "USERNAME_TAKEN");
+        assertEquals(409, e.getStatus());
+    }
+
     @Test
     void registrationDisabled403WhenAdminClaimed() {
-        when(jdbc.query(contains("SELECT password_hash FROM app_user WHERE id = 1"),
-                any(ResultSetExtractor.class))).thenReturn(hasher.hash("admin-real-pass"));
+        // 认领 0 行（已被占）+ 开关关 → 403
+        when(jdbc.update(contains("WHERE id = 1 AND password_hash = ?"),
+                anyString(), anyString(), anyString(), anyString())).thenReturn(0);
 
         ofCode(() -> newService(false).register("bob", "password123"), "REGISTRATION_DISABLED");
     }
 
     @Test
     void registrationDisabledDoesNotBlockAdminClaim() {
-        when(jdbc.query(contains("SELECT password_hash FROM app_user WHERE id = 1"),
-                any(ResultSetExtractor.class))).thenReturn("!");
-        when(jdbc.query(contains("id <> 1 AND lower(username) = lower(?)"),
-                any(ResultSetExtractor.class), eq("admin"))).thenReturn(null);
+        when(jdbc.update(contains("WHERE id = 1 AND password_hash = ?"),
+                anyString(), anyString(), anyString(), anyString())).thenReturn(1);
 
         AuthService.AuthSession s = newService(false).register("admin", "password123");
         assertEquals(1L, s.userId(), "认领不受开关限制");

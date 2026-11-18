@@ -2,6 +2,7 @@ package com.meetingnotes.web;
 
 import com.meetingnotes.common.ApiException;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
@@ -12,9 +13,11 @@ import java.util.List;
  *
  * <p>口径（卡面第 3/5 条）：
  * <ul>
- *   <li>用户名 trim 后 3–32 字符、字符集 {@code [A-Za-z0-9_\-\u4e00-\u9fa5]}、大小写不敏感唯一（409 USERNAME_TAKEN）；</li>
+ *   <li>用户名 trim 后 3–32 字符、字符集 {@code [A-Za-z0-9_\-\u4e00-\u9fa5]}、大小写不敏感唯一（409 USERNAME_TAKEN，
+ *       **并发安全**：以唯一索引为最终闸门，唯一键冲突捕获为 409，K-91）；</li>
  *   <li>密码去首尾空白后 8–64 字符（空/超长 → 400 INVALID_PARAM）；</li>
- *   <li>1 号账号未认领（password_hash='!'）→ 首次注册即认领管理员（role=ADMIN，**不受注册开关控制**）；</li>
+ *   <li>1 号账号未认领（password_hash='!'）→ 首次注册即认领管理员（role=ADMIN，**不受注册开关控制**）——
+ *       认领是**条件更新原子操作**（T4.37a-fix）：并发认领只有 1 个成功，其余按普通注册路径继续；</li>
  *   <li>其余注册受 {@code AUTH_REGISTRATION_ENABLED} 控制（关闭 → 403 REGISTRATION_DISABLED），新用户 role=USER；</li>
  *   <li>登录失败统一 401 INVALID_CREDENTIALS（不泄露用户名是否存在）；</li>
  *   <li>登录成功轮换令牌（旧令牌立即失效）；logout 清空 token_hash。</li>
@@ -58,47 +61,53 @@ public class AuthService {
         String username = requireValidUsername(rawUsername);
         String password = requireValidPassword(rawPassword);
 
-        String adminHash = jdbc.query(
-                "SELECT password_hash FROM app_user WHERE id = 1",
-                rs -> rs.next() ? rs.getString(1) : null);
-        if (UNCLAIMED_MARKER.equals(adminHash)) {
-            return claimAdmin(username, password);
+        // T4.37a-fix：认领=条件更新原子闸（0 行=已被并发认领），赢者拿 admin 会话，输者走普通注册
+        AuthSession claimed = claimAdminIfUnclaimed(username, password);
+        if (claimed != null) {
+            return claimed;
         }
         if (!registrationEnabled) {
             throw new ApiException(403, "REGISTRATION_DISABLED", "注册已关闭，请联系管理员");
         }
-        requireUsernameFree(username);
-        return createUser(username, password, "USER", -1L);
+        requireUsernameFree(username); // 快路径查重；并发窗口由唯一索引兜底（DuplicateKeyException → 409）
+        return createUser(username, password, "USER");
     }
 
-    /** 首次注册 = 认领管理员：写入 id=1、role=ADMIN，返回 token（忽略注册开关）。 */
-    private AuthSession claimAdmin(String username, String password) {
-        Long taken = jdbc.query(
-                "SELECT id FROM app_user WHERE id <> 1 AND lower(username) = lower(?)",
-                rs -> rs.next() ? rs.getLong(1) : null, username);
-        if (taken != null) {
+    /** 首次注册 = 认领管理员：**条件更新** WHERE id=1 AND password_hash='!'（原子，K-91）。
+     *  影响 1 行 → 认领成功返回 admin 会话；0 行 → 已被并发认领/已认领，返回 null 走普通注册。
+     *  用户名与其它用户撞唯一索引 → DuplicateKeyException 统一 409。 */
+    private AuthSession claimAdminIfUnclaimed(String username, String password) {
+        String token = tokenService.generate();
+        String tokenHash = tokenService.sha256Hex(token);
+        try {
+            int claimed = jdbc.update("""
+                    UPDATE app_user SET username = ?, password_hash = ?, role = 'ADMIN',
+                           token_hash = ?, token_issued_at = now()
+                    WHERE id = 1 AND password_hash = ?
+                    """, username, passwordHasher.hash(password), tokenHash, UNCLAIMED_MARKER);
+            if (claimed == 0) {
+                return null;
+            }
+            return new AuthSession(1L, username, "ADMIN", token);
+        } catch (DuplicateKeyException e) {
+            // 认领请求的用户名与既有其它用户撞名（ux_app_user_username 全表唯一）
             throw new ApiException(409, "USERNAME_TAKEN", "用户名已被占用");
         }
-        return createUser(username, password, "ADMIN", 1L);
     }
 
-    private AuthSession createUser(String username, String password, String role, long fixedId) {
+    /** 普通用户创建：唯一索引为并发最终闸门——INSERT 撞 ux_app_user_username → 409（不吞其它完整性异常）。 */
+    private AuthSession createUser(String username, String password, String role) {
         String token = tokenService.generate();
-        String hash = tokenService.sha256Hex(token);
+        String tokenHash = tokenService.sha256Hex(token);
         String passwordHash = passwordHasher.hash(password);
         long userId;
-        if (fixedId > 0) {
-            jdbc.update("""
-                    UPDATE app_user SET username = ?, password_hash = ?, role = ?,
-                           token_hash = ?, token_issued_at = now()
-                    WHERE id = ?
-                    """, username, passwordHash, role, hash, fixedId);
-            userId = fixedId;
-        } else {
+        try {
             userId = jdbc.queryForObject("""
                     INSERT INTO app_user (username, password_hash, role, token_hash, token_issued_at)
                     VALUES (?, ?, ?, ?, now()) RETURNING id
-                    """, Long.class, username, passwordHash, role, hash);
+                    """, Long.class, username, passwordHash, role, tokenHash);
+        } catch (DuplicateKeyException e) {
+            throw new ApiException(409, "USERNAME_TAKEN", "用户名已被占用");
         }
         return new AuthSession(userId, username, role, token);
     }
