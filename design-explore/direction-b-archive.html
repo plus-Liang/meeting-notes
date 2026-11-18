@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>方向 B · 暖纸档案 — 录音纪要平台</title>
+<style>
+:root{
+  --paper:#f6f1e6; --leaf:#fbf7ee; --ink:#1b1712; --ink-2:#4d463b; --ink-3:#6a604f;
+  --rule:#d8cdb8; --rule-soft:#e6ddcc; --seal:#9c2f1a; --seal-tint:#f2e0d6; --done:#4a6b43;
+  --serif:"Noto Serif SC","Source Han Serif SC","Songti SC",STSong,"STZhongsong",SimSun,Georgia,serif;
+  --sans:"PingFang SC","Microsoft YaHei","Helvetica Neue",Arial,sans-serif;
+  --mono:ui-monospace,"SF Mono","Cascadia Mono",Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-font-smoothing:antialiased}
+body{
+  background:var(--paper);color:var(--ink);font:400 16px/1.75 var(--sans);
+  background-image:radial-gradient(circle at 22% 8%,rgba(255,255,255,.6),transparent 46%);
+}
+::selection{background:var(--seal-tint)}
+a{color:inherit;text-decoration:none}
+.page{max-width:1180px;margin:30px auto;background:var(--leaf);border:1px solid var(--rule);
+  box-shadow:0 1px 0 #fff inset,0 18px 46px rgba(80,60,30,.10);position:relative}
+.page::before,.page::after{content:"";position:absolute;width:17px;height:17px;pointer-events:none}
+.page::before{left:-1px;top:-1px;border-left:2px solid var(--ink);border-top:2px solid var(--ink)}
+.page::after{right:-1px;bottom:-1px;border-right:2px solid var(--ink);border-bottom:2px solid var(--ink)}
+.pad{padding:0 52px}
+
+/* 文件抬头 */
+.docket{display:flex;align-items:center;gap:22px;padding:15px 0;border-bottom:1px solid var(--rule);
+  Ipx/1.5 var(--mono);letter-spacing:.16em;text-transform:uppercase;color:var(--ink-3)}
+.docket b{color:var(--ink);letter-spacing:.1em}
+.docket .r{margin-left:auto;display:flex;gap:18px}
+
+/* 刊头 */
+.masthead{display:grid;grid-template-columns:1fr 320px;gap:56px;align-items:end;padding:44px 0 34px;border-bottom:2px solid var(--ink)}
+.brand{font:600 15px/1.3 var(--serif);letter-spacing:.06em}
+.brand em{display:block;Ipx/1.6 var(--mono);font-style:normal;letter-spacing:.22em;text-transform:uppercase;color:var(--ink-3);margin-top:6px}
+.masthead h1{font:600 clamp(38px,5.2vw,62px)/1.12 var(--serif);letter-spacing:-.6px;margin-top:52px;text-wrap:balance}
+.masthead h1 i{font-style:normal;color:var(--seal)}
+.masthead .sub{margin-top:16px;font:400 13.5px/1.9 var(--sans);color:var(--ink-2);max-width:34em}
+figure.stamp{justify-self:end;align-self:start;text-align:right}
+figure.stamp .num{font:500 58px/1 var(--serif);color:var(--seal);font-variant-numeric:tabular-nums;letter-spacing:-1px}
+figure.stamp figcaption{Ipx/1.7 var(--mono);letter-spacing:.18em;text-transform:uppercase;color:var(--ink-3);margin-top:6px}
+figure.stamp .seal{display:inline-block;margin-top:18px;padding:9px 13px;border:1px solid var(--seal);color:var(--seal);
+  Ipx/1.4 var(--mono);letter-spacing:.2em;transform:rotate(-2deg);background:rgba(156,47,26,.04)}
+
+/* 目录导航 */
+.toc{display:flex;gap:34px;padding:13px 0;border-bottom:1px solid var(--rule);font:400 12px/1.5 var(--sans)}
+.toc a{display:flex;gap:8px;align-items:baseline;color:var(--ink-2);padding-bottom:2px;border-bottom:1px solid transparent;transition:.15s}
+.toc a i{Ipx/1 var(--mono);font-style:normal;color:var(--ink-3);letter-spacing:.1em}
+.toc a:hover{color:var(--ink);border-bottom-color:var(--ink)}
+.toc a[aria-current]{color:var(--seal);border-bottom-color:var(--seal)}
+.toc .who{margin-left:auto;color:var(--ink-3);font:400 11px/1.5 var(--mono);letter-spacing:.06em}
+
+/* 章节 */
+.sec{display:grid;grid-template-columns:186px minmax(0,1fr);gap:40px;padding:38px 0;border-bottom:1px solid var(--rule-soft)}
+.sec:last-of-type{border-bottom:0}
+.sec .side h2{font:600 21px/1.3 var(--serif);letter-spacing:.02em}
+.sec .side h2 sup{Ipx/1 var(--mono);color:var(--seal);letter-spacing:.14em;margin-right:9px;vertical-align:2px}
+.sec .side p{margin-top:9px;font:400 12px/1.8 var(--sans);color:var(--ink-3)}
+
+/* 三入口：编号 + 衬线标题，竖线分栏 */
+.inlets{display:grid;grid-template-columns:repeat(3,1fr);gap:0}
+.inlet{border-left:1px solid var(--rule);padding:0 22px 4px}
+.inlet:first-child{border-left:0;padding-left:0}
+.inlet .k{font:400 11px/1 var(--mono);color:var(--seal);letter-spacing:.16em}
+.inlet h3{margin:10px 0 7px;font:600 17px/1.35 var(--serif)}
+.inlet p{font:400 12px/1.8 var(--sans);color:var(--ink-2)}
+.inlet .go{margin-top:14px;display:inline-block;font:400 12px/1 var(--sans);color:var(--ink);
+  border-bottom:1px solid var(--ink);padding-bottom:3px;cursor:pointer}
+.inlet .go:hover{color:var(--seal);border-bottom-color:var(--seal)}
+.btn{display:inline-flex;align-items:center;justify-content:center;height:42px;padding:0 20px;cursor:pointer;
+  border:1px solid var(--ink);background:var(--ink);color:var(--leaf);font:400 13px/1 var(--sans);letter-spacing:.04em;border-radius:2px;transition:.15s}
+.btn:hover{background:#000}
+.btn.ghost{background:transparent;color:var(--ink);border-color:var(--rule)}
+.btn.ghost:hover{border-color:var(--ink)}
+:focus-visible{outline:2px solid var(--seal);outline-offset:3px}
+
+/* 台账式任务表 */
+.ledger{width:100%;border-collapse:collapse;Ipx/1 var(--mono);letter-spacing:.18em;text-transform:uppercase;color:var(--ink-3);
+  text-align:left;padding:0 0 9px;border-bottom:1px solid var(--ink)}
+.ledger tbody tr{border-bottom:1px dotted var(--rule);cursor:pointer;transition:background .15s}
+.ledger tbody tr:hover{background:#f3ecdd}
+.ledger td{padding:11px 10px 11px 0;vertical-align:middle}
+.ledger td:first-child{padding-left:0}
+.ledger .no{font:400 12px/1 var(--mono);color:var(--ink-3);font-variant-numeric:tabular-nums;width:58px}
+.ledger .name{font:500 14px/1.5 var(--sans);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:0}
+.ledger .name u{text-decoration:none;border-bottom:1px solid transparent;transition:border-color .15s}
+.ledger tbody tr:hover .name u{border-bottom-color:var(--seal);color:var(--seal)}
+.ledger .name small{display:block;Ipx/1.7 var(--mono);color:var(--ink-3);letter-spacing:.04em}
+.ledger .dur,.ledger .date{Jpx/1.5 var(--mono);color:var(--ink-2);font-variant-numeric:tabular-nums;white-space:nowrap}
+.ledger .lead-dots{border-bottom:1px dotted var(--rule);min-width:14px}
+.ledger .st{text-align:right;white-space:nowrap;Jpx/1.5 var(--sans);color:var(--ink-2)}
+.ledger .st i{display:inline-block;width:5px;height:5px;border-radius:50%;margin-right:6px;vertical-align:1px}
+.i-ok{background:var(--done)}.i-go{background:var(--seal)}.i-wait{background:#b0891e}.i-bad{background:#a3241a}
+
+/* 详情：首字下沉 + 两栏 */
+.dossier{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:0;margin-top:8px;
+  border:1px solid var(--rule);background:#fffdf8}
+.dossier .l{padding:26px 30px;border-right:1px solid var(--rule-soft)}
+.dossier .r{padding:26px 28px}
+.dossier h4{Ipx/1 var(--mono);letter-spacing:.2em;text-transform:uppercase;color:var(--ink-3);margin-bottom:13px}
+.dossier .ttl{font:600 20px/1.4 var(--serif);letter-spacing:-.2px;margin-bottom:11px}
+.drop::first-letter{float:left;font:600 40px/1 var(--serif);color:var(--seal);padding:4px 9px 0 0;margin-top:-2px}
+.drop{font:400 14px/1.95 var(--sans);color:var(--ink-2)}
+ol.pts{margin:16px 0 0;padding:0;list-style:none;counter-reset:p}
+ol.pts li{counter-increment:p;position:relative;padding:9px 0 9px 28px;border-top:1px dotted var(--rule);font:400 13px/1.8 var(--sans);color:var(--ink-2)}
+ol.pts li::before{content:"0" counter(p);position:absolute;left:0;top:9px;Ipx/1.8 var(--mono);color:var(--seal);letter-spacing:.06em}
+.todo{display:flex;gap:9px;align-items:flex-start;padding:10px 0;border-top:1px dotted var(--rule);font:400 13px/1.7 var(--sans);color:var(--ink-2)}
+.todo .bx{width:13px;height:13px;border:1px solid var(--ink-2);margin-top:4px;flex:none;background:#fff}
+.kw{display:flex;flex-wrap:wrap;gap:7px}
+.kw b{Ipx/1 var(--mono);letter-spacing:.06em;padding:5px 8px;border:1px solid var(--rule);background:var(--paper);color:var(--ink-2)}
+.facts{display:grid;grid-template-columns:1fr auto;gap:0 14px;font:400 12px/1.6 var(--sans);color:var(--ink-2)}
+.facts dt,.facts dd{padding:6px 0;border-top:1px dotted var(--rule)}
+.facts dd{font:400 12px/1.6 var(--mono);color:var(--ink);text-align:right;font-variant-numeric:tabular-nums}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{Jpx/1 var(--sans);padding:6px 11px;border:1px solid var(--rule);background:transparent;cursor:pointer;color:var(--ink-2);border-radius:2px;transition:.15s}
+.chip:hover{border-color:var(--ink);color:var(--ink)}
+.chip[aria-pressed="true"]{background:var(--ink);border-color:var(--ink);color:var(--leaf)}
+.bar{height:4px;background:var(--rule-soft);margin-top:9px;border:1px solid var(--rule)}
+.bar i{display:block;height:100%;background:var(--seal)}
+
+/* 页脚 */
+footer{display:flex;justify-content:space-between;gap:18px;padding:16px 0 22px;border-top:2px solid var(--ink);
+  Ipx/1.7 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3)}
+
+@media (max-width:1000px){
+  .page{margin:0}
+  .pad{padding:0 26px}
+  .masthead{grid-template-columns:1fr;gap:24px}
+  .masthead h1{margin-top:26px}
+  figure.stamp{justify-self:start;text-align:left}
+  .sec{grid-template-columns:1fr;gap:14px;padding:28px 0}
+  .dossier{grid-template-columns:1fr}
+  .dossier .l{border-right:0;border-bottom:1px solid var(--rule-soft)}
+}
+@media (max-width:720px){
+  .pad{padding:0 18px}
+  .docket{flex-wrap:wrap;gap:6px 14px}
+  .docket .r{margin-left:0;width:100%}
+  .toc{flex-wrap:wrap;gap:12px 18px}
+  .inlets{grid-template-columns:1fr}
+  .inlet{border-left:0;border-top:1px solid var(--rule-soft);padding:16px 0 4px}
+  .inlet:first-child{border-top:0}
+  .ledger .date,.ledger .dur{display:none}
+  .ledger .name{max-width:0;white-space:nowrap}
+}
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="pad">
+
+    <div class="docket">
+      <b>REC-NOTES</b><span>自托管 · 私有部署</span>
+      <span class="r"><span>档案 299</span><span>V0.1.0</span><span>2026-11-18</span></span>
+    </div>
+
+    <div class="masthead">
+      <div>
+        <div class="brand">录音纪要平台<em>transcript &amp; minutes archive</em></div>
+        <h1>录音进来，<br>纪要归档出去<i>。</i></h1>
+        <p class="sub">上传音视频或直接贴链接，转写、结构化摘要、待办提取一次完成；全部在本机运行，音频不出这台机器。</p>
+      </div>
+      <figure class="stamp">
+        <div class="num">36/36</div>
+        <figcaption>今日配额 · 已用尽</figcaption>
+        <span class="seal">本机私有</span>
+      </figure>
+    </div>
+
+    <nav class="toc">
+      <a href="#" aria-current="page"><i>01</i>提交</a>
+      <a href="#"><i>02</i>任务列表</a>
+      <a href="#"><i>03</i>设置</a>
+      <span class="who">15360364827 · 管理员 · 退出</span>
+    </nav>
+
+    <section class="sec">
+      <div class="side">
+        <h2><sup>01</sup>提交</h2>
+        <p>三种入库方式，最终都进入同一条转写队列。</p>
+      </div>
+      <div class="inlets">
+        <div class="inlet">
+          <div class="k">FILE</div><h3>音视频文件</h3>
+          <p>拖入或选择，按文件名自动定模板；单文件 200 MB / 60 分钟，可批量 20 个。</p>
+          <span class="go">选择文件 →</span>
+        </div>
+        <div class="inlet">
+          <div class="k">LINK</div><h3>音视频直链</h3>
+          <p>贴直链直接转写；平台页面链接只做预览核对，不抓取页面内容。</p>
+          <span class="go">粘贴链接 →</span>
+        </div>
+        <div class="inlet">
+          <div class="k">REC</div><h3>浏览器录音</h3>
+          <p>在本页直接录音，停止命名后进入队列，流程与上传一致。</p>
+          <span class="go">开始录制 →</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="sec">
+      <div class="side">
+        <h2><sup>02</sup>任务台账</h2>
+        <p>按时间倒序；点行进入详情。共 299 条，此处示最近 5 条。</p>
+      </div>
+      <div>
+        <table class="ledger">
+          <thead><tr><th>No.</th><th>文件名 / 模板</th><th>时长</th><th>提交</th><th style="text-align:right">状态</th></tr></thead>
+          <tbody>
+            <tr>
+              <td class="no">#650</td>
+              <td class="name"><u>t435a-d92b4b81-7774-4685-a11c-2b600658e091.wav</u><small>会议 · AI 开发 · 需求提示词</small></td>
+              <td class="dur">1 分 30 秒</td><td class="date">11-18 17:16</td>
+              <td class="st"><i class="i-ok"></i>已完成</td>
+            </tr>
+            <tr>
+              <td class="no">#646</td>
+              <td class="name"><u>batch-e2e-b.wav</u><small>会议</small></td>
+              <td class="dur">1 秒</td><td class="date">11-18 17:16</td>
+              <td class="st"><i class="i-ok"></i>已完成</td>
+            </tr>
+            <tr>
+              <td class="no">#643</td>
+              <td class="name"><u>paste.txt</u><small>会议 · N14 自动化测试 · 验收覆盖</small></td>
+              <td class="dur">—</td><td class="date">11-18 17:15</td>
+              <td class="st"><i class="i-ok"></i>已完成</td>
+            </tr>
+            <tr>
+              <td class="no">#631</td>
+              <td class="name"><u>t435a-d75f9931-249d-4b69-b4ca-8d376f1f4b9e.wav</u><small>AI 开发 · APP 制作 · 智能体</small></td>
+              <td class="dur">1 分 30 秒</td><td class="date">11-18 16:55</td>
+              <td class="st"><i class="i-ok"></i>已完成</td>
+            </tr>
+            <tr>
+              <td class="no">#602</td>
+              <td class="name"><u>paste.txt</u><small>N14 · 自动化测试 · 真实依据</small></td>
+              <td class="dur">—</td><td class="date">11-18 15:53</td>
+              <td class="st"><i class="i-ok"></i>已完成</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="sec">
+      <div class="side">
+        <h2><sup>03</sup>档案 #552</h2>
+        <p>会议 · 1 分 01 秒 · 1.8 MB<br>2026-11-17 22:55 · 云端 AI</p>
+        <div class="facts" style="margin-top:18px">
+          <dt>片段</dt><dd>24 / 31</dd>
+          <dt>字数</dt><dd>1 842</dd>
+          <dt>模板</dt><dd>会议</dd>
+          <dt>标签</dt><dd>3</dd>
+        </div>
+        <div style="margin-top:18px">
+          <div style="Ipx/1 var(--mono);letter-spacing:.2em;text-transform:uppercase;color:var(--ink-3);margin-bottom:8px">转写进度</div>
+          <div class="bar"><i style="width:100%"></i></div>
+        </div>
+      </div>
+      <div class="dossier">
+        <div class="l">
+          <h4>摘要</h4>
+          <div class="ttl">团队协作与 AI Coding 复盘</div>
+          <p class="drop">本次分享围绕公司内 AI Coding 实战与团队协作，介绍从早期单会话 Agent 使用遇到的问题，到切换 Agent 或新开会话后希望继续原需求、避免重复解释背景。并以测试阶段发现新 Bug、当前会话阻塞需新开会话为例说明痛点，最终给出替代方案与工作复盘。</p>
+          <ol class="pts">
+            <li>分享主题：在公司中使用 AI Coding 的实战经验，以及团队协作方式。</li>
+            <li>早期单会话 Agent 模式带来的重复解释成本。</li>
+            <li>跨会话承接需求：换 Agent 或新开会话时保留原需求。</li>
+          </ol>
+        </div>
+        <div class="r">
+          <h4>待办</h4>
+          <div class="todo"><span class="bx"></span><span>本段内容没有待办事项</span></div>
+          <h4 style="margin-top:24px">关键词</h4>
+          <div class="kw"><b>AI Coding</b><b>Agent</b><b>新会话</b><b>团队协作</b><b>工作复盘</b></div>
+          <h4 style="margin-top:24px">模板</h4>
+          <div class="chips">
+            <button class="chip" aria-pressed="true">会议</button><button class="chip">课程</button><button class="chip">访谈</button>
+            <button class="chip">播客</button><button class="chip">短视频</button>
+          </div>
+          <div style="margin-top:22px;display:flex;gap:10px;flex-wrap:wrap">
+            <button class="btn">导出 Markdown</button><button class="btn ghost">生成分享链接</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <footer><span>v0.1.0 · MIT · 本机运行</span><span>方向 B / 暖纸档案</span></footer>
+  </div>
+</div>
+</body>
+</html>

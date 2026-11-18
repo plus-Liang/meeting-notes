@@ -1,0 +1,406 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>方向 C · 灰版仪器 — 录音纪要平台</title>
+<style>
+:root{
+  --bg:#eceeeb; --panel:#ffffff; --panel-2:#f4f5f2; --ink:#13181a; --ink-2:#3f4a4c; --ink-3:#646c6d;
+  --rule:#c9cfca; --rule-soft:#e2e6e1; --signal:#1a4fd6; --signal-tint:#e6ecfb; --ok:#2f6b3d; --warn:#8a5a00; --bad:#a3221a;
+  --serif:"Noto Serif SC","Source Han Serif SC","Songti SC",STSong,SimSun,Georgia,serif;
+  --sans:"PingFang SC","Microsoft YaHei","Helvetica Neue",Arial,sans-serif;
+  --mono:ui-monospace,"SF Mono","Cascadia Mono",Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-font-smoothing:antialiased}
+body{background:var(--bg);color:var(--ink);font:400 15px/1.65 var(--sans)}
+a{color:inherit;text-decoration:none}
+::selection{background:#cfdcff}
+.frame{max-width:1340px;margin:0 auto;padding:22px 26px 40px}
+
+/* 系统状态横条：仪器开机自检感 */
+.statusbar{display:flex;align-items:center;gap:22px;padding:0 0 10px;
+  Ipx/1.4 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3)}
+.statusbar b{color:var(--ink);font-weight:500;letter-spacing:.1em}
+.statusbar .r{margin-left:auto;display:flex;gap:20px;align-items:center}
+.lamp{display:inline-flex;align-items:center;gap:6px}
+.lamp i{width:6px;height:6px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 2px rgba(47,107,61,.15)}
+
+/* 主壳：左导航轨 / 主台 / 读数栏 */
+.shell{display:grid;grid-template-columns:172px minmax(0,1fr) 268px;background:var(--panel);
+  border:1px solid var(--ink);box-shadow:6px 6px 0 rgba(19,24,26,.06)}
+
+/* 左轨 */
+.rail{border-right:1px solid var(--rule);background:var(--panel-2);display:flex;flex-direction:column}
+.mark{padding:18px 16px 16px;border-bottom:1px solid var(--rule)}
+.mark b{display:block;font:600 14px/1.4 var(--serif);letter-spacing:.04em}
+.mark span{display:block;margin-top:7px;Ipx/1.6 var(--mono);letter-spacing:.2em;text-transform:uppercase;color:var(--ink-3)}
+.railnav{display:flex;flex-direction:column;padding:8px 0}
+.railnav a{display:flex;align-items:baseline;gap:10px;padding:11px 16px;Kpx/1.4 var(--sans);
+  color:var(--ink-2);border-left:2px solid transparent;transition:background .12s,color .12s,border-color .12s}
+.railnav a i{Ipx/1 var(--mono);font-style:normal;color:var(--ink-3);letter-spacing:.1em}
+.railnav a:hover{background:#e9ece7;color:var(--ink)}
+.railnav a[aria-current]{background:#fff;border-left-color:var(--signal);color:var(--ink);font-weight:500}
+.railnav a[aria-current] i{color:var(--signal)}
+.railtail{margin-top:auto;padding:14px 16px;border-top:1px solid var(--rule);
+  Ipx/1.8 var(--mono);letter-spacing:.1em;color:var(--ink-3)}
+.railtail b{display:block;color:var(--ink);font-weight:500}
+
+/* 主台 */
+.main{border-right:1px solid var(--rule);display:flex;flex-direction:column;min-width:0}
+.thead{display:flex;align-items:flex-end;gap:18px;padding:22px 24px 16px;border-bottom:2px solid var(--ink)}
+.thead h1{font:600 30px/1.2 var(--serif);letter-spacing:-.4px}
+.thead .sub{font:400 12px/1.5 var(--sans);color:var(--ink-3);padding-bottom:3px}
+.thead .acts{margin-left:auto;display:flex;gap:8px}
+
+/* 按钮：方角、等宽标签 */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;height:38px;padding:0 15px;cursor:pointer;
+  border:1px solid var(--ink);background:var(--ink);color:#fff;border-radius:0;
+  font:500 11px/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;transition:.12s}
+.btn:hover{background:#000}
+.btn.sec{background:var(--panel);color:var(--ink);border-color:var(--rule)}
+.btn.sec:hover{background:var(--panel-2);border-color:var(--ink)}
+.btn.sig{background:var(--signal);border-color:var(--signal);color:#fff}
+.btn.sig:hover{background:#153fb0;border-color:#153fb0}
+:focus-visible{outline:2px solid var(--signal);outline-offset:2px}
+
+/* 入口：三格仪表 */
+.inlets{display:grid;grid-template-columns:repeat(3,1fr);border-bottom:1px solid var(--rule)}
+.cell{padding:18px 20px 20px;border-right:1px solid var(--rule-soft);transition:background .12s}
+.cell:last-child{border-right:0}
+.cell:hover{background:var(--panel-2)}
+.cell .k{display:flex;justify-content:space-between;align-items:baseline;
+  Ipx/1 var(--mono);letter-spacing:.18em;text-transform:uppercase;color:var(--ink-3)}
+.cell .k b{color:var(--signal);letter-spacing:.1em}
+.cell h3{margin:9px 0 6px;Jpx/1.7 var(--sans);color:var(--ink-2);min-height:2.4em}
+.cell .go{margin-top:13px;display:inline-flex;align-items:center;height:32px;padding:0 12px;cursor:pointer;
+  border:1px solid var(--rule);background:var(--panel);Ipx/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--ink-2);transition:.12s}
+.cell .go:hover{border-color:var(--ink);color:var(--ink)}
+
+/* 工具栏 */
+.toolbar{display:flex;align-items:center;gap:10px;padding:12px 24px;border-bottom:1px solid var(--rule);flex-wrap:wrap}
+.search{display:flex;align-items:center;gap:8px;height:34px;padding:0 11px;border:1px solid var(--rule);background:var(--panel-2);flex:1;min-width:180px}
+.search span{Ipx/1 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3)}
+.search input{border:0;background:transparent;outline:none;Kpx/1 var(--sans);color:var(--ink);width:100%}
+.segis{display:flex;border:1px solid var(--rule)}
+.segis button{height:34px;padding:0 13px;border:0;border-right:1px solid var(--rule);background:var(--panel);cursor:pointer;
+  Ipx/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--ink-2);transition:.12s}
+.segis button:last-child{border-right:0}
+.segis button:hover{background:var(--panel-2);color:var(--ink)}
+.segis button[aria-pressed="true"]{background:var(--ink);color:#fff}
+.segis button .n{opacity:.6;margin-left:5px;font-variant-numeric:tabular-nums}
+
+/* 任务表：密排、等宽数字 */
+.table{width:100%;border-collapse:collapse}
+.table thead th{position:sticky;top:0;background:var(--panel-2);border-bottom:1px solid var(--rule);
+  padding:8px 12px;text-align:left;Ipx/1 var(--mono);letter-spacing:.18em;text-transform:uppercase;color:var(--ink-3);white-space:nowrap}
+.table tbody tr{border-bottom:1px solid var(--rule-soft);cursor:pointer;transition:background .12s}
+.table tbody tr:hover{background:var(--panel-2)}
+.table tbody tr[aria-selected="true"]{background:var(--signal-tint);box-shadow:inset 2px 0 0 var(--signal)}
+.table td{padding:9px 12px;vertical-align:middle;Kpx/1.5 var(--sans)}
+.table .no{font:400 11px/1 var(--mono);color:var(--ink-3);font-variant-numeric:tabular-nums;white-space:nowrap}
+.table .tt{max-width:0;width:46%}
+.table .tt b{display:block;font-weight:500;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.table .tt small{Ipx/1.7 var(--mono);color:var(--ink-3);letter-spacing:.05em;text-transform:uppercase}
+.table .num{font:400 11px/1 var(--mono);color:var(--ink-2);font-variant-numeric:tabular-nums;white-space:nowrap;text-align:right}
+.table .st{white-space:nowrap}
+.badge{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 7px;border:1px solid var(--rule);
+  Ipx/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--ink-2);background:var(--panel)}
+.badge i{width:5px;height:5px;border-radius:50%}
+.badge.ok{color:var(--ok);border-color:#bcd0bf;background:#eef5ef}
+.badge.ok i{background:var(--ok)}
+.badge.go{color:var(--signal);border-color:#bfcdf3;background:var(--signal-tint)}
+.badge.go i{background:var(--signal)}
+.badge.wait{color:var(--warn);border-color:#dfd0a8;background:#f8f2e2}
+.badge.wait i{background:#b0891e}
+.badge.bad{color:var(--bad);border-color:#e2bfba;background:#fbeeec}
+.badge.bad i{background:var(--bad)}
+
+/* 详情：读数 + 文本两栏 */
+.detail{display:grid;grid-template-columns:minmax(0,1fr) 268px;border-top:1px solid var(--rule);min-height:0}
+.detail .doc{padding:18px 24px 24px}
+.dtab{display:flex;gap:0;border-bottom:1px solid var(--rule);margin:0 -24px 18px;padding:0 24px}
+.dtab a{padding:11px 0 9px;margin-right:24px;font:400 11px/1 var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3);border-bottom:2px solid transparent}
+.dtab a[aria-current]{color:var(--ink);border-bottom-color:var(--signal)}
+.dhead{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+.dhead h2{Ipx/1.35 var(--serif)}
+.dhead .no{Ipx/1 var(--mono);letter-spacing:.12em;color:var(--ink-3)}
+.dhead .acts{margin-left:auto;display:flex;gap:7px}
+.blk{margin-top:16px}
+.blk h4{Ipx/1 var(--mono);letter-spacing:.2em;text-transform:uppercase;color:var(--ink-3);
+  padding-bottom:7px;border-bottom:1px solid var(--rule);margin-bottom:9px}
+.blk p{font:400 13px/1.85 var(--sans);color:var(--ink-2)}
+ol.num{margin:0;padding:0;list-style:none;counter-reset:n}
+ol.num li{counter-increment:n;display:grid;grid-template-columns:26px 1fr;gap:8px;padding:7px 0;border-bottom:1px solid var(--rule-soft);Kpx/1.7 var(--sans);color:var(--ink-2)}
+ol.num li::before{content:counter(n,decimal-leading-zero);Ipx/1.9 var(--mono);color:var(--signal);letter-spacing:.06em}
+.todo{display:flex;gap:9px;align-items:flex-start;padding:8px 0;border-bottom:1px solid var(--rule-soft);Kpx/1.7 var(--sans);color:var(--ink-2)}
+.todo .bx{width:13px;height:13px;border:1px solid var(--ink-2);margin-top:4px;flex:none;background:#fff}
+.kw{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px}
+.kw b{Ipx/1 var(--mono);letter-spacing:.1em;text-transform:uppercase;padding:5px 7px;border:1px solid var(--rule);background:var(--panel-2);color:var(--ink-2)}
+/* 读数栏 */
+.readout{border-left:1px solid var(--rule);background:var(--panel-2);padding:18px 18px 22px}
+.readout h5{Ipx/1 var(--mono);letter-spacing:.2em;text-transform:uppercase;color:var(--ink-3);margin-bottom:10px}
+.gauge{margin-bottom:20px}
+.gauge .v{font:500 34px/1 var(--mono);letter-spacing:-1.5px;font-variant-numeric:tabular-nums}
+.gauge .v small{Ipx/1 var(--mono);letter-spacing:.1em;color:var(--ink-3);margin-left:7px}
+.ticks{display:flex;gap:2px;margin-top:9px}
+.ticks i{flex:1;height:12px;background:var(--rule-soft);border:1px solid var(--rule)}
+.ticks i.on{background:var(--signal);border-color:var(--signal)}
+.readrow{display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-top:1px solid var(--rule);
+  font:400 11px/1.5 var(--sans);color:var(--ink-2)}
+.readrow b{font:400 11px/1.5 var(--mono);color:var(--ink);font-variant-numeric:tabular-nums}
+.kvline{display:grid;grid-template-columns:1fr auto;gap:0 10px;Jpx/1.6 var(--sans);color:var(--ink-2)}
+.kvline dt,.kvline dd{padding:6px 0;border-top:1px solid var(--rule)}
+.kvline dd{Jpx/1.6 var(--mono);color:var(--ink);text-align:right;font-variant-numeric:tabular-nums}
+.chips{display:flex;flex-wrap:wrap;gap:5px}
+.chip{Ipx/1 var(--sans);padding:6px 9px;border:1px solid var(--rule);background:var(--panel);cursor:pointer;color:var(--ink-2);transition:.12s}
+.chip:hover{border-color:var(--ink);color:var(--ink)}
+.chip[aria-pressed="true"]{background:var(--ink);border-color:var(--ink);color:#fff}
+
+/* 底部样本 */
+.strip{margin-top:22px;background:var(--panel);border:1px solid var(--rule);padding:16px 20px 20px}
+.strip .hd{display:flex;align-items:baseline;gap:12px;Ipx/1 var(--mono);letter-spacing:.18em;text-transform:uppercase;color:var(--ink-3);
+  padding-bottom:10px;border-bottom:1px solid var(--rule);margin-bottom:14px}
+.strip .hd b{color:var(--ink);letter-spacing:.1em}
+.specrow{display:grid;grid-template-columns:104px 1fr;gap:14px 18px;padding:10px 0;border-bottom:1px solid var(--rule-soft);align-items:center}
+.specrow:last-child{border-bottom:0}
+.specrow .lb{Ipx/1.6 var(--mono);letter-spacing:.16em;text-transform:uppercase;color:var(--ink-3)}
+.specrow .demo{display:flex;flex-wrap:wrap;gap:9px;align-items:center}
+input.f{height:34px;padding:0 10px;border:1px solid var(--rule);background:var(--panel);Kpx/1 var(--sans);color:var(--ink);width:260px;border-radius:0}
+input.f::placeholder{color:var(--ink-3)}
+input.f:focus{outline:none;border-color:var(--signal);box-shadow:0 0 0 3px rgba(26,79,214,.14)}
+footer{display:flex;justify-content:space-between;gap:18px;margin-top:18px;Ipx/1.7 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3)}
+
+@media (max-width:1180px){
+  .shell{grid-template-columns:172px minmax(0,1fr)}
+  .readout{border-left:0;border-top:1px solid var(--rule);display:grid;grid-template-columns:repeat(3,1fr);gap:0 22px}
+  .readout h5:first-of-type{grid-column:1/-1}
+}
+@media (max-width:960px){
+  .detail{grid-template-columns:1fr}
+  .readout{grid-template-columns:1fr 1fr}
+}
+@media (max-width:760px){
+  .frame{padding:12px 12px 26px}
+  .statusbar{flex-wrap:wrap;gap:8px 16px}
+  .statusbar .r{margin-left:0;width:100%;flex-wrap:wrap}
+  .shell{grid-template-columns:1fr;box-shadow:none}
+  .rail{border-right:0;border-bottom:1px solid var(--rule)}
+  .railnav{flex-direction:row;overflow-x:auto;padding:0}
+  .railnav a{border-left:0;border-bottom:2px solid transparent;white-space:nowrap;padding:10px 12px}
+  .railnav a[aria-current]{border-left:0;border-bottom-color:var(--signal)}
+  .railtail{display:none}
+  .thead{flex-wrap:wrap;padding:16px 14px 12px}
+  .thead .acts{margin-left:0;width:100%}
+  .inlets{grid-template-columns:1fr}
+  .cell{border-right:0;border-bottom:1px solid var(--rule-soft)}
+  .toggle-col{display:none}
+  .table td:nth-child(4),.table td:nth-child(5),.table thead th:nth-child(4),.table thead th:nth-child(5){display:none}
+  .detail .doc{padding:14px 14px 18px}
+  .dtab{margin:0 -14px 14px;padding:0 14px;overflow-x:auto}
+  .readout{grid-template-columns:1fr}
+  .specrow{grid-template-columns:1fr;gap:8px}
+}
+</style>
+</head>
+<body>
+<div class="frame">
+
+  <div class="statusbar">
+    <span class="lamp"><i></i><b>系统正常</b></span>
+    <span>Postgres · Redis · MinIO · FFmpeg</span>
+    <span class="r"><span>队列 0</span><span>今日 36 / 36</span><span>v0.1.0</span></span>
+  </div>
+
+  <div class="shell">
+    <!-- 左：导航轨 -->
+    <nav class="rail">
+      <div class="mark"><b>录音纪要平台</b><span>private · self-hosted</span></div>
+      <div class="railnav">
+        <a href="#" aria-current="page"><i>01</i>提交</a>
+        <a href="#"><i>02</i>任务列表</a>
+        <a href="#"><i>03</i>设置</a>
+      </div>
+      <div class="railtail"><b>15360364827</b>管理员<br><span style="text-transform:none;letter-spacing:.04em">退出登录</span></div>
+    </nav>
+
+    <!-- 中：主台 -->
+    <div class="main">
+      <div class="thead">
+        <h1>提交与队列</h1>
+        <div class="sub">全部在本机处理 · 音频不出机器</div>
+        <div class="acts">
+          <button class="btn sec">任务列表</button>
+          <button class="btn sig">上传文件</button>
+        </div>
+      </div>
+
+      <div class="inlets">
+        <div class="cell">
+          <div class="k"><span>FILE</span><b>01</b></div>
+          <h3>音视频文件</h3>
+          <p>单文件 200 MB / 60 分钟；可一次批量 20 个，按文件名自动定模板。</p>
+          <span class="go">选择文件</span>
+        </div>
+        <div class="cell">
+          <div class="k"><span>LINK</span><b>02</b></div>
+          <h3>音视频直链</h3>
+          <p>直链可直接转写；平台页面链接只做预览，不抓取内容。</p>
+          <span class="go">粘贴链接</span>
+        </div>
+        <div class="cell">
+          <div class="k"><span>REC</span><b>03</b></div>
+          <h3>浏览器录音</h3>
+          <p>本页直接录音，停止命名后进入队列，与上传同流程。</p>
+          <span class="go">开始录制</span>
+        </div>
+      </div>
+
+      <div class="toolbar">
+        <div class="search"><span>SEARCH</span><input placeholder="文件名或任务 ID"></div>
+        <div class="segis" role="group" aria-label="按状态筛选">
+          <button aria-pressed="true">全部<span class="n">299</span></button>
+          <button>进行中<span class="n">0</span></button>
+          <button>已完成<span class="n">299</span></button>
+          <button>失败<span class="n">0</span></button>
+          <button>收藏<span class="n">0</span></button>
+        </div>
+        <button class="btn sec">导出</button>
+      </div>
+
+      <table class="table">
+        <thead>
+          <tr>
+            <th>ID</th><th>文件名 / 模板</th><th style="text-align:right">时长</th>
+            <th>提交时间</th><th style="text-align:right">字数</th><th>状态</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr aria-selected="true">
+            <td class="no">#650</td>
+            <td class="tt"><b>t435a-d92b4b81-7774-4685-a11c-2b600658e091.wav</b><small>会议 · 需求提示词 · AI 开发</small></td>
+            <td class="num">1:30</td><td class="num">11-18 17:16</td><td class="num">1 842</td>
+            <td class="st"><span class="badge ok"><i></i>已完成</span></td>
+          </tr>
+          <tr>
+            <td class="no">#646</td>
+            <td class="tt"><b>batch-e2e-b.wav</b><small>会议</small></td>
+            <td class="num">0:01</td><td class="num">11-18 17:16</td><td class="num">12</td>
+            <td class="st"><span class="badge ok"><i></i>已完成</span></td>
+          </tr>
+          <tr>
+            <td class="no">#643</td>
+            <td class="tt"><b>paste.txt</b><small>会议 · N14 自动化测试 · 验收覆盖</small></td>
+            <td class="num">—</td><td class="num">11-18 17:15</td><td class="num">986</td>
+            <td class="st"><span class="badge ok"><i></i>已完成</span></td>
+          </tr>
+          <tr>
+            <td class="no">#631</td>
+            <td class="tt"><b>t435a-d75f9931-249d-4b69-b4ca-8d376f1f4b9e.wav</b><small>AI 开发 · APP 制作 · 智能体</small></td>
+            <td class="num">1:30</td><td class="num">11-18 16:55</td><td class="num">1 735</td>
+            <td class="st"><span class="badge ok"><i></i>已完成</span></td>
+          </tr>
+          <tr>
+            <td class="no">#602</td>
+            <td class="tt"><b>paste.txt</b><small>N14 · 自动化测试 · 真实依据</small></td>
+            <td class="num">—</td><td class="num">11-18 15:53</td><td class="num">1 204</td>
+            <td class="st"><span class="badge ok"><i></i>已完成</span></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="detail">
+        <div class="doc">
+          <div class="dtab">
+            <a href="#" aria-current="page">摘要</a><a href="#">逐字稿</a><a href="#">待办</a><a href="#">导出</a>
+          </div>
+          <div class="dhead">
+            <h2>团队协作与 AI Coding 复盘</h2>
+            <span class="no">#552 · 会议 · 云端 AI</span>
+            <div class="acts"><button class="btn sec">播放</button><button class="btn sec">导出 MD</button></div>
+          </div>
+          <div class="blk">
+            <h4>摘要</h4>
+            <p>本次分享围绕公司内 AI Coding 实战与团队协作，介绍从早期单会话 Agent 使用遇到的问题，到切换 Agent 或新开会话后希望继续原需求、避免重复解释背景。并以测试阶段发现新 Bug、当前会话阻塞需新开会话为例说明痛点，最终给出替代方案与工作复盘。</p>
+          </div>
+          <div class="blk">
+            <h4>要点</h4>
+            <ol class="num">
+              <li>分享主题：在公司中使用 AI Coding 的实战经验，以及团队协作方式。</li>
+              <li>早期单会话 Agent 模式带来的重复解释成本。</li>
+              <li>跨会话承接需求：换 Agent 或新开会话时保留原需求。</li>
+            </ol>
+          </div>
+          <div class="blk">
+            <h4>待办</h4>
+            <div class="todo"><span class="bx"></span><span>本段内容没有待办事项</span></div>
+          </div>
+          <div class="blk">
+            <h4>关键词</h4>
+            <div class="kw"><b>AI Coding</b><b>Agent</b><b>新会话</b><b>团队协作</b><b>工作复盘</b></div>
+          </div>
+        </div>
+
+        <aside class="readout">
+          <h5>配额</h5>
+          <div class="gauge">
+            <div class="v">36<small>/ 36 次</small></div>
+            <div class="ticks"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i></div>
+          </div>
+          <h5>本月读数</h5>
+          <div class="readrow"><span>任务</span><b>31</b></div>
+          <div class="readrow"><span>音频时长</span><b>8.4 h</b></div>
+          <div class="readrow"><span>平均转写</span><b>42 s</b></div>
+          <h5 style="margin-top:18px">当前任务</h5>
+          <dl class="kvline">
+            <dt>片段</dt><dd>24 / 31</dd>
+            <dt>字数</dt><dd>1 842</dd>
+            <dt>模板</dt><dd>会议</dd>
+            <dt>标签</dt><dd>3</dd>
+          </dl>
+          <h5 style="margin-top:18px">模板切换</h5>
+          <div class="chips">
+            <button class="chip" aria-pressed="true">会议</button><button class="chip">课程</button><button class="chip">访谈</button>
+            <button class="chip">播客</button><button class="chip">短视频</button>
+          </div>
+        </aside>
+      </div>
+    </div>
+
+    <!-- 右：读数栏（大屏独享） -->
+    <aside class="readout" style="border-left:1px solid var(--rule)">
+      <h5>运行状态</h5>
+      <div class="readrow"><span>服务</span><b>5 / 5</b></div>
+      <div class="readrow"><span>队列</span><b>0</b></div>
+      <div class="readrow"><span>今日</span><b>36 / 36</b></div>
+      <h5 style="margin-top:22px">任务总量</h5>
+      <div class="gauge"><div class="v">299</div></div>
+      <h5 style="margin-top:22px">按状态</h5>
+      <div class="readrow"><span>已完成</span><b>299</b></div>
+      <div class="readrow"><span>进行中</span><b>0</b></div>
+      <div class="readrow"><span>失败</span><b>0</b></div>
+      <h5 style="margin-top:22px">账号</h5>
+      <div class="readrow"><span>15360364827</span><b>管理员</b></div>
+      <div class="readrow"><span>分享链接</span><b>1</b></div>
+    </aside>
+  </div>
+
+  <section class="strip">
+    <div class="hd"><b>组件与状态</b><span>方向稿样本 · 非产品实现</span></div>
+    <div class="specrow"><div class="lb">按钮</div><div class="demo">
+      <button class="btn sig">上传并转写</button><button class="btn">主操作</button><button class="btn sec">次要</button><button class="btn sec">删除任务</button>
+    </div></div>
+    <div class="specrow"><div class="lb">输入</div><div class="demo">
+      <input class="f" placeholder="https://… 音视频直链"><input class="f" placeholder="搜索文件名或 ID">
+    </div></div>
+    <div class="specrow"><div class="lb">状态</div><div class="demo">
+      <span class="badge wait"><i></i>排队中</span><span class="badge go"><i></i>转写中</span>
+      <span class="badge ok"><i></i>已完成</span><span class="badge bad"><i></i>失败</span>
+    </div></div>
+  </section>
+
+  <footer><span>v0.1.0 · MIT · 自托管</span><span>方向 C / 灰版仪器</span></footer>
+</div>
+</body>
+</html>
