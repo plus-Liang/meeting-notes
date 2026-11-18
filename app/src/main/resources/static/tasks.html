@@ -4,24 +4,47 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="description" content="查看转写任务：按状态筛选，进行中任务自动刷新，失败任务可批量重试。">
-<title>任务列表 · 录音纪要平台</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Ctext y=%2713%27 font-size=%2713%27%3E%F0%9F%8E%99%3C/text%3E%3C/svg%3E">
+<title>任务台账 · 录音纪要平台</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Ctext y=%2713%27 font-size=%2713%27%3E%E2%96%B6%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="components.css">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<nav>
-  <span class="brand">录音纪要平台</span>
-  <a href="index.html">提交</a>
-  <a href="tasks.html" aria-current="page">任务列表</a>
-  <a href="settings.html">设置</a>
-  <span class="mn-userbar" data-mn-userbar></span>
-</nav>
-<main>
-  <div class="card">
-    <h1>任务列表</h1>
-    <p class="hint">按状态筛选；有进行中的任务时每 3 秒自动刷新，并可继续加载更早的任务。</p>
+<div class="wrap">
+
+  <div class="docket">
+    <b>REC-NOTES</b><span>自托管 · 私有部署</span>
+    <span class="r">
+      <span id="docketCounts">—</span>
+      <span id="docketDate">—</span>
+      <span>V0.1.0</span>
+    </span>
+  </div>
+
+  <header class="top">
+    <a class="brand" href="index.html">录音纪要平台<em>transcript &amp; minutes</em></a>
+    <nav class="nav">
+      <a href="index.html">提交</a>
+      <a href="tasks.html" aria-current="page">任务台账</a>
+      <a href="settings.html">设置</a>
+    </nav>
+    <span class="who mn-userbar" data-mn-userbar></span>
+  </header>
+
+  <section class="mast">
+    <h1>任务台账<i>。</i></h1>
+    <dl class="meta">
+      <div><dt>全部</dt><dd class="big" id="mastTotal">—</dd></div>
+      <div><dt>进行中</dt><dd id="mastActive">—</dd></div>
+      <div><dt>已完成</dt><dd id="mastDone">—</dd></div>
+      <div><dt>失败</dt><dd id="mastDead">—</dd></div>
+    </dl>
+  </section>
+
+  <main>
     <div class="search-box">
-      <input type="search" id="searchInput" maxlength="100" placeholder="按文件名或任务 ID 搜索" aria-label="搜索任务（服务端搜索）">
+      <input type="search" id="searchInput" maxlength="100" placeholder="按文件名或任务编号搜索" aria-label="搜索任务（服务端搜索）">
       <p class="search-note" id="searchNote"></p>
     </div>
     <div class="filter-bar" id="filterBar"></div>
@@ -43,13 +66,14 @@
       <div class="skeleton-row"><div class="skeleton skeleton-line" style="width:30%"></div><div class="skeleton skeleton-line" style="width:88px"></div></div>
     </div>
     <p><button id="moreBtn" class="btn-secondary" style="display:none;">加载更多</button></p>
-  </div>
-</main>
-<footer class="site-footer">
-  <span class="version-tag">v0.1.0</span>
-  <a href="https://github.com/plus-Liang/meeting-notes" rel="noopener">GitHub</a>
-  <span>以 MIT 许可证开源发布</span>
-</footer>
+  </main>
+
+  <footer class="site-footer">
+    <span>v0.1.0 · MIT · 自托管，音频不出本机</span>
+    <a href="https://github.com/plus-Liang/meeting-notes" rel="noopener">GitHub</a>
+    <span>录音纪要平台 · 白纸档案</span>
+  </footer>
+</div>
 <script src="auth.js"></script>
 <script src="app.js"></script>
 <script src="drawer.js"></script>
@@ -87,23 +111,30 @@
     return hit ? hit.name : null;
   }
 
-  function badgeHtml(status) {
-    var cls = status === 'DONE' ? 'done' : (status === 'DEAD' ? 'dead' : 'busy');
-    return '<span class="badge ' + cls + '">' + statusText(status) + '</span>';
-  }
-
-  /* T4.21（D-114）：辨识三件套——模板徽章 + 关键词 chips（≤3，超出 +N）+ 摘要首句灰字；均 null 安全 */
+  /* T4.41：台账行 = 编号 / 文件名+模板·标签 / 时长 / 提交时间 / 状态圆点 / 详情（原字段口径不变） */
   var TEMPLATE_SHORT = { meeting: '会议', course: '课程', interview: '访谈', podcast: '播客', shortvideo: '短视频' };
+
+  function stDotClass(status) {
+    if (status === 'DONE') return 'dot-ok';
+    if (status === 'DEAD' || status === 'RETRYING') return 'dot-bad';
+    if (status === 'PENDING') return 'dot-wait';
+    return 'dot-go';
+  }
 
   function identityHtml(item) {
     var html = '';
     if (item.template && TEMPLATE_SHORT[item.template]) {
       html += '<span class="badge tpl">' + TEMPLATE_SHORT[item.template] + '</span>';
     }
+    if (item.labels && item.labels.length) {
+      html += item.labels.map(function (l) {
+        return '<span class="chip plain">' + escapeHtml(l) + '</span>';
+      }).join('');
+    }
     if (item.keywords && item.keywords.length) {
-      html += ' ' + item.keywords.slice(0, 3).map(function (k) {
+      html += item.keywords.slice(0, 3).map(function (k) {
         return '<span class="chip plain kchip">' + escapeHtml(k) + '</span>';
-      }).join(' ');
+      }).join('');
       if (item.keywords.length > 3) {
         html += ' <span class="chip plain kchip">+' + (item.keywords.length - 3) + '</span>';
       }
@@ -117,6 +148,16 @@
       : '';
   }
 
+  function fmtClockShort(iso) {
+    if (!iso) return '—';
+    try {
+      var d = new Date(iso);
+      if (isNaN(d.getTime())) return '—';
+      var p = function (n) { return n < 10 ? '0' + n : String(n); };
+      return p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+    } catch (e) { return '—'; }
+  }
+
   function renderFilterBar() {
     /* T4.29：追加收藏按钮 + 标签下拉（选项 = 当前已加载行的 labels 并集；值由 state 保持防重建丢失） */
     var fav = '<button class="filter-btn' + (state.filterFavorite ? ' active' : '') +
@@ -125,7 +166,7 @@
     filterBar.innerHTML = FILTERS.map(function (f) {
       var n = countFor(f.key);
       return '<button class="filter-btn' + (state.filter === f.key ? ' active' : '') +
-        '" data-status="' + f.key + '">' + f.label +
+        '" data-status="' + f.key + '" aria-pressed="' + (state.filter === f.key) + '">' + f.label +
         (n === null ? '' : '<span class="count-chip">' + n + '</span>') + '</button>';
     }).join('') + fav + labelSel;
     refreshLabelOptions();
@@ -160,10 +201,22 @@
     return String(countState.dead);
   }
 
+  function fillMeta() {
+    function set(id, v) { var el = document.getElementById(id); if (el) el.textContent = v; }
+    if (countState.total !== null) {
+      set('mastTotal', String(countState.total));
+      set('mastActive', String(countState.active));
+      set('mastDone', String(countState.done));
+      set('mastDead', String(countState.dead));
+      set('docketCounts', '归档 ' + countState.total);
+    }
+  }
+
   function fetchCounts() {
     getJson('api/v1/tasks/counts').then(function (data) {
       if (data.__httpStatus !== 200) return;
       countState = { total: data.total, active: data.active, done: data.done, dead: data.dead };
+      fillMeta();
       renderFilterBar();
     }, function () { /* 计数失败不打扰主列表 */ });
   }
@@ -203,24 +256,22 @@
   function rowHtml(item) {
     var name = item.original_name || localName(item.id) || ('任务 ' + item.id);
     /* T4.29：星标 + 标签 chips（favorite/labels 为列表接口只增字段） */
-    var star = item.favorite ? '<span class="fav-star" title="已收藏">★</span> ' : '';
-    var labelsHtml = (item.labels || []).length
-      ? '<span class="task-labels">' + item.labels.map(function (l) {
-          return '<span class="chip plain">' + escapeHtml(l) + '</span>';
-        }).join('') + '</span>'
-      : '';
-    var checkbox = '<input type="checkbox" class="row-check" data-id="' + item.id + '"' +
-      (state.checked[item.id] ? ' checked' : '') + '> '; /* T4.15⑥：勾选不再限于 DEAD（导出 md 也需要）；重试仍只对 DEAD 开放 */
-    /* T4.14c⑤：时长 + 提交时间（列表接口 item 六键已含 duration_sec/created_at，纯前端渲染；null → '—'） */
-    var meta = '<span class="task-meta">' + fmtDuration(item.duration_sec) +
-      ' · ' + fmtDate(item.created_at) + '</span>';
+    var star = item.favorite ? '<span class="fav-star" title="已收藏">★</span>' : '';
+    var checkbox = '<span class="row-check-cell"><input type="checkbox" class="row-check" data-id="' + item.id + '"' +
+      (state.checked[item.id] ? ' checked' : '') + ' aria-label="选择任务 #' + item.id + '"></span>'; /* T4.15⑥：勾选不再限于 DEAD；重试仍只对 DEAD 开放 */
     return '<div class="task-row" data-id="' + item.id + '">' +
-      '<span class="task-name">' +
-      '<span class="task-title">' + checkbox + star + '#' + item.id + ' ' + escapeHtml(name) + '</span>' + meta +
-      labelsHtml +
+      checkbox +
+      '<span class="task-no">#' + item.id + '</span>' +
+      '<span class="task-name">' + star +
+      '<span class="task-title"><a href="task.html?id=' + item.id + '" class="task-detail-link" data-task-id="' + item.id +
+      '" data-task-name="' + escapeHtml(name).replace(/"/g, '&quot;') + '" ' +
+      'aria-label="查看任务 #' + item.id + ' 详情">' + escapeHtml(name) + '</a></span>' +
+      '<span class="task-sub">' + identityHtml(item) + '</span>' +
       summaryHtml(item) + '</span>' +
-      '<span class="task-side">' + identityHtml(item) + ' ' + badgeHtml(item.status) + ' ' +
-      '<a href="task.html?id=' + item.id + '" class="task-detail-link" data-task-id="' + item.id +
+      '<span class="cell-num cell-dur">' + fmtDuration(item.duration_sec) + '</span>' +
+      '<span class="cell-num cell-time">' + fmtClockShort(item.created_at) + '</span>' +
+      '<span class="st"><i class="st-dot ' + stDotClass(item.status) + '"></i>' + statusText(item.status) + '</span>' +
+      '<span class="task-side"><a href="task.html?id=' + item.id + '" class="task-detail-link" data-task-id="' + item.id +
       '" data-task-name="' + escapeHtml(name).replace(/"/g, '&quot;') + '" ' +
       'aria-label="查看任务 #' + item.id + ' 详情">详情</a></span></div>';
   }
@@ -260,7 +311,7 @@
     lastRenderKey = key;
     /* 操作条：DEAD 筛选（重试场景）或存在失败任务（清空场景）或有勾选（导出/删除场景）时出现 */
     retryBar.style.display = state.items.length &&
-      (state.filter === 'DEAD' || count > 0 || countState.dead > 0) ? 'block' : 'none';
+      (state.filter === 'DEAD' || count > 0 || countState.dead > 0) ? 'flex' : 'none';
     retryBtn.style.display = state.filter === 'DEAD' ? '' : 'none'; /* 重试只对 DEAD 开放（语义不变） */
     deleteFailedBtn.style.display = countState.dead > 0 ? '' : 'none'; /* T4.21：无失败任务时隐藏 */
     checkAllEl.checked = count > 0 && count === state.items.length;
@@ -279,7 +330,7 @@
     } else {
       listEl.innerHTML = state.items.map(rowHtml).join('');
     }
-    moreBtn.style.display = state.cursor ? 'inline-block' : 'none';
+    moreBtn.style.display = state.cursor ? 'inline-flex' : 'none';
     listEl.querySelectorAll('.row-check').forEach(function (box) {
       box.addEventListener('change', function () {
         var id = box.getAttribute('data-id');
@@ -331,7 +382,9 @@
     listEl.innerHTML = index.length
       ? '<p class="hint">服务暂时不可用，以下为本浏览器上次提交的缓存：</p>' +
         index.map(function (item) {
-          return '<div class="task-row"><span class="task-name"><span class="task-title">#' + item.id + ' ' + escapeHtml(item.name) + '</span></span>' +
+          return '<div class="task-row task-row-lite"><span class="task-no">#' + item.id + '</span>' +
+            '<span class="task-name"><span class="task-title"><a href="task.html?id=' + item.id + '" class="task-detail-link" data-task-id="' + item.id +
+            '" data-task-name="' + escapeHtml(item.name).replace(/"/g, '&quot;') + '">' + escapeHtml(item.name) + '</a></span></span>' +
             '<span class="task-side"><a href="task.html?id=' + item.id + '" class="task-detail-link" data-task-id="' + item.id +
             '" data-task-name="' + escapeHtml(item.name).replace(/"/g, '&quot;') + '">详情</a></span></div>';
         }).join('')
@@ -510,6 +563,15 @@
       retryResult.textContent = '导出失败：服务暂时不可用，请稍后重试。';
     });
   });
+
+  /* 档案抬头行日期（T4.41） */
+  (function () {
+    var el = document.getElementById('docketDate');
+    if (!el) return;
+    var d = new Date();
+    var p = function (n) { return n < 10 ? '0' + n : String(n); };
+    el.textContent = d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+  })();
 
   renderFilterBar();
   /* T4.38：详情站内抽屉（列表 URL 不变、不新开标签；ESC/遮罩关闭） */

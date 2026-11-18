@@ -6,39 +6,60 @@
 <meta name="description" content="登录录音纪要平台；首次使用可创建账号，第一个账号将成为管理员。">
 <meta name="robots" content="noindex">
 <title>登录 · 录音纪要平台</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Ctext y=%2713%27 font-size=%2713%27%3E%F0%9F%8E%99%3C/text%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Ctext y=%2713%27 font-size=%2713%27%3E%E2%96%B6%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="components.css">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<nav>
-  <span class="brand">录音纪要平台</span>
-</nav>
-<main>
-  <div class="card mn-login-card">
-    <h1 id="mnLoginTitle">登录</h1>
-    <div class="mn-login-modes">
-      <button type="button" id="modeLogin" class="mn-mode-btn mn-mode-active">登录</button>
-      <button type="button" id="modeRegister" class="mn-mode-btn">首次使用 · 创建账号</button>
-    </div>
-    <form id="loginForm" novalidate>
-      <label class="mn-login-label" for="mnUsername">用户名</label>
-      <input type="text" id="mnUsername" maxlength="32" autocomplete="username" spellcheck="false" aria-label="用户名">
-      <label class="mn-login-label" for="mnPassword">密码</label>
-      <input type="password" id="mnPassword" autocomplete="current-password" aria-label="密码">
-      <div id="mnConfirmRow" hidden>
-        <label class="mn-login-label" for="mnPassword2">确认密码</label>
-        <input type="password" id="mnPassword2" autocomplete="new-password" aria-label="确认密码">
-      </div>
-      <p class="error-text" id="mnLoginError" hidden></p>
-      <button type="submit" id="mnSubmitBtn" class="mn-login-submit">登录</button>
-      <p class="hint mn-login-note">第一个创建的账号将成为管理员；如实例已关闭注册会提示联系管理员。</p>
-    </form>
+<div class="wrap">
+
+  <div class="docket">
+    <b>REC-NOTES</b><span>自托管 · 私有部署</span>
+    <span class="r"><span>V0.1.0</span></span>
   </div>
-</main>
-<footer class="site-footer">
-  <span class="version-tag">v0.1.0</span>
-  <span>以 MIT 许可证开源发布</span>
-</footer>
+
+  <header class="top">
+    <a class="brand" href="index.html">录音纪要平台<em>transcript &amp; minutes</em></a>
+  </header>
+
+  <main>
+    <div class="mn-login-card">
+      <section class="mast" style="grid-template-columns:1fr;padding-top:64px">
+        <h1 id="mnLoginTitle">登录<i>。</i></h1>
+        <p class="mn-sub hint" style="margin-top:12px">账号密码换本浏览器令牌；第一个创建的账号将成为管理员。</p>
+      </section>
+      <form id="loginForm" novalidate style="margin-top:26px">
+        <div class="mn-login-modes">
+          <button type="button" id="modeLogin" class="mn-mode-btn mn-mode-active">登录</button>
+          <button type="button" id="modeRegister" class="mn-mode-btn">首次使用 · 创建账号</button>
+        </div>
+        <div class="field">
+          <label class="mn-login-label" for="mnUsername">用户名</label>
+          <input type="text" id="mnUsername" maxlength="32" autocomplete="username" spellcheck="false" aria-label="用户名">
+        </div>
+        <div class="field">
+          <label class="mn-login-label" for="mnPassword">密码</label>
+          <input type="password" id="mnPassword" autocomplete="current-password" aria-label="密码">
+        </div>
+        <div id="mnConfirmRow" hidden>
+          <div class="field">
+            <label class="mn-login-label" for="mnPassword2">确认密码</label>
+            <input type="password" id="mnPassword2" autocomplete="new-password" aria-label="确认密码">
+          </div>
+        </div>
+        <p class="error-text" id="mnLoginError" hidden></p>
+        <button type="submit" id="mnSubmitBtn" class="btn mn-login-submit">登录</button>
+        <p class="hint mn-login-note">如实例已关闭注册会提示联系管理员。</p>
+      </form>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <span>v0.1.0 · MIT · 自托管，音频不出本机</span>
+    <span>以 MIT 许可证开源发布</span>
+  </footer>
+</div>
 <script src="auth.js"></script>
 <script>
 (function () {
@@ -68,7 +89,8 @@
     mode = m;
     document.getElementById('modeLogin').classList.toggle('mn-mode-active', m === 'login');
     document.getElementById('modeRegister').classList.toggle('mn-mode-active', m === 'register');
-    titleEl.textContent = m === 'login' ? '登录' : '创建账号';
+    /* T4.41：刊头标题只换正文词，句号点强调保留 */
+    titleEl.innerHTML = (m === 'login' ? '登录' : '创建账号') + '<i>。</i>';
     submitBtn.textContent = m === 'login' ? '登录' : '创建账号';
     confirmRow.hidden = m !== 'register';
     setError('');

@@ -5,30 +5,44 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="description" content="查看转写任务详情：转写全文、AI 摘要、关键词、待办与 Markdown 导出。">
 <title>任务详情 · 录音纪要平台</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Ctext y=%2713%27 font-size=%2713%27%3E%F0%9F%8E%99%3C/text%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Ctext y=%2713%27 font-size=%2713%27%3E%E2%96%B6%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="components.css">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<nav>
-  <span class="brand">录音纪要平台</span>
-  <a href="index.html">提交</a>
-  <a href="tasks.html" aria-current="page">任务列表</a>
-  <a href="settings.html">设置</a>
-  <span class="mn-userbar" data-mn-userbar></span>
-</nav>
-<main class="wide">
-  <div class="card" id="card">
-    <div class="skeleton skeleton-block" style="width:38%"></div>
-    <div class="skeleton skeleton-line" style="width:30%"></div>
-    <div class="skeleton skeleton-block" style="width:100%"></div>
-    <div class="skeleton skeleton-block" style="width:100%"></div>
+<div class="wrap">
+
+  <div class="docket">
+    <b>REC-NOTES</b><span>自托管 · 私有部署</span>
+    <span class="r"><span id="docketDate">—</span><span>V0.1.0</span></span>
   </div>
-</main>
-<footer class="site-footer">
-  <span class="version-tag">v0.1.0</span>
-  <a href="https://github.com/plus-Liang/meeting-notes" rel="noopener">GitHub</a>
-  <span>以 MIT 许可证开源发布</span>
-</footer>
+
+  <header class="top">
+    <a class="brand" href="index.html">录音纪要平台<em>transcript &amp; minutes</em></a>
+    <nav class="nav">
+      <a href="index.html">提交</a>
+      <a href="tasks.html" aria-current="page">任务台账</a>
+      <a href="settings.html">设置</a>
+    </nav>
+    <span class="who mn-userbar" data-mn-userbar></span>
+  </header>
+
+  <main>
+    <div id="card">
+      <div class="skeleton skeleton-block" style="width:38%;margin-top:36px"></div>
+      <div class="skeleton skeleton-line" style="width:30%"></div>
+      <div class="skeleton skeleton-block" style="width:100%"></div>
+      <div class="skeleton skeleton-block" style="width:100%"></div>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <span>v0.1.0 · MIT · 自托管，音频不出本机</span>
+    <a href="https://github.com/plus-Liang/meeting-notes" rel="noopener">GitHub</a>
+    <span>录音纪要平台 · 白纸档案</span>
+  </footer>
+</div>
 <script src="auth.js"></script>
 <script src="app.js"></script>
 <script>
@@ -68,12 +82,15 @@
     if (data.ai_tier) {
       badges += ' ' + badge(TIER_TEXT[data.ai_tier] || data.ai_tier, TIER_CLS[data.ai_tier] || '');
     }
-    return '<h1>任务 <span class="num">#' + data.task_id + '</span> ' + badges + '</h1>' +
+    /* T4.41：详情刊头 = mn-detail-head（左：衬线大标题 + 状态徽章行；右：meta 表），对齐定稿稿刊头语汇 */
+    return '<div class="mn-detail-head">' +
+      '<div><h1>任务 <span class="num">#' + data.task_id + '</span></h1>' +
+      '<div class="task-sub" style="margin-top:10px">' + badges + '</div></div>' +
       '<dl class="meta">' +
-      '<dt>时长</dt><dd>' + fmtDuration(data.duration_sec) + '</dd>' +
-      '<dt>大小</dt><dd>' + fmtBytes(data.size_bytes) + '</dd>' +
-      '<dt>提交时间</dt><dd>' + fmtDate(data.created_at) + '</dd>' +
-      '</dl>';
+      '<div><dt>时长</dt><dd>' + fmtDuration(data.duration_sec) + '</dd></div>' +
+      '<div><dt>大小</dt><dd>' + fmtBytes(data.size_bytes) + '</dd></div>' +
+      '<div><dt>提交时间</dt><dd>' + fmtDate(data.created_at) + '</dd></div>' +
+      '</dl></div>';
   }
 
   /* D-072 语义：null = AI 未启用或生成失败；[] = 确实没有内容。两者文案必须区分 */
@@ -110,28 +127,41 @@
       grounds.length + ' 句（在原文中匹配到的句子，浏览器内重算）</div><ul>' + rows + '</ul></div>';
   }
 
-  /* T4.15⑧：关键词 chip 可定位（命中有依据句才可点，点它跳到逐字稿高亮；未命中保持不可点） */
+  /* T4.15⑧：关键词 chip 可定位（命中有依据句才可点，点它跳到逐字稿高亮；未命中保持不可点）。
+     T4.41：关键词独立成块（定稿稿骨架：右栏 待办/关键词/模板/转写口径/导出） */
+  function keywordsHtml(data) {
+    if (!data.keywords || !data.keywords.length) {
+      return data.keywords ? '<div class="section"><h2>关键词</h2><p class="hint" style="margin:0">没有关键词。</p></div>' : '';
+    }
+    var html = '<div class="section"><h2>关键词</h2>';
+    html += '<div class="chips">' + data.keywords.map(function (k) {
+      var hit = transcript ? mnGroundKeyword(k, transcript) : null;
+      return '<button type="button" class="chip ' + (hit ? 'linkable' : 'plain') + '"' +
+        (hit ? ' data-keyword="' + escapeHtml(k) + '" title="定位到原文"' : ' disabled') + '>' +
+        escapeHtml(k) + '</button>';
+    }).join('') + '</div>' +
+      '<p class="hint" style="margin:4px 0 0">点关键词可跳到逐字稿中匹配到的句子。</p>';
+    return html + '</div>';
+  }
+
+  /* T4.41：转写口径（右栏 facts；全部取自详情已有字段，不造数据） */
+  function factsHtml(data) {
+    var segCount = Array.isArray(data.segments) ? data.segments.length : null;
+    return '<div class="section"><h2>转写口径</h2><dl class="facts">' +
+      '<dt>模板</dt><dd>' + escapeHtml(data.template ? (TEMPLATE_TEXT[data.template] || data.template) : '—') + '</dd>' +
+      '<dt>档位</dt><dd>' + escapeHtml(data.ai_tier ? (TIER_TEXT[data.ai_tier] || data.ai_tier) : '—') + '</dd>' +
+      '<dt>分段</dt><dd>' + (segCount === null ? '—' : segCount) + '</dd>' +
+      '<dt>字数</dt><dd>' + (transcript ? transcript.length : 0) + '</dd>' +
+      '</dl></div>';
+  }
+
   function summaryHtml(data) {
-    if (!data.summary && !data.keywords) {
-      return '<div class="section"><h2>摘要与关键词</h2>' +
+    if (!data.summary) {
+      return '<div class="section"><h2>摘要</h2>' +
         (transcript === '' ? noSpeechHint(NO_SPEECH_SUMMARY) : nullHint()) + '</div>';
     }
-    var html = '<div class="section"><h2>摘要与关键词</h2>';
-    html += data.summary
-      ? '<p style="margin:0 0 8px">' + escapeHtml(data.summary) + '</p>' + summaryGroundHtml(data)
-      : '<p class="hint" style="margin:0 0 8px">无摘要。</p>';
-    if (data.keywords && data.keywords.length) {
-      html += '<div>' + data.keywords.map(function (k) {
-        var hit = transcript ? mnGroundKeyword(k, transcript) : null;
-        return '<button type="button" class="chip ' + (hit ? 'linkable' : 'plain') + '"' +
-          (hit ? ' data-keyword="' + escapeHtml(k) + '" title="定位到原文"' : ' disabled') + '>' +
-          escapeHtml(k) + '</button>';
-      }).join('') + '</div>' +
-      '<p class="hint" style="margin:4px 0 0">点关键词可跳到逐字稿中匹配到的句子。</p>';
-    } else if (data.keywords) {
-      html += '<p class="hint" style="margin:0">没有关键词。</p>';
-    }
-    return html + '</div>';
+    return '<div class="section"><h2>摘要</h2>' +
+      '<p class="drop" style="margin:0 0 8px">' + escapeHtml(data.summary) + '</p>' + summaryGroundHtml(data) + '</div>';
   }
 
   /* T4.17：音频要点（编号 + 加粗小标题 + ：说明）。null/空 = AI 未启用或本次未生成（历史任务同语义，D-109） */
@@ -505,11 +535,12 @@
       body = '<div class="section"><p class="error-text">转写失败。原因：' + escapeHtml(errorTextOf(data.error_code)) + '</p>' +
         '<p class="hint">请检查 ASR 服务是否正常后，可在<a href="tasks.html">任务列表</a>按"失败"筛选并批量重试。</p></div>';
     } else if (status === 'DONE') {
-      /* T4.38：1280 两栏（左播放+转写，右摘要/待办/导出）；<1100 单栏（detail-grid 单列） */
-      body = '<div class="detail-grid">' +
-        '<div class="detail-col-main">' + playerHtml(data) + transcriptHtml(data) + '</div>' +
-        '<div class="detail-col-side">' + summaryHtml(data) + keypointsHtml(data) + todosHtml(data) +
-        metaHtml() + restructureHtml(data) + shareHtml(data) + exportHtml(data) + deleteHtml(data) + '</div>' +
+      /* T4.41：按定稿稿骨架两栏（左：摘要+要点+播放器+逐字稿；右：待办/关键词/标签/模板/转写口径/分享/导出/删除）；
+         <1080 单栏（detail-grid 单列） */
+      body = '<div class="detail-grid mn-two-col">' +
+        '<div class="detail-col-main">' + summaryHtml(data) + keypointsHtml(data) + playerHtml(data) + transcriptHtml(data) + '</div>' +
+        '<div class="detail-col-side">' + todosHtml(data) + keywordsHtml(data) + metaHtml(data) +
+        restructureHtml(data) + factsHtml(data) + shareHtml(data) + exportHtml(data) + deleteHtml(data) + '</div>' +
         '</div>';
     } else {
       body = '<p class="hint">未知状态：' + escapeHtml(status) + '</p>';
@@ -968,6 +999,7 @@
     volWrap.addEventListener('mouseleave', function () { volWrap.classList.remove('open'); });
 
     /* 倍速菜单 */
+    audio.addEventListener('ratechange', renderSpeed); /* T4.41：速率变化（含菜单外途径）同步按钮文案与菜单选中态 */
     speedBtn.addEventListener('click', function () {
       var open = speedWrap.classList.toggle('open');
       speedBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
@@ -1218,6 +1250,15 @@
       });
     });
   }
+
+  /* 档案抬头行日期（T4.41） */
+  (function () {
+    var el = document.getElementById('docketDate');
+    if (!el) return;
+    var d = new Date();
+    var p = function (n) { return n < 10 ? '0' + n : String(n); };
+    el.textContent = d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+  })();
 
   /* PENDING/RUNNING/RETRYING 每 3 秒轮询（D-024），到 DONE/DEAD 或 404 停 */
   pollUntil('api/v1/tasks/' + id, render, render);

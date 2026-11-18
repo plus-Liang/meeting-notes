@@ -5,54 +5,90 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="description" content="查看服务端今日配额用量、AI 档位与术语回流沉淀的词条。">
 <title>设置 · 录音纪要平台</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Ctext y=%2713%27 font-size=%2713%27%3E%E2%9A%99%EF%B8%8F%3C/text%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Ctext y=%2713%27 font-size=%2713%27%3E%E2%96%B6%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="components.css">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<nav>
-  <span class="brand">录音纪要平台</span>
-  <a href="index.html">提交</a>
-  <a href="tasks.html">任务列表</a>
-  <a href="settings.html" aria-current="page">设置</a>
-  <span class="mn-userbar" data-mn-userbar></span>
-</nav>
-<main>
-  <div class="card">
-    <h1>设置</h1>
-    <p class="hint">只读展示当前系统状态、配额用量、AI 档位与术语表。</p>
+<div class="wrap">
 
-    <h2>系统状态</h2>
-    <div id="health"><div class="skeleton skeleton-line" style="width:70%"></div></div>
-    <p class="version-tag" style="margin-top:8px">版本 <span class="num">v0.1.0</span>（静态常量，构建信息展示属 T7 范围）</p>
+  <div class="docket">
+    <b>REC-NOTES</b><span>自托管 · 私有部署</span>
+    <span class="r"><span id="docketDate">—</span><span>V0.1.0</span></span>
+  </div>
 
-    <h2>今日配额</h2>
-    <div id="quota">
-      <div class="quota-item"><div class="skeleton skeleton-line" style="width:40%"></div><div class="skeleton quota-bar" style="margin-top:8px"></div></div>
-      <div class="quota-item"><div class="skeleton skeleton-line" style="width:30%"></div><div class="skeleton quota-bar" style="margin-top:8px"></div></div>
+  <header class="top">
+    <a class="brand" href="index.html">录音纪要平台<em>transcript &amp; minutes</em></a>
+    <nav class="nav">
+      <a href="index.html">提交</a>
+      <a href="tasks.html">任务台账</a>
+      <a href="settings.html" aria-current="page">设置</a>
+    </nav>
+    <span class="who mn-userbar" data-mn-userbar></span>
+  </header>
+
+  <section class="mast">
+    <h1>设置<i>。</i></h1>
+    <dl class="meta">
+      <div><dt>版本</dt><dd class="big">V0.1.0</dd></div>
+      <div><dt>运行位置</dt><dd>本机 · 数据不出机</dd></div>
+      <div><dt>本页性质</dt><dd>只读 · 无按钮化</dd></div>
+    </dl>
+  </section>
+
+  <main>
+    <div class="kv-section">
+      <div class="sechead"><h2>系统状态</h2></div>
+      <div id="health"><div class="skeleton skeleton-line" style="width:70%"></div></div>
+      <p class="hint">版本 v0.1.0（静态常量，构建信息展示属 T7 范围）。</p>
     </div>
 
-    <h2>我的使用</h2>
-    <div id="usage"><div class="skeleton skeleton-line" style="width:55%"></div></div>
-    <p class="hint" style="margin-top:8px">平均处理倍速（含排队，近似值）：任务从提交到完成的耗时与音频时长之比，含排队等待，不等于语音处理 RTF。成功率为 DONE/(DONE+DEAD)。</p>
+    <div class="kv-section">
+      <div class="sechead"><h2>今日配额</h2></div>
+      <div id="quota">
+        <div class="quota-item"><div class="skeleton skeleton-line" style="width:40%"></div><div class="skeleton quota-bar" style="margin-top:8px"></div></div>
+        <div class="quota-item"><div class="skeleton skeleton-line" style="width:30%"></div><div class="skeleton quota-bar" style="margin-top:8px"></div></div>
+      </div>
+    </div>
 
-    <h2>AI 档位</h2>
-    <div id="tier"><div class="skeleton skeleton-line" style="width:55%"></div><div class="skeleton skeleton-line" style="width:45%;margin-top:8px"></div></div>
-    <p class="hint" style="margin-top:8px">会议/远场录音建议用 medium 语音模型（更准但更慢，需自备约 1.5GB 模型，配置 ASR_MODEL_NAME=medium 后重启 asr 服务）；清晰单人录音 small 足够。</p>
+    <div class="kv-section">
+      <div class="sechead"><h2>我的使用</h2></div>
+      <div id="usage"><div class="skeleton skeleton-line" style="width:55%"></div></div>
+      <p class="hint">平均处理倍速（含排队，近似值）：任务从提交到完成的耗时与音频时长之比，含排队等待，不等于语音处理 RTF。成功率为 DONE/(DONE+DEAD)。</p>
+    </div>
 
-    <h2>术语表</h2>
-    <p class="hint">改词回流沉淀的词条（按命中次数排序，最多展示 100 条），转写与摘要自动应用。</p>
-    <div id="glossary"><div class="skeleton skeleton-block" style="width:100%"></div></div>
-  </div>
-</main>
-<footer class="site-footer">
-  <span class="version-tag">v0.1.0</span>
-  <a href="https://github.com/plus-Liang/meeting-notes" rel="noopener">GitHub</a>
-  <span>以 MIT 许可证开源发布</span>
-</footer>
+    <div class="kv-section">
+      <div class="sechead"><h2>AI 档位</h2></div>
+      <div id="tier"><div class="skeleton skeleton-line" style="width:55%"></div><div class="skeleton skeleton-line" style="width:45%;margin-top:8px"></div></div>
+      <p class="hint">会议/远场录音建议用 medium 语音模型（更准但更慢，需自备约 1.5GB 模型，配置 ASR_MODEL_NAME=medium 后重启 asr 服务）；清晰单人录音 small 足够。</p>
+    </div>
+
+    <div class="kv-section">
+      <div class="sechead"><h2>术语表</h2><span class="n">改词回流 · 自动应用</span></div>
+      <p class="hint" style="margin:10px 0">改词回流沉淀的词条（按命中次数排序，最多展示 100 条），转写与摘要自动应用。</p>
+      <div id="glossary"><div class="skeleton skeleton-block" style="width:100%"></div></div>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <span>v0.1.0 · MIT · 自托管，音频不出本机</span>
+    <a href="https://github.com/plus-Liang/meeting-notes" rel="noopener">GitHub</a>
+    <span>录音纪要平台 · 白纸档案</span>
+  </footer>
+</div>
 <script src="auth.js"></script>
 <script src="app.js"></script>
 <script>
 (function () {
+  /* 档案抬头行日期（T4.41） */
+  var dEl = document.getElementById('docketDate');
+  if (dEl) {
+    var d = new Date();
+    var pd = function (n) { return n < 10 ? '0' + n : String(n); };
+    dEl.textContent = d.getFullYear() + '-' + pd(d.getMonth() + 1) + '-' + pd(d.getDate());
+  }
+
   function badge(text, cls) {
     return '<span class="badge ' + cls + '">' + text + '</span>';
   }
@@ -90,7 +126,7 @@
         '<div class="empty-state">' +
         '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
         '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>' +
-        '<h3>术语表还是空的</h3><p>在任务详情里修正转写错词后，词条会自动沉淀到这里，下次转写自动生效。</p></div>';
+        '<h3 class="empty-title">术语表还是空的</h3><p>在任务详情里修正转写错词后，词条会自动沉淀到这里，下次转写自动生效。</p></div>';
       return;
     }
     document.getElementById('glossary').innerHTML =
@@ -106,7 +142,7 @@
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
 
-  /* T4.15⑦：系统状态卡——GET /actuator/health（认证豁免端点）；app=整体 status，
+  /* T4.15⑦：系统状态——GET /actuator/health（认证豁免端点）；app=整体 status，
      asr/postgres(minio 的 db 组件)/minio/redis 取 components；任一失败显示「未知」，不弹错 */
   getJson('actuator/health').then(function (data) {
     var el = document.getElementById('health');

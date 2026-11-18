@@ -6,24 +6,36 @@
 <meta name="description" content="只读分享：查看一条转写纪要的摘要、关键词、待办与转写全文。">
 <meta name="robots" content="noindex">
 <title>只读分享 · 录音纪要平台</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Ctext y=%2713%27 font-size=%2713%27%3E%F0%9F%8E%99%3C/text%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Ctext y=%2713%27 font-size=%2713%27%3E%E2%96%B6%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="components.css">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<nav>
-  <span class="brand">录音纪要平台 · 只读分享</span>
-</nav>
-<main>
-  <div class="card" id="shareCard">
-    <div class="skeleton skeleton-line" style="width:50%"></div>
-    <div class="skeleton skeleton-block" style="width:100%;margin-top:12px"></div>
+<div class="wrap">
+
+  <div class="docket">
+    <b>REC-NOTES</b><span>只读分享 · 匿名可见</span>
+    <span class="r"><span>V0.1.0</span></span>
   </div>
-  <p class="hint" style="margin-top:8px">本页为只读分享视图：不能编辑、不能删除，也不展示其它任务。</p>
-</main>
-<footer class="site-footer">
-  <span class="version-tag">v0.1.0</span>
-  <span>以 MIT 许可证开源发布</span>
-</footer>
+
+  <header class="top">
+    <span class="brand">录音纪要平台<em>只读分享</em></span>
+  </header>
+
+  <main>
+    <div class="share-card" id="shareCard">
+      <div class="skeleton skeleton-line" style="width:50%"></div>
+      <div class="skeleton skeleton-block" style="width:100%;margin-top:12px"></div>
+    </div>
+    <p class="hint" style="margin-top:10px">本页为只读分享视图：不能编辑、不能删除，也不展示其它任务。</p>
+  </main>
+
+  <footer class="site-footer">
+    <span>v0.1.0 · MIT · 自托管，音频不出本机</span>
+    <span>以 MIT 许可证开源发布</span>
+  </footer>
+</div>
 <script src="auth.js"></script>
 <script src="app.js"></script>
 <script>
@@ -38,18 +50,18 @@
   }
 
   function errorHtml(title) {
-    return '<h1>' + title + '</h1><p class="hint">链接无效、已被撤销或已过期。请联系分享者重新生成；' +
+    return '<h1 class="share-mast-h1">' + title + '</h1><p class="hint">链接无效、已被撤销或已过期。请联系分享者重新生成；' +
       '本页不会区分具体原因。</p>';
   }
 
   /* 只读待办：纯文本行（复选框 disabled 且不可交互，无任何写入口） */
   function todosHtml(todos) {
     if (!todos || !todos.length) return '';
-    return '<h2>待办</h2><ul class="keypoints">' + todos.map(function (t) {
+    return '<div class="detail-side-block" style="margin-top:26px"><div class="eyebrow">待办</div><ol class="keypoints">' + todos.map(function (t) {
       return '<li>' + escapeHtml(t.action || '') +
         (t.owner ? '（负责人：' + escapeHtml(t.owner) + '）' : '') +
         (t.deadline ? '（截止：' + escapeHtml(t.deadline) + '）' : '') + '</li>';
-    }).join('') + '</ul>';
+    }).join('') + '</ol></div>';
   }
 
   if (!token) {
@@ -62,33 +74,36 @@
       card.innerHTML = errorHtml(data.__httpStatus === 404 ? '链接无效或已过期' : '加载失败');
       return;
     }
-    var html = '<h1>' + escapeHtml(data.original_name || ('任务 #' + data.task_id)) + '</h1>' +
-      '<p class="hint">时长 ' + fmtDuration(data.duration_sec) + ' · 创建于 ' + fmtDate(data.created_at) +
-      ' · 档位 ' + escapeHtml(data.ai_tier || '—') + ' · 模板 ' + escapeHtml(data.template || '—') + '</p>';
+    var html = '<div class="share-mast">' +
+      '<h1>' + escapeHtml(data.original_name || ('任务 #' + data.task_id)) + '</h1>' +
+      '<p class="share-meta">时长 ' + fmtDuration(data.duration_sec) + ' · 创建于 ' + fmtDate(data.created_at) +
+      ' · 档位 ' + escapeHtml(data.ai_tier || '—') + ' · 模板 ' + escapeHtml(data.template || '—') + '</p></div>';
+    html += '<div style="margin-top:26px">';
     html += data.summary
-      ? '<h2>摘要</h2><p style="margin:0 0 8px">' + escapeHtml(data.summary) + '</p>'
-      : '<h2>摘要</h2><p class="hint" style="margin:0 0 8px">无摘要。</p>';
+      ? '<div class="eyebrow">摘要</div><p class="drop" style="margin:0 0 8px">' + escapeHtml(data.summary) + '</p>'
+      : '<div class="eyebrow">摘要</div><p class="hint" style="margin:0 0 8px">无摘要。</p>';
     if (data.keywords && data.keywords.length) {
-      html += '<div>' + data.keywords.map(function (k) {
+      html += '<div class="chips" style="margin-top:12px">' + data.keywords.map(function (k) {
         return '<span class="chip plain">' + escapeHtml(k) + '</span>';
       }).join('') + '</div>';
     }
     if (data.keypoints && data.keypoints.length) {
-      html += '<h2>要点</h2><ol class="keypoints">' + data.keypoints.map(function (kp) {
+      html += '<div class="detail-side-block" style="margin-top:26px"><div class="eyebrow">要点</div><ol class="keypoints">' + data.keypoints.map(function (kp) {
         return '<li><strong>' + escapeHtml(kp.title) + '</strong>：' + escapeHtml(kp.detail) + '</li>';
-      }).join('') + '</ol>';
+      }).join('') + '</ol></div>';
     }
     html += todosHtml(data.todos);
     if (data.transcript) {
       var source = data.transcript_punctuated || data.transcript;
-      html += '<h2>转写</h2><div class="transcript">' +
+      html += '<div class="detail-side-block" style="margin-top:26px"><div class="eyebrow">转写</div><div class="transcript">' +
         source.split(/(?<=[。！？!?；;\n])/).map(function (s) { return s.trim(); })
           .filter(function (s) { return s; })
           .map(function (s) { return '<span class="sent-target">' + escapeHtml(s) + '</span>'; })
-          .join('\n') + '</div>';
+          .join('\n') + '</div></div>';
     } else {
-      html += '<h2>转写</h2><p class="empty-tip">未识别到语音内容。</p>';
+      html += '<div class="detail-side-block" style="margin-top:26px"><div class="eyebrow">转写</div><p class="empty-tip">未识别到语音内容。</p></div>';
     }
+    html += '</div>';
     card.innerHTML = html;
   }, function () {
     card.innerHTML = errorHtml('加载失败');

@@ -1,0 +1,62 @@
+/* 录音纪要平台 · 设计 token 层（T4.41，视觉世界「白纸档案」）
+ * 权威文件：仓库根 DESIGN.md；取值来源 design-explore/direction-final-mixed.html（唯一视觉权威）。
+ * 本文件只放变量，不放规则；组件在 components.css，页面/布局在 style.css。
+ * 纪律：离线自托管（系统字体栈）；禁渐变/玻璃/纹理/粒子/脉冲；动效只动 transform/opacity ≤200ms。
+ */
+:root {
+  color-scheme: light;
+
+  /* 纸面：近白（禁米色/cream，detector 会判 cream-palette） */
+  --paper: #fbfaf7;
+  --paper-2: #f4f1ea;
+  --leaf: #ffffff;
+
+  /* 墨阶 */
+  --ink: #14120e;
+  --ink-2: #48443b;
+  --ink-3: #6d685c;
+
+  /* 结构线：实线 = 墨；hairline = 沙 */
+  --rule: #e2ddd2;
+  --rule-soft: #ece8dd;
+  --rule-ink: #14120e;
+
+  /* 印章红：只用于「此刻/重点」（当前句/录制中/配额刻度/选中态/失败重试） */
+  --seal: #9d2f1b;
+  --seal-deep: #7f2415;
+  --seal-tint: #f6e7e0;
+
+  /* 状态 */
+  --done: #3c6236;
+  --done-tint: #eef3ec;
+  --wait: #8a6400;
+  --bad: #8f2318;
+  --bad-tint: #f7e9e5;
+  --skeleton-base: #ece8dd;
+
+  /* 字体三轨（离线系统栈，不引外链字体） */
+  --serif: "Noto Serif SC", "Source Han Serif SC", "Songti SC", STSong, "STZhongsong", SimSun, Georgia, serif;
+  --sans: "PingFang SC", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+
+  /* 字号阶：刊头 clamp(46,6.2vw,78)/1.06；区块标题 17–22 serif；正文 15/1.7；次级 13；标签 12 mono（功能性文字 ≥12px） */
+  --fs-body: 15px;
+  --lh-body: 1.7;
+  --fs-sm: 13px;
+  --fs-label: 12px;
+
+  /* 形：pill 全圆角（按钮/徽章/chip/筛选/toast）；容器 10–14px；表格与结构线无圆角；零卡片化 */
+  --r-pill: 999px;
+  --r-pop: 14px;
+  --r-field: 12px;
+
+  /* 浮层投影（中性、带 y 偏移；纸面内容不用投影） */
+  --shadow-pop: 0 12px 28px rgba(20, 18, 14, .16);
+  --shadow-toast: 0 10px 24px rgba(20, 18, 14, .22);
+
+  /* 动效：120–200ms，只动 transform/opacity */
+  --ease: cubic-bezier(.22, 1, .36, 1);
+  --dur-fast: 120ms;
+  --dur: 160ms;
+  --dur-move: 200ms;
+}

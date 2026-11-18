@@ -41,7 +41,7 @@
 **任何"整站设计 / 视觉改版 / 重做页面"任务，动手前必须先读这两份技能**（仓库内副本，只读不改）：
 
 1. `design-skills/impeccable/SKILL.md`（v4.9.2，Apache-2.0）——设计词汇 + 24 个命令 playbook + 确定性 slop 检测器。
-   本项目是 **Operate 模式（App UI，不是营销站）**：优先读 `reference/new-work.md`、`craft-floor.md`、`critique-rubric.md`、`polish.md`、`audit.md`、`typeset.md`、`layout.md`；`PRODUCT.md` / `DESIGN.md` 放**仓库根**。
+   本项目是 **Operate 模式（App UI，不是营销站）**：优先读 `reference/new-work.md`、`craft-floor.md`、`critique-rubric.md`、`polish.md`、`audit.md`、`typeset.md`、`layout.md`；`PRODUCT.md` / `DESIGN.md` 放**仓库根**。T4.41 起 `static/` 样式分三层：`tokens.css`（变量）→ `components.css`(共享组件) → `style.css`(页面骨架/布局/JS 钩子收口)。
    - **检测门禁**（每卡必跑，已验证 `npx -y impeccable detect` v4.9.2 可用）：
      `npx -y impeccable detect app/src/main/resources/static --json`（源码）+ `npx -y impeccable detect http://127.0.0.1:8080/login.html --json`（渲染页）；已登录页用 Playwright 带 token 渲染后 `page.content()` 落 `file://` 快照再检测。
      **目标：warning 0**；advisory 逐条处理或 `impeccable-disable` + 写明理由。基线（T4.39）：14 条（6 warning `pulsing-dot` / 8 advisory `codex-grid-background`）。
