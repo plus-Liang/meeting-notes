@@ -2819,7 +2819,7 @@ F-15 控制在 ≤30 行并集中一处；新增静态资源不引第三方库�
 > - 残留清理（D-139）：零新建任务；`/tmp`、MinIO 对象数、override、`.env` 逐条核对。
 > **禁止**：加自动说话人分离/改 ASR；写 V8 迁移（V1 已有 `speaker_map`）；改 `segments`/摘要/待办/已有 15 键语义；新建任务做验证；引 CDN/框架；多 commit。
 
-## T4.37a 账号体系后端：注册/登录/令牌 + 全仓 userId 替换 + 音频签名绑 userId（约 1 天；D-122；**必须新开 WorkBuddy 会话**；依赖 T4.36 已通过 `d54766a`）
+## T4.37a 账号体系后端：注册/登录/令牌 + 全仓 userId 替换 + 音频签名绑 userId（约 1 天；D-122；**必须新开 WorkBuddy 会话**；依赖 T4.36 已通过 `d54766a`）⚠️ 首验不通过（`386c9f9`，2026-11-18，第 63 份报告，D-148）：核心能力全过，但**并发同名注册 500**（P2）→ 收尾卡见下方 `T4.37a-fix`
 
 > **先跑三行报给我**：`git -C D:\new\projects\meeting-notes log --oneline -1`、`git -C D:\new\projects\meeting-notes status --short`、`Get-Content D:\new\artifacts\T4.36\workbuddy\head.txt`。
 > **会话说明**：**本卡必须新开一个 WorkBuddy 会话**（横切全仓 16 个类、要改认证面，旧会话上下文是说话人/播放器，不相关）。只读「这张卡 + `handoff.md` 第 0–2 节 + `AGENT.md` §2/§4」；证据落 `D:\new\artifacts\T4.37a\workbuddy\`；回报 ≤40 行。
@@ -2854,6 +2854,22 @@ F-15 控制在 ≤30 行并集中一处；新增静态资源不引第三方库�
 > - **门禁**：`-UnitOnly` 全绿 → **单 commit `feat(T4.37a)`** → `docker compose build app && up -d app` → 全量 `scripts\test.ps1` 全绿（K-68/K-77）→ 可维护性 0/0（`AuthController`/`AuthService` 防超 300 行，可拆 `PasswordHasher`/`TokenService`）→ `head.txt` 记提交后 HEAD。
 > - **残留（D-139）**：零新建音频任务（唯一允许 1 条 PASTE 文本任务，用完删）；删 B 账号与任务后 `task`/`task_result` 计数回 279；`.env` 不动、无 override、无 `/tmp` 残留；`git status` 干净、不 push。
 > **禁止**：改 `static/*`（b 卡才做）；加前端依赖/新 Maven 依赖；OAuth/短信/邮件/找回密码/角色管理后台/多租户；改 `API_TOKEN` 语义为不兼容或改其它既有错误码；令牌或密码明文落库/打日志（DB 只存哈希）；删改历史任务或 `user_id`；多 commit；用真实 ASR 新建音频任务做验证；把 `AUTH_REGISTRATION_ENABLED` 写死在代码里。
+
+## T4.37a-fix T4.37a 收尾：并发同名注册 500 → 409（约 20–30 分钟；D-148；**同一 WorkBuddy 会话继续**；起点 `386c9f9`）
+
+> **先跑三行报给我**：`git -C D:\new\projects\meeting-notes log --oneline -1`、`git -C D:\new\projects\meeting-notes status --short`、`Get-Content D:\new\artifacts\T4.37a\workbuddy\head.txt`。
+> **会话说明**：**继续在 T4.37a 那个 WorkBuddy 会话里做**（代码刚写完、上下文强相关，这是同一张卡的首验缺陷收尾，不是新卡）。只读「这张卡 + `handoff.md` 第 0–2 节 + `AGENT.md` §2/§4」；证据落 `D:\new\artifacts\T4.37a-fix\workbuddy\`；回报 ≤40 行。
+> **我验收实测的缺陷（P2，必须复现再修）**：`POST /api/v1/auth/register` 同用户名 **4 路并发** → `[500 INTERNAL_ERROR, 200, 500, 500]`（顺序重复时正确 409）。根因：`AuthService.register` 先 `requireUsernameFree` SELECT 查重、再 INSERT，并发窗口内后到者撞 `ux_app_user_username` 唯一索引 → `DataIntegrityViolationException` → 500。违反 `接入指南 §3.4`：重复用户名必须 **409 `USERNAME_TAKEN`**。T4.37b 前端注册按钮双击即可触发。
+> **修复（按此口径）**：
+> 1. `AuthService.createUser` 的 `INSERT ... RETURNING id` 包 try/catch：**只捕获唯一键冲突**（Spring/JdbcTemplate 的 `DuplicateKeyException`；不要吞所有 `DataIntegrityViolationException`）→ 抛 `409 USERNAME_TAKEN`。固定 id 的 UPDATE 路径同样检查影响行数。
+> 2. **管理员认领原子化**：`claimAdmin` 改成条件更新 `UPDATE app_user SET username=?, password_hash=?, role='ADMIN', token_hash=?, token_issued_at=now() WHERE id=1 AND password_hash='!'`；影响行数 = 0 → 说明已被并发认领，**按普通注册路径继续**（开关关闭 → 403 `REGISTRATION_DISABLED`，否则 `createUser` 建 USER）；= 1 → 返回该 admin 会话。
+> 3. 不改其它契约、不改前端、不加依赖、不动 `UserContext` 机制。
+> **固定判据（缺一不可）**：
+> - 单测 +2/3：① mock `jdbc.update/queryForObject` 抛 `DuplicateKeyException` → 409 `USERNAME_TAKEN`；② 认领 UPDATE 影响 0 行 → 走普通注册路径（开关开=建 USER / 开关关=403）；③ 既有 464 例仍全绿。
+> - **真机复现→修复→复核**：起点先复现一次 4 并发同名注册（允许看到 500，作为对照）；修完重建镜像后，**4 并发同名注册结果只允许 `{200,409}` 且恰好 1 个 200**（重复跑 3 轮都成立）；两并发首次认领时只有 1 个 admin 会话生效（另一个按普通注册/403 口径，不得出现第二个 ADMIN 令牌）。
+> - 门禁：`-UnitOnly` 全绿 → **单 commit `fix(T4.37a)`**（或 `feat(T4.37a)` 单 commit，只一次提交）→ `docker compose build app && up -d app` → 全量 `scripts\test.ps1` 全绿（K-68/K-77）→ 可维护性 0/0 → `head.txt` 记提交后 HEAD。
+> - **收尾（D-139）**：删掉验证用的测试账号（`app_user WHERE id>=2`）与 quota 行、**把 1 号账号恢复未认领**（`username='admin', password_hash='!', token_hash=NULL, token_issued_at=NULL`）；任务数保持 291、全 DONE、user_id 全 1；`.env` 不动、无 override、`/tmp` 无残留、`git status` 干净、不 push。
+> **禁止**：改前端/其它契约/错误码语义；吞所有数据完整性异常；把并发窗口"用 sleep 测试"糊过去；多 commit；新建音频任务（并发验注册不需要任务）。
 
 ## 每张卡做完都要给你的回报
 
