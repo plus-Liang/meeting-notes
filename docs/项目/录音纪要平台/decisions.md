@@ -1833,6 +1833,21 @@
 
 ---
 
+### D-147 T4.36 通过：手工说话人落地（PATCH 校验矩阵 + 详情第 16 键 `speaker_map` + 句子 chip/分组视图，零迁移）；"卡面列名先对真实 schema（无 updated_at）"入坑 K-89
+
+- **日期**：2026-11-18｜**决策人**：DSH
+- **结论**：
+  1. **T4.36 通过**（`d54766a`，12 文件 +626/−23，单 commit）：新增 `PATCH /api/v1/tasks/{id}/speaker-map`（`SpeakerMapController`，因 `TaskController` 触 M3 行数上限而拆出，语义不变；Bearer 由 `ApiTokenFilter` 横切）：body `{"speaker_map":{"句子下标":"标签"}}`；**404 `TASK_NOT_FOUND`**（不存在/非本人，先于状态判定）；**400 `INVALID_PARAM`**（非 DONE、无 segments、键非整数/负/越界、值 trim 后空或 >20 字、条目 >200）；成功 200 返回落库后实际内容；**`{}` = 清除 → 落 NULL**（与"从未标注"同语义，文档 §3.11 定死）；**只写 `speaker_map` + `created_at`**，不碰其它列。详情 `GET /tasks/{id}` **只增第 16 键** `speaker_map`（对象或 null，键序最后）；前端句子行尾 chip（选已有/新建/清除）+「按说话人分组」视图（组序=标签首现序、未标注在最后、组内原序；无 segments 整块不显示）；PATCH 成功后**回读详情**（K-80），失败就地提示且 map 不动=自然回滚。**18 张 ✅ → 19 张 ✅**。**零迁移**（`task_result.speaker_map JSONB` V1 建表即有）、零新建任务。
+  2. 我独立验证：`-UnitOnly` **439/439 exit 0**、可维护性 **0/0 exit 0**、全量 **457/457 exit 0**；**服务端静态 == 工作区 sha256 逐一相等**（`task.html 97F21FBE…`、`style.css A469EF5F…`）；真机 API 探针 **44/44**（16 键/键序、写入回读、改标签、`md5` 快照证明**只动 speaker_map+created_at**、12 项校验矩阵、清除落 NULL 实查、旧任务 237 null、列表/meta/audio-token/导出未被波及、坏 JSON/类型错 400、匿名 401）；Playwright **23/23**（chip 新建「说话人 A」→ 回读 `{"0":"说话人 A"}`、刷新仍生效、已有标签可选、分组 **3 组「A（2 句）/B（1 句）/未标注（15 句）」**、分组内点句 `seeked=19==start` 且唯一高亮、chip 不触发 seek、标签 `<b>组</b>` 纯文本转义无注入、390 溢出 0 且菜单在视口内、清除本句、237 无 playerCard/audio/segList/说话人 UI、535 35 chip、console/pageerror 0）；**UI/API 探针前后任务数 275→275（零新建）**。
+  3. **时间戳口径（如实记录，不改表）**：卡面写"只更新 `speaker_map` + `updated_at`"，但 `task_result` **实际没有 `updated_at` 列**（只有 `created_at`，`\d` 实查）——按既有 `saveTranscript` 同口径落 `created_at = now()`，**不为此建迁移**，口径写进 `接入指南.md` §3.11。
+  4. **新坑 K-89**：**任务卡里的列名/字段名先对真实 schema 再落 SQL**——卡面写 `updated_at`、表里没有，若照抄会让 PATCH 直接 500；正确做法是 `\d task_result` 核对后按既有列口径落 `created_at` 并在文档写明，而不是默默"少更新一个字段"。附带小坑：Mockito/单测里构造含 null 值的 map **不能用 `Map.of`（不收 null）**，要用 `LinkedHashMap`；20 字标签**恰好合法**、21 字才拒（边界测试先红后修正）。
+  5. 残余（P3，接受）：组序仅首现序不可拖拽、同名/别名不自动合并、菜单无 Escape/外点关闭、分组视图 `scrollIntoView nearest` 长列表需手动滚、缺 `speaker_map` 键视同清空（宽松）、键前导零归一化、自动说话人分离不做（先 spike 再定）、`speaker.prevMap` 无害死代码、缺 Content-Type 回 415（HTTP 语义未写入 §3.11）。
+  6. **会话策略（按用户要求区分）**：T4.36 已在**同一 WorkBuddy 会话**完成（延续 `task.html` 句子列表，强相关）；**T4.37 登录/多用户必须新会话**（大卡横切：登录/注册/会话 + 27 处 `DEFAULT_USER_ID` + 数据隔离 + 配额按人，**必须把 userId 绑进音频签名**收 T4.35b P3-1）。
+- **依据**：`review/2026-11-18-T4.36验收.md`（第 62 份）；`artifacts/T4.36/lead-verify/`（unitonly 439、full 457、maintainability 0/0、probe.py 44/44 + probe-result.json、ui-probe.js 23/23 + ui-result.json + ui-run.log、served-* sha256）；`task_result` 快照 md5 证明其它列未变；数据 279 任务全 DONE、`speaker_map` 非空 0、MinIO 285=279+历史 6 孤儿无新增；配额 12 分钟/12 任务（11-18）。
+- **已排除项**：把卡面 `updated_at` 当真实列（实查只有 `created_at`，已按既有口径落并写文档）；把 `"03"` 归一化当缺陷（容错取向，P3 记录）；把缺 `speaker_map` 键当 400（文档定"空 map=清除"，语义一致）；把 M3 拆 `SpeakerMapController` 当越界重构（行数门禁要求的机械拆分，语义零变）；把 T4.36 想当然写成需要 V8 迁移（V1 第 31 行已有列，再次核实）。
+
+---
+
 ## 面试速查（由本文件派生，勿单独维护）
 
 | 面试问题 | 取哪条 |

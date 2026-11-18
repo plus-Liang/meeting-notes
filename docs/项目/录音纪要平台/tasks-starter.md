@@ -2794,7 +2794,7 @@ F-15 控制在 ≤30 行并集中一处；新增静态资源不引第三方库�
 > - 残留清理（D-139）：零新建任务；核对 `/tmp`、MinIO 对象数不变、无 override 残留、`.env` 未动。
 > **禁止**：改后端契约/详情 15 键；新建任务做 UI 验证；引 CDN/前端框架；改 `share.html`；用裸 API_TOKEN 拼 audio src（必须走签发）；多 commit。
 
-## T4.36 手工说话人：句子打标签 + 分组显示（约 2–3 小时；D-122；**依赖 T4.35c 已通过 `bbe2ca3`**）
+## T4.36 手工说话人：句子打标签 + 分组显示（约 2–3 小时；D-122；**依赖 T4.35c 已通过 `bbe2ca3`**）✅ 已完成（`d54766a`，2026-11-18，第 62 份报告，D-147）
 
 > **先跑三行报给我**：`git -C D:\new\projects\meeting-notes log --oneline -1`、`git -C D:\new\projects\meeting-notes status --short`、`Get-Content D:\new\artifacts\T4.35c\workbuddy\head.txt`。
 > **会话说明**：这张卡**继续在同一个会话里做**（你刚改完 `task.html` 的句子列表，说话人 chip 就挂在这套句子上）；但这是**新卡 T4.36**，不是继续改 T4.35c——先跑上面三行报给我再动手。只看「这张卡 + `handoff.md` 第 0–2 节 + `AGENT.md` §2/§4」；证据落 `D:\new\artifacts\T4.36\workbuddy\`；回报 ≤40 行。
