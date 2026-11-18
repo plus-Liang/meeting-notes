@@ -42,7 +42,8 @@ a{color:inherit;text-decoration:none}
 
 /* ── 刊头：A 的巨标题 + B 的档案元信息 ── */
 .mast{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:56px;align-items:end;padding:60px 0 34px;border-bottom:1px solid var(--rule-ink)}
-.mast h1{font:600 clamp(46px,6.2vw,78px)/1.06 var(--serif);letter-spacing:-2px;text-wrap:balance}
+.mast h1{font:600 clamp(44px,5.4vw,68px)/1.1 var(--serif);letter-spacing:-1.6px}
+.mast .lede{margin-top:16px;font:400 14px/1.8 var(--sans);color:var(--ink-2)}
 .mast h1 i{font-style:normal;color:var(--seal)}
 .mast .meta{display:flex;flex-direction:column;gap:0;padding-bottom:6px}
 .mast .meta div{display:flex;justify-content:space-between;gap:16px;align-items:baseline;padding:9px 0;border-top:1px solid var(--rule)}
@@ -255,7 +256,10 @@ footer{display:flex;justify-content:space-between;gap:18px;margin-top:44px;paddi
   </header>
 
   <section class="mast">
-    <h1>录音进来<br>纪要归档</h1>
+    <div class="mast-main">
+      <h1>录音转纪要</h1>
+      <p class="lede">上传音视频，得到结构化摘要、要点与待办</p>
+    </div>
     <dl class="meta">
       <div><dt>归档总量</dt><dd class="big">299 条</dd></div>
       <div><dt>音频总时长</dt><dd>8.4 小时</dd></div>
