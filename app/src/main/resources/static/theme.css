@@ -1,0 +1,115 @@
+/* 录音纪要平台 · T4.39 深色科技风主题层
+ * 只做视觉覆盖：加载在 style.css 之后，不改任何 class 结构与 JS 行为。
+ * 设计语言（用户 brief 2026-11-18）：深色近黑墨绿底 + 低饱和绿辅助色；
+ * 毛玻璃（backdrop-filter + 降级底色）、柔阴影、1px 细边框、渐变网格（CSS gradient）、
+ * 颗粒纹理（内联 SVG feTurbulence data-uri）；离线自托管，无外链。
+ * 对比度：正文 ≥4.5:1、次要 ≥3:1（在 #0c110f / #131a15 底上实测校准）。
+ * 动效仍守 style.css 的 120–240ms 收敛；prefers-reduced-motion 由 style.css 与 particles.js 双侧降级。
+ */
+
+/* ========== 1. 深色 token 覆盖 ========== */
+:root {
+  color-scheme: dark;
+  /* 文字：亮灰绿阶（正文/次要/弱化） */
+  --ink: #e6ebe4;
+  --ink-2: #b3bbae;
+  --ink-3: #949c92;
+  /* 底色：近黑墨绿 */
+  --bg: #0c110f;
+  --grid-line: rgba(150, 200, 165, .045);
+  --surface: #131a15;
+  --surface-muted: #1a231c;
+  /* 细边框 */
+  --border: #263029;
+  --border-strong: #344138;
+  /* 低饱和绿辅助色 */
+  --accent: #8cc49a;
+  --accent-deep: #b2dcbb;            /* tint 上的可读文字色 */
+  --accent-tint: rgba(140, 196, 154, .12);
+  /* 语义色：深底可读版本 + 半透明 tint */
+  --success: #8bd9a8;  --success-tint: rgba(110, 231, 160, .10);
+  --danger: #ff9d8f;   --danger-tint: rgba(217, 45, 32, .16);
+  --warn: #e9c37c;     --warn-tint: rgba(180, 83, 9, .18);
+  --skeleton-base: #202a22;
+  /* 柔阴影（黑基，比纸感时代更重一档） */
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, .35), 0 12px 32px rgba(0, 0, 0, .28);
+  --shadow-card-hover: 0 2px 4px rgba(0, 0, 0, .38), 0 16px 40px rgba(0, 0, 0, .32);
+  --shadow-overlay: 0 12px 32px rgba(0, 0, 0, .5);
+}
+
+/* ========== 2. 背景：渐变网格 + 颗粒（原来 body::before 是方格纹理，整体替换） ========== */
+body::before {
+  z-index: -1;
+  background-image:
+    radial-gradient(1100px 700px at 85% -10%, rgba(140, 196, 154, .10), transparent 60%),
+    radial-gradient(900px 620px at -10% 32%, rgba(110, 170, 140, .07), transparent 60%),
+    radial-gradient(1000px 800px at 72% 112%, rgba(90, 140, 110, .08), transparent 55%),
+    linear-gradient(rgba(150, 200, 165, .04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(150, 200, 165, .04) 1px, transparent 1px);
+  background-size: auto, auto, auto, 28px 28px, 28px 28px;
+}
+/* 颗粒纹理：内联 SVG feTurbulence（离线 data-uri，无外链） */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  opacity: .05;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E");
+}
+
+/* ========== 3. 毛玻璃（渐进增强；不支持 backdrop-filter 时退回 style.css 的实底） ========== */
+@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .card {
+    background: rgba(19, 26, 21, .72);
+    -webkit-backdrop-filter: blur(16px) saturate(1.25);
+    backdrop-filter: blur(16px) saturate(1.25);
+  }
+  .mn-drawer {
+    background: rgba(12, 17, 14, .84);
+    -webkit-backdrop-filter: blur(20px) saturate(1.2);
+    backdrop-filter: blur(20px) saturate(1.2);
+  }
+  .mn-drawer-head { background: rgba(19, 26, 21, .6); }
+}
+
+/* ========== 4. style.css 硬编码色点的深色等价 ========== */
+/* 主按钮：墨绿面板底 + 亮字 */
+button { background: #1f2a22; border-color: #2b382d; }
+button:hover { background: #28352b; border-color: #334237; }
+.filter-btn.active { background: #1f2a22; color: var(--ink); border-color: var(--accent); }
+.filter-btn.active:hover { background: #28352b; border-color: var(--accent); }
+.pl-play { background: #1f2a22; border-color: #2b382d; }
+.pl-btn:hover { background: #28352b; border-color: #334237; }
+.mn-drawer-toast { background: #28352b; color: var(--ink); }
+.pl-bubble { background: #28352b; color: var(--ink); }
+.mn-drawer-mask { background: rgba(3, 7, 4, .62); }
+.task-row:hover { background: rgba(255, 255, 255, .045); }
+.count-chip { background: rgba(255, 255, 255, .10); }
+.filter-btn.active .count-chip { background: rgba(255, 255, 255, .18); }
+
+/* 焦点环与输入焦点：绿调 */
+.search-box input:focus,
+.link-field input:focus,
+.mn-login-card input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(140, 196, 154, .20);
+}
+
+/* 自绘 checkbox 勾选态：绿底 + 深色勾（原为 ink 底白勾，深色下反转会看不见） */
+input[type="checkbox"] {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8.5l3 3 6-6' fill='none' stroke='%230c110f' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 12px;
+}
+input[type="checkbox"]:checked {
+  background-color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* ========== 5. 动效收敛确认（与 style.css 同口径；新增层不引入 >300ms 过渡） ========== */
+@media (prefers-reduced-motion: reduce) {
+  body::after { opacity: .03; } /* 颗粒仍在但更淡；无动画层 */
+}
