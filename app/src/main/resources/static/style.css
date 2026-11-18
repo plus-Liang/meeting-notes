@@ -641,3 +641,62 @@ details.example[open] summary { margin-bottom: var(--sp-3); }
   .seg-line { padding: var(--sp-2); font-size: var(--fs-base); }
   .seg-ts { min-width: 40px; }
 }
+
+/* ===== T4.36：说话人标注——chip / 菜单 / 分组视图（复用现有变量，无 CDN） ===== */
+.seg-item { display: flex; align-items: flex-start; gap: var(--sp-2); }
+.seg-item .seg-line { flex: 1 1 auto; min-width: 0; }
+.seg-chip {
+  flex: 0 0 auto;
+  margin-top: var(--sp-2);
+  padding: 2px 10px;
+  font-size: var(--fs-xs, 12px);
+  line-height: 1.6;
+  border-radius: 999px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--ink-2);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color var(--dur-color) var(--ease), border-color var(--dur-color) var(--ease);
+}
+.seg-chip:hover { background: var(--surface-muted); color: var(--ink); }
+.seg-chip.seg-chip-active { background: var(--accent-tint); border-color: var(--accent); color: var(--accent-deep); font-weight: var(--fw-semibold); }
+.seg-chip:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
+.speaker-menu {
+  margin: var(--sp-3) 0;
+  padding: var(--sp-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-sm, 10px);
+  background: var(--surface-muted);
+}
+.speaker-menu-title { font-weight: var(--fw-semibold); margin-bottom: var(--sp-2); }
+.speaker-menu-labels { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-bottom: var(--sp-2); }
+.speaker-pick.speaker-pick-on { background: var(--accent-tint); border-color: var(--accent); color: var(--accent-deep); }
+.speaker-menu-row { display: flex; gap: var(--sp-2); margin-bottom: var(--sp-2); }
+.speaker-menu-row input {
+  flex: 1 1 auto; min-width: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-xs);
+  font-size: var(--fs-sm);
+  background: var(--surface);
+  color: var(--ink);
+}
+.speaker-menu-row input:focus { outline: none; border-color: var(--ink); box-shadow: 0 0 0 3px rgba(26, 26, 26, .12); }
+.speaker-menu-actions { display: flex; gap: var(--sp-2); }
+.seg-group { margin-bottom: var(--sp-3); }
+.seg-group-title {
+  font-weight: var(--fw-semibold);
+  font-size: var(--fs-sm);
+  color: var(--accent-deep);
+  background: var(--accent-tint);
+  padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--r-xs);
+  margin-bottom: var(--sp-1);
+}
+.seg-group-title.seg-group-unlabeled { color: var(--ink-3); background: var(--surface-muted); }
+.seg-group .seg-item:first-of-type .seg-line { border-top: 0; }
+@media (max-width: 640px) {
+  .seg-chip { padding: 2px 8px; }
+  .speaker-menu-row { flex-direction: column; }
+}

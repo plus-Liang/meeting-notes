@@ -538,6 +538,7 @@
    * 同一任务只签发一次，失败/过期重签一次（卡面）；segments 为 null 或 [] → 不渲染播放器（双降级，
    * 原文区与今天完全一致）；audio-token 失败 → 播放卡内可读错误，不阻塞原文/摘要渲染。 */
   var player = { segs: null, audio: null, issueCount: 0, curIdx: -1 };
+  var speaker = { map: null, grouped: false, menuIdx: -1, prevMap: null }; /* T4.36：说话人标注状态 */
 
   function fmtTs(sec) {
     var s = Math.floor(sec);
@@ -550,17 +551,94 @@
     var segs = data.segments;
     if (!segs || !segs.length) return ''; /* null（旧任务/PASTE）与 []（空音频）都不渲染，卡面双降级 */
     player.segs = segs;
-    var rows = segs.map(function (s, i) {
-      return '<li class="seg-item"><button type="button" class="seg-line" data-idx="' + i +
-        '" data-start="' + s.start + '" aria-label="跳到第 ' + (i + 1) + ' 句">' +
-        '<span class="seg-ts">' + fmtTs(s.start) + '</span>' +
-        '<span class="seg-text">' + escapeHtml(s.text) + '</span></button></li>';
-    }).join('');
+    speaker.map = data.speaker_map || null; /* T4.36：第 16 键（null=未标注/清除，不是 {}） */
     return '<div class="section" id="playerCard"><h2>播放</h2>' +
       '<p id="playerMsg" class="hint" hidden></p>' +
       '<div id="playerBody" hidden><audio id="taskAudio" controls preload="metadata"></audio>' +
-      '<p class="hint">点任意句子跳到该句；播放时当前句自动高亮。</p>' +
-      '<ol class="seg-list" id="segList">' + rows + '</ol></div></div>';
+      '<p class="hint">点任意句子跳到该句；播放时当前句自动高亮。点行尾「＋标注」给句子打说话人标签。</p>' +
+      '<p><button type="button" class="btn-secondary" id="speakerGroupBtn" hidden></button></p>' +
+      '<div id="speakerMenu" class="speaker-menu" hidden>' +
+      '<div class="speaker-menu-title" id="speakerMenuTitle"></div>' +
+      '<div id="speakerMenuLabels" class="speaker-menu-labels"></div>' +
+      '<div class="speaker-menu-row"><input type="text" id="speakerNewInput" maxlength="20" ' +
+      'placeholder="新建标签（1–20 字）" aria-label="新建说话人标签">' +
+      '<button type="button" class="btn-secondary" id="speakerNewBtn">新建</button></div>' +
+      '<div class="speaker-menu-actions"><button type="button" class="btn-secondary" id="speakerClearBtn">清除本句</button>' +
+      '<button type="button" class="btn-secondary" id="speakerCloseBtn">关闭</button></div>' +
+      '<p id="speakerMsg" class="hint" hidden></p></div>' +
+      '<ol class="seg-list" id="segList"></ol></div>';
+  }
+
+  /** 单个句子行（顺序视图与分组视图共用）：seg-line（点→seek）+ seg-chip（点→说话人菜单）。 */
+  function segItemHtml(i) {
+    var s = player.segs[i];
+    return '<li class="seg-item">' +
+      '<button type="button" class="seg-line" data-idx="' + i + '" data-start="' + s.start +
+      '" aria-label="跳到第 ' + (i + 1) + ' 句">' +
+      '<span class="seg-ts">' + fmtTs(s.start) + '</span>' +
+      '<span class="seg-text">' + escapeHtml(s.text) + '</span></button>' +
+      '<button type="button" class="seg-chip" data-idx="' + i + '" aria-label="标注第 ' + (i + 1) + ' 句说话人"></button>' +
+      '</li>';
+  }
+
+  function speakerLabels() {
+    var seen = [], map = speaker.map || {};
+    for (var k in map) {
+      if (map[k] && seen.indexOf(map[k]) < 0) seen.push(map[k]);
+    }
+    return seen;
+  }
+
+  /** 顺序视图 ↔ 分组视图（有映射才允许分组；组序=标签首次出现序，未标注组在最后）。 */
+  function renderSegList() {
+    var list = document.getElementById('segList');
+    if (!list) return;
+    var hasMap = speaker.map && Object.keys(speaker.map).length > 0;
+    if (speaker.grouped && hasMap) {
+      var groups = {}, unlabeled = [], order = [], seen = {};
+      for (var i = 0; i < player.segs.length; i++) {
+        var lab = speaker.map[String(i)];
+        if (lab) {
+          if (!groups[lab]) { groups[lab] = []; order.push(lab); }
+          groups[lab].push(i);
+        } else {
+          unlabeled.push(i);
+        }
+      }
+      var html = '';
+      order.forEach(function (l) {
+        html += '<div class="seg-group"><div class="seg-group-title">' + escapeHtml(l) +
+          '（' + groups[l].length + ' 句）</div>' + groups[l].map(segItemHtml).join('') + '</div>';
+      });
+      if (unlabeled.length) {
+        html += '<div class="seg-group"><div class="seg-group-title seg-group-unlabeled">未标注（' +
+          unlabeled.length + ' 句）</div>' + unlabeled.map(segItemHtml).join('') + '</div>';
+      }
+      list.innerHTML = html;
+    } else {
+      list.innerHTML = player.segs.map(function (s, i2) { return segItemHtml(i2); }).join('');
+    }
+    renderChips();
+    updateGroupBtn();
+  }
+
+  function renderChips() {
+    var list = document.getElementById('segList');
+    if (!list) return;
+    var map = speaker.map || {};
+    list.querySelectorAll('.seg-chip').forEach(function (c) {
+      var label = map[c.getAttribute('data-idx')];
+      c.textContent = label || '＋标注';
+      c.classList.toggle('seg-chip-active', !!label);
+    });
+  }
+
+  function updateGroupBtn() {
+    var btn = document.getElementById('speakerGroupBtn');
+    if (!btn) return;
+    var hasMap = speaker.map && Object.keys(speaker.map).length > 0;
+    btn.hidden = !hasMap;
+    btn.textContent = speaker.grouped ? '恢复原顺序' : '按说话人分组';
   }
 
   function showPlayerMsg(text) {
@@ -624,7 +702,9 @@
   }
 
   function initPlayer(data) {
-    if (!player.segs) return; /* null/[]：双降级，页面无 <audio> 元素 */
+    if (!player.segs) return; /* null/[]：双降级，页面无 <audio> 元素，也无说话人 UI（T4.36） */
+    renderSegList();
+    bindSpeakerMenu();
     issueAudioToken();
     var audio = document.getElementById('taskAudio');
     /* 播放中签名过期（audio 加载 404）→ 重签一次 */
@@ -641,7 +721,9 @@
         }, 300);
       }
     });
-    /* 点句 → seek（用户手势内同时 play）；K-80 写路径口径：真点真读 audio.currentTime */
+    /* 点句 → seek（用户手势内同时 play）；K-80 写路径口径：真点真读 audio.currentTime。
+     * 事件委托绑在 segList 元素上（innerHTML 重渲染不丢）；seg-chip 与 seg-line 是兄弟节点，
+     * chip 点击不会触发 seek。 */
     document.getElementById('segList').addEventListener('click', function (ev) {
       var line = ev.target.closest('.seg-line');
       if (!line || !player.audio) return;
@@ -658,6 +740,109 @@
       highlightSeg(currentSegIndex(audio.currentTime), true);
     });
   }
+
+  /* ===== T4.36：说话人标注菜单（选已有 / 新建 / 清除 → PATCH → 回读详情，K-80；失败就地提示回滚） ===== */
+
+  function bindSpeakerMenu() {
+    var menu = document.getElementById('speakerMenu');
+    if (!menu) return;
+    menu.addEventListener('click', function (ev) { ev.stopPropagation(); });
+    document.getElementById('speakerCloseBtn').addEventListener('click', closeSpeakerMenu);
+    document.getElementById('speakerGroupBtn').addEventListener('click', function () {
+      speaker.grouped = !speaker.grouped;
+      renderSegList();
+    });
+    document.getElementById('segList').addEventListener('click', function (ev) {
+      var chip = ev.target.closest('.seg-chip');
+      if (!chip) return;
+      openSpeakerMenu(Number(chip.getAttribute('data-idx')));
+    });
+    document.getElementById('speakerNewBtn').addEventListener('click', function () {
+      var input = document.getElementById('speakerNewInput');
+      var label = input.value.trim();
+      if (!label) { showSpeakerMsg('请输入 1–20 字的标签'); return; }
+      applyLabel(label);
+    });
+    document.getElementById('speakerNewInput').addEventListener('keydown', function (ev) {
+      if (ev.key === 'Enter') document.getElementById('speakerNewBtn').click();
+    });
+    document.getElementById('speakerClearBtn').addEventListener('click', function () {
+      applyLabel(null);
+    });
+  }
+
+  function openSpeakerMenu(idx) {
+    speaker.menuIdx = idx;
+    speaker.prevMap = speaker.map ? JSON.parse(JSON.stringify(speaker.map)) : null; /* 失败回滚基准 */
+    var menu = document.getElementById('speakerMenu');
+    var map = speaker.map || {};
+    document.getElementById('speakerMenuTitle').textContent =
+      '第 ' + (idx + 1) + ' 句说话人 · 当前：' + (map[String(idx)] || '未标注');
+    var labels = speakerLabels();
+    var box = document.getElementById('speakerMenuLabels');
+    box.innerHTML = labels.length
+      ? labels.map(function (l) {
+          return '<button type="button" class="btn-secondary speaker-pick' +
+            (map[String(idx)] === l ? ' speaker-pick-on' : '') + '" data-label="' +
+            escapeHtml(l).replace(/"/g, '&quot;') + '">' + escapeHtml(l) + '</button>';
+        }).join('')
+      : '<span class="hint">还没有标签，用下面输入框新建一个</span>';
+    box.querySelectorAll('.speaker-pick').forEach(function (b) {
+      b.addEventListener('click', function () { applyLabel(b.getAttribute('data-label')); });
+    });
+    document.getElementById('speakerNewInput').value = '';
+    document.getElementById('speakerMsg').hidden = true;
+    menu.hidden = false;
+    document.getElementById('speakerNewInput').focus();
+  }
+
+  function closeSpeakerMenu() {
+    var menu = document.getElementById('speakerMenu');
+    if (menu) menu.hidden = true;
+    speaker.menuIdx = -1;
+  }
+
+  function showSpeakerMsg(text) {
+    var el = document.getElementById('speakerMsg');
+    if (!el) return;
+    el.hidden = !text;
+    el.className = 'error-text';
+    el.textContent = text;
+  }
+
+  /** 应用标签（label=null 清除）：构建候选 map → PATCH → 成功后回读详情（K-80）；失败就地提示。 */
+  function applyLabel(label) {
+    var idx = speaker.menuIdx;
+    if (idx < 0) return;
+    var candidate = speaker.map ? JSON.parse(JSON.stringify(speaker.map)) : {};
+    if (label === null) {
+      delete candidate[String(idx)];
+    } else {
+      candidate[String(idx)] = label;
+    }
+    sendJson('api/v1/tasks/' + id + '/speaker-map', 'PATCH', { speaker_map: candidate })
+      .then(function (resp) {
+        if (resp.__httpStatus !== 200) {
+          showSpeakerMsg('保存失败（' + (resp.code || resp.__httpStatus) + '）：' +
+            (resp.message || '请稍后重试')); /* map 未动 = 自然回滚 */
+          return;
+        }
+        /* K-80：PATCH 成功后回读详情，以服务端为准更新本地状态 */
+        getJson('api/v1/tasks/' + id).then(function (detail) {
+          speaker.map = detail && detail.speaker_map ? detail.speaker_map : null;
+          closeSpeakerMenu();
+          renderSegList();
+        }, function () {
+          /* 回读失败也用响应值兜底（已落库，仅展示层保守） */
+          speaker.map = Object.keys(resp.speaker_map || {}).length ? resp.speaker_map : null;
+          closeSpeakerMenu();
+          renderSegList();
+        });
+      }, function () {
+        showSpeakerMsg('网络异常，保存失败。标签未变更。');
+      });
+  }
+
 
   /* T4.15⑨：待办渲染与交互（checkbox → PATCH {done}；删除 → DELETE；乐观更新 + 失败回滚 + 行内错误） */
   var todos = [];

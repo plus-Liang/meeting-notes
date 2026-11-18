@@ -33,6 +33,7 @@ import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 /**
  * 任务入口 API（T1.4 上传 / T1.5 状态查询 / T3.5 改词回流与待办勾选删除 / T3.7 PASTE / T3.9 模板参数）。
@@ -152,7 +153,8 @@ public class TaskController {
                        r.summary, r.keywords, r.ai_tier, r.todos, r.keypoints,
                        CASE WHEN t.status = 'DONE' THEN r.transcript_punctuated END AS transcript_punctuated,
                        r.template,
-                       CASE WHEN t.status = 'DONE' THEN r.segments::text END AS segments
+                       CASE WHEN t.status = 'DONE' THEN r.segments::text END AS segments,
+                       r.speaker_map::text AS speaker_map
                 FROM task t
                 LEFT JOIN task_result r ON r.task_id = t.id
                 WHERE t.id = ? AND t.user_id = ?
@@ -222,12 +224,26 @@ public class TaskController {
                             segments = null;
                         }
                     }
+                    // speaker_map 列是 JSONB（T4.36 第 16 键）：未标注/清除/旧任务/坏数据 → null（不是 {}），不炸接口
+                    Map<String, String> speakerMap = null;
+                    String speakerRaw = rs.getString("speaker_map");
+                    if (speakerRaw != null && !speakerRaw.isBlank()) {
+                        try {
+                            JsonNode smObj = mapper.readTree(speakerRaw);
+                            if (smObj.isObject()) {
+                                Map<String, String> parsed = new java.util.LinkedHashMap<>();
+                                smObj.fields().forEachRemaining(f -> parsed.put(f.getKey(), f.getValue().asText()));
+                                speakerMap = parsed;
+                            }
+                        } catch (Exception e) { speakerMap = null; }
+                    }
                     return new TaskStatusResponse(rs.getLong("id"), rs.getString("status"),
                             duration, size,
                             rs.getObject("created_at", OffsetDateTime.class), rs.getString("transcript"),
                             rs.getString("error_code"), rs.getString("summary"), keywords,
                             rs.getString("ai_tier"), todos, keypoints,
-                            rs.getString("transcript_punctuated"), rs.getString("template"), segments);
+                            rs.getString("transcript_punctuated"), rs.getString("template"), segments,
+                            speakerMap);
                 },
                 id, DEFAULT_USER_ID);
         if (resp == null) {

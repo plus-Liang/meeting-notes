@@ -48,7 +48,7 @@ class E2ETest {
     private static final List<String> DETAIL_KEYS = List.of(
             "task_id", "status", "duration_sec", "size_bytes", "created_at", "transcript",
             "error_code", "summary", "keywords", "ai_tier", "todos", "keypoints",
-            "transcript_punctuated", "template", "segments");
+            "transcript_punctuated", "template", "segments", "speaker_map");
 
     private static String textA;
     private static long taskId;

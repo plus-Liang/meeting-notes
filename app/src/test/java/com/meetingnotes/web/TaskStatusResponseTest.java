@@ -16,7 +16,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * 详情契约键序：原 11 键 + template（T3.9 第 12）+ keypoints（T4.17 第 13）+ transcript_punctuated
- * （T4.18 第 14）+ segments（T4.35a 第 15）（不多不少、键序不变、历史/未生成 null——只增不改）。
+ * （T4.18 第 14）+ segments（T4.35a 第 15）+ speaker_map（T4.36 第 16）（不多不少、键序不变、
+ * 历史/未生成 null——只增不改）。
  * 列表/POST/导出不在本记录，键集不受影响。
  */
 class TaskStatusResponseTest {
@@ -35,11 +36,12 @@ class TaskStatusResponseTest {
                 List.of(new TodoItemView("准备扩容方案", "运维组", null, false)),
                 List.of(new KeypointView("扩容计划", "与会人员讨论了数据库扩容的时间表。")),
                 "与会人员讨论了，数据库扩容的时间表。", template,
-                java.util.List.of(new TaskStatusResponse.SegmentView(0.12, 3.45, "大家好，我们开始。")));
+                java.util.List.of(new TaskStatusResponse.SegmentView(0.12, 3.45, "大家好，我们开始。")),
+                java.util.Map.of("0", "说话人 1"));
     }
 
     @Test
-    void detailJsonHasExactlyFifteenKeysEndingWithSegments() throws Exception {
+    void detailJsonHasExactlySixteenKeysEndingWithSpeakerMap() throws Exception {
         ObjectMapper mapper = productionMapper();
         JsonNode node = mapper.readTree(mapper.writeValueAsString(sample("course")));
 
@@ -50,14 +52,16 @@ class TaskStatusResponseTest {
         }
         assertEquals(List.of("task_id", "status", "duration_sec", "size_bytes", "created_at",
                         "transcript", "error_code", "summary", "keywords", "ai_tier", "todos",
-                        "keypoints", "transcript_punctuated", "template", "segments"),
-                keys, "键集 = 14 键 + segments（T4.35a 第 15，只增不改），不许插在中间或改名");
+                        "keypoints", "transcript_punctuated", "template", "segments", "speaker_map"),
+                keys, "键集 = 15 键 + speaker_map（T4.36 第 16，只增不改），不许插在中间或改名");
         assertEquals("course", node.get("template").asText(), "新任务 template 恒非空");
         JsonNode segments = node.get("segments");
         assertTrue(segments.isArray() && segments.size() == 1, "segments 数组元素序列化为 start/end/text");
         assertEquals(List.of("start", "end", "text"), toKeys(segments.get(0)), "segments 元素键 = start/end/text");
         assertEquals(0.12, segments.get(0).get("start").asDouble(), 1e-9);
         assertEquals("大家好，我们开始。", segments.get(0).get("text").asText());
+        assertEquals("说话人 1", node.get("speaker_map").get("0").asText(),
+                "speaker_map 对象键=句子下标字符串、值=标签");
     }
 
     private static List<String> toKeys(JsonNode node) {
@@ -89,6 +93,6 @@ class TaskStatusResponseTest {
         ObjectMapper mapper = productionMapper();
         JsonNode node = mapper.readTree(mapper.writeValueAsString(sample(null)));
         assertTrue(node.get("template").isNull(), "T3.9 之前的旧任务 template 必须是 null");
-        assertEquals(15, node.size(), "T4.35a 起 = 15 键（segments 只增在第 15）");
+        assertEquals(16, node.size(), "T4.36 起 = 16 键（speaker_map 只增在第 16）");
     }
 }

@@ -2,6 +2,7 @@ package com.meetingnotes.web;
 
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Map;
 
 /**
  * GET /api/v1/tasks/{id} 响应体（T1.5 / T1.6 追加 error_code，S-3 / T3.1 追加摘要三字段 /
@@ -21,7 +22,8 @@ import java.util.List;
  * {@code template} 为摘要模板（T3.9）：新任务恒非空（meeting/course/interview/podcast/shortvideo 之一），
  * T3.9 之前的旧任务为 null；{@code segments} 为句子级时间戳（T4.35a 第 15 键，元素 start/end 秒 + text）：
  * 新音频任务非空数组（空音频是 []，有响应无内容），旧任务 / PASTE 无音频任务为 null（不是 []），
- * 前端据此隐藏播放器（T4.35c）。
+ * 前端据此隐藏播放器（T4.35c）；{@code speaker_map} 为手工说话人标注（T4.36 第 16 键，键=句子下标
+ * 字符串、值=标签）：未标注/清除/旧任务为 null（不是 {}），PATCH /tasks/{id}/speaker-map 写入。
  */
 public record TaskStatusResponse(
         long taskId,
@@ -38,7 +40,8 @@ public record TaskStatusResponse(
         List<KeypointView> keypoints,
         String transcriptPunctuated,
         String template,
-        List<SegmentView> segments) {
+        List<SegmentView> segments,
+        Map<String, String> speakerMap) {
 
     /** 句子级时间戳元素（T4.35a）：start/end 秒（double），text 去首尾空白后的句子文本。 */
     public record SegmentView(double start, double end, String text) {
