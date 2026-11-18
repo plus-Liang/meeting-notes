@@ -1,8 +1,8 @@
 # 状态：录音纪要平台
 
-**更新**: 2026-11-18 03:10 ｜ **阶段**: **D-122 批次（按 D-126/D-127 裁剪）**：保留 T4.36/T4.37；不做 T4.31 PWA / T4.33 INBOX / T4.34 RSS；**已通过 18 张：T4.23 / T4.23b / T4.24 / T4.24b / T4.25 / T4.26 / T4.26b / T4.27 / T4.27b / T4.28 / T4.29 / T4.29b / T4.30（含收尾 T4.30b）/ T4.32a / T4.32b / T4.35a / T4.35b / T4.35c ✅**（其中 T4.29/T4.30 均为首验不通过→收尾卡修复后转通过）；下一张 = **T4.36 手工说话人（句子打标签 + 分组显示；V1 已有 speaker_map，无需迁移）** → T4.37 登录
+**更新**: 2026-11-18 03:35 ｜ **阶段**: **D-122 批次（按 D-126/D-127 裁剪）**：保留 T4.36/T4.37；不做 T4.31 PWA / T4.33 INBOX / T4.34 RSS；**已通过 18 张：T4.23 / T4.23b / T4.24 / T4.24b / T4.25 / T4.26 / T4.26b / T4.27 / T4.27b / T4.28 / T4.29 / T4.29b / T4.30（含收尾 T4.30b）/ T4.32a / T4.32b / T4.35a / T4.35b / T4.35c ✅**（其中 T4.29/T4.30 均为首验不通过→收尾卡修复后转通过）；下一张 = **T4.36 手工说话人（句子打标签 + 分组显示；V1 已有 speaker_map，无需迁移）** → T4.37 登录
 **目标**: 开源自托管「录音/网课/短视频 → 纪要 + 待办」Web 应用（给别人用、我是第一用户）
-**仓库**: `plus-Liang/meeting-notes` ｜ 产品提交 **`bbe2ca3`**（T4.35c）；**本地领先 origin 2 个提交待推**（产品 + 本验收文档；原因：FlClash TUN 的 HTTPS 通道故障，HTTP 200 但 HTTPS 全 000，`git push` 两种 TLS 后端都握手失败）｜ 推送命令：`git -C D:\new\projects\meeting-notes push origin main`（网络恢复后执行）｜ `git status` 干净
+**仓库**: `plus-Liang/meeting-notes` ｜ 产品提交 **`bbe2ca3`**（T4.35c）；**origin 已同步到 `009c245`（与本地一致，无待推）**｜ `git status` 干净
 
 ## 实测基线
 
@@ -28,10 +28,10 @@
 
 ## 阻塞 / 风险
 
-- **无阻塞**。**推送待办：本地领先 origin 2 个提交（产品 `bbe2ca3` + 验收文档），FlClash HTTPS 故障期间推不上去；网络恢复后执行 `git -C D:\new\projects\meeting-notes push origin main`**。**会话策略**：T4.36 在 WorkBuddy 的同一会话继续（刚改完 `task.html` 句子列表，强相关）；**T4.37 必须新会话**（大卡横切）。
+- **无阻塞**。push：**origin 已到 `009c245`（与本地一致，无待推）**。**会话策略**：T4.36 在 WorkBuddy 的同一会话继续（刚改完 `task.html` 句子列表，强相关）；**T4.37 必须新会话**（大卡横切）。
 - **T4.35c P3 残余（接受）**：高亮句出列表可视区时自动滚动会轻微牵动"边听边翻别处"的用户（可加"用户滚动后暂停跟随 5s"）；重渲染不保留滚动/高亮位置（DONE 后不再轮询，无实际影响）；无键盘快捷键；`share.html` 不加播放器；高亮精度受 `timeupdate` ~4Hz 限制（≤250ms）。
 - **T4.35b P3 残余（接受）**：**音频 GET 未绑 user_id**（T4.37 必收）；PASTE 保护依赖签发闸；`HEAD /audio` 未实现、多段 Range 416；MinIO 416 兜底未注入故障；签名无吊销。
 - **T4.35a P3 残余**：segments 无索引/无服务端排序校验；`AsrClient` 不再走 Spring AI；ASR 默认分段未合并；ASR 超时未注入故障。
 - **T4.32b/T4.32a P3 残余**：`{out}` 模式不排空 stdout、预览 2MB 截断、无 Content-Type 判 unsupported、BYOF 413 未真机、预览与 HttpMediaFetcher 有重复实现；`100.64/10`/NAT64/6to4 未拦、DNS rebinding TOCTOU、链接导入不查 `TASK_MAX_SIZE_BYTES`。
 - 既有残余：标签下拉来源=已加载行并集（P3-3）；浏览器交互层无自动化回归（P3-4）；录音 60min/200MB 自动停未超长实测；`runFfprobe` 先读流再 waitFor 的既有阻塞风险；F-14 本地档 v1 不可用；Webhook v1 无 SSRF；批量 413/429 未实测；**v1 余量 0（D-032 仍成立）**。
-- **运维**：Docker Desktop `AutoStart=false`（K-38）；改 compose 网络属性必须 `down` 再 `up`（K-44）；所有 curl 带 Bearer；重建容器前先存日志（K-74）。**2026-11-18 凌晨 FlClash TUN 的 HTTPS 通道故障**（HTTP 80 正常 200、HTTPS 全 000，本机 7890 代理也出不去）导致 `git push` 长时间失败：本地提交安全、不阻塞开发（写码方不 push），**恢复后第一件事就是 push 补上 2 个提交**；诊断结论：不是 git/账号/权限问题。
+- **运维**：Docker Desktop `AutoStart=false`（K-38）；改 compose 网络属性必须 `down` 再 `up`（K-44）；所有 curl 带 Bearer；重建容器前先存日志（K-74）。**代理 TLS 故障（2026-11-18 凌晨，约 2 小时）已恢复**：当时 HTTP 80 正常、HTTPS 全 000，`git push` 两种 TLS 后端都握手失败；恢复后已推成功（`origin/main == 009c245`）。**以后遇到同类现象按"代理 TLS 故障"排查，别动本地提交、别 reset**。

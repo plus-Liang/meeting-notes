@@ -2,7 +2,7 @@
 
 ## 0. 当前位置
 
-- 产品提交 **`bbe2ca3`**（T4.35c），工作区干净；**注意：本地领先 origin 2 个提交待推**（产品 + 验收文档）——2026-11-18 凌晨 FlClash TUN 的 HTTPS 通道故障（HTTP 200 但 HTTPS 全 000），`git push` 两种 TLS 后端都握手失败；**网络恢复后第一件事**：`git -C D:\new\projects\meeting-notes push origin main`。栈 5/5 healthy。**D-122 批次已通过 18 张**（T4.23…T4.30 含收尾、T4.32a、T4.32b、T4.35a、T4.35b、T4.35c）。
+- 产品提交 **`bbe2ca3`**（T4.35c），工作区干净；**origin 已同步到 `009c245`（与本地一致，无待推）**；栈 5/5 healthy。**D-122 批次已通过 18 张**（T4.23…T4.30 含收尾、T4.32a、T4.32b、T4.35a、T4.35b、T4.35c）。
 - 配额（11-18 新的一天）：已用 **8 分钟 / 8 任务**（上限 200/100，余量足）。任务总数 **271**（全 DONE、DEAD 0）；MinIO **277 前缀 = 271 + 历史 6 孤儿（74–79）**。
 - **下一张 = T4.36 手工说话人**：`PATCH /tasks/{id}/speaker-map`（句子下标 → 标签，校验矩阵）+ 详情**只增第 16 键** `speaker_map`（旧任务 null）+ 前端句子 chip / 分组视图；**用已有任务 552（18 段）/535（35 段）/237（无 segments）验证，零新建任务**。之后 T4.37 登录/多用户；不做 T4.31 PWA / T4.33 INBOX / T4.34 RSS。
 - **已核实（别白写迁移）**：`task_result.speaker_map JSONB` 在 **V1 建表就有**（`V1__init.sql` 第 31 行），T4.36 **不需要 V8 迁移**。
@@ -36,7 +36,7 @@
 
 ## 4. 未决
 
-- **推送待办（P0 于交接前确认）**：本地领先 origin **2 个提交**（`bbe2ca3` 产品 + T4.35c 验收文档），因 FlClash HTTPS 故障推不上去；网络恢复后立刻 `git -C D:\new\projects\meeting-notes push origin main` 并确认 `git rev-parse HEAD == git rev-parse origin/main`。诊断：HTTP 80 正常、HTTPS 全 000（含 baidu），本机 7890 代理也出不去——不是 git/账号/权限问题；**别删本地提交、别 reset**。
+- **推送（已恢复，勿再当成待办）**：2026-11-18 凌晨 FlClash 的 HTTPS 通道曾故障约 2 小时（HTTP 200、HTTPS 全 000，`git push` 两种 TLS 后端握手失败），**03:35 网络恢复后已推成功**：`origin/main == 009c245`（与本地一致，待推 0）。以后遇到同类现象先按"代理 TLS 故障"排查，不要动本地提交。
 - **T4.35c P3 残余（接受）**：高亮句出列表可视区时自动滚动会轻微牵动用户（可加"用户滚动后暂停跟随 5s"）；重渲染不保留滚动/高亮位置（日常无影响）；无键盘快捷键；`share.html` 不加播放器；高亮精度受 `timeupdate` ~4Hz（≤250ms）。
 - **T4.35b P3 残余（接受）**：**音频 GET 未绑 user_id**（T4.37 必收）；PASTE 保护依赖签发闸；`HEAD /audio` 未实现、多段 Range 416；MinIO 416 兜底未注入故障；签名无吊销。
 - T4.35a/T4.32b/T4.32a 残余同前（见 state.md）。
