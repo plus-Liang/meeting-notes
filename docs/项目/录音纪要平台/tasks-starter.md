@@ -2871,7 +2871,7 @@ F-15 控制在 ≤30 行并集中一处；新增静态资源不引第三方库�
 > - **收尾（D-139）**：删掉验证用的测试账号（`app_user WHERE id>=2`）与 quota 行、**把 1 号账号恢复未认领**（`username='admin', password_hash='!', token_hash=NULL, token_issued_at=NULL`）；任务数保持 291、全 DONE、user_id 全 1；`.env` 不动、无 override、`/tmp` 无残留、`git status` 干净、不 push。
 > **禁止**：改前端/其它契约/错误码语义；吞所有数据完整性异常；把并发窗口"用 sleep 测试"糊过去；多 commit；新建音频任务（并发验注册不需要任务）。
 
-## T4.37b 登录/多用户前端：登录页 + 首次创建管理员 + 401→登录页 + 页头当前用户/退出（约 3–4 小时；D-122；**必须新开 WorkBuddy 会话**；依赖 T4.37a 已通过 `437018f`）
+## T4.37b 登录/多用户前端：登录页 + 首次创建管理员 + 401→登录页 + 页头当前用户/退出（约 3–4 小时；D-122；**必须新开 WorkBuddy 会话**；依赖 T4.37a 已通过 `437018f`） ✅ 已完成（`ad10350`，2026-11-18，第 65 份报告，D-150）
 
 > **先跑三行报给我**：`git -C D:\new\projects\meeting-notes log --oneline -1`、`git -C D:\new\projects\meeting-notes status --short`、`Get-Content D:\new\artifacts\T4.37a-fix\workbuddy\head.txt`。
 > **会话说明**：**本卡必须新开一个 WorkBuddy 会话**（纯前端层：static HTML/JS/CSS；上一个会话是后端账号大卡，上下文不相关且已很长）。只读「这张卡 + `handoff.md` 第 0–2 节 + `AGENT.md` §2/§4」；证据落 `D:\new\artifacts\T4.37b\workbuddy\`；回报 ≤40 行。

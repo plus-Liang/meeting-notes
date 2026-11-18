@@ -1,23 +1,25 @@
-# 交接：录音纪要平台（更新 2026-11-18 17:35，给下一个会话 / 新会话 WorkBuddy）
+# 交接：录音纪要平台（更新 2026-11-18 18:40，给下一个会话）
 
 ## 0. 当前位置
 
-- 产品提交 **`437018f`**（T4.37a-fix），工作区干净；**origin 已同步（含 T4.37a/T4.37a-fix 验收文档与 T4.37b 卡，与本地一致，待推 0）**；栈 5/5 healthy。**D-122 批次已通过 20 张**（T4.23…T4.30 含收尾、T4.32a、T4.32b、T4.35a、T4.35b、T4.35c、T4.36、**T4.37a（首验不通过 → 收尾后转通过）**）。
-- 配额（11-18）：已用 **36 分钟 / 36 任务**（上限 200/100，余量足）。任务总数 **299**（全 DONE、DEAD 0、user_id 全 1）；MinIO **305 前缀 = 299 + 历史 6 孤儿（74–79）**；`app_user` **1 行占位 admin 未认领**（等 T4.37b 首次访问创建）。
-- **下一张 = T4.37b 登录/多用户前端（卡已写在 `tasks-starter.md`，直接粘卡消息即可；必须新开 WorkBuddy 会话）**：`login.html`（登录 + 首次创建管理员/注册 + `?next=` 站内防开放重定向）+ `auth.js` 401→登录页（删 token 弹窗）+ index/tasks/task/settings 页头当前用户/退出 + `style.css`；**只前端零后端**。之后发布三件（T4.10 → T4.9 → T4.11）；不做 T4.31 PWA / T4.33 INBOX / T4.34 RSS。
-- **会话策略（按用户要求区分）**：T4.36、T4.37a、T4.37a-fix 均按规则用同一会话；**T4.37b 必须新会话**（纯前端层，与后端账号大卡上下文不相关且旧会话已很长）。
+- 产品提交 **`ad10350`**（T4.37b 登录/多用户前端），工作区干净；**origin 待推 1（本 commit + 本次验收文档）**；栈 5/5 healthy。**D-122 批次已通过 21 张**（T4.23…T4.30 含收尾、T4.32a、T4.32b、T4.35a、T4.35b、T4.35c、T4.36、T4.37a（首验不通过 → 收尾后转通过）、**T4.37b**）。
+- 配额（11-18）：已用 **36 分钟 / 36 任务**（上限 200/100）。任务总数 **299**（全 DONE、DEAD 0、user_id 全 1）；MinIO **305 前缀 = 299 + 历史 6 孤儿（74–79）**；`app_user` **1 行占位 admin 未认领**（等真实首访在登录页创建）。
+- **下一张 = 发布三件**：**T4.10 README + 录屏 → T4.9 开源最小集（LICENSE/CHANGELOG/v0.1.0 tag + 清 MinIO 孤儿 74–79）→ T4.11 简历材料**；这三件是文档/材料层，**由 Lead 自己写，不再开 WorkBuddy 写码卡**。不做 T4.31 PWA / T4.33 INBOX / T4.34 RSS。
+- **会话策略**：T4.37b 已用新 WorkBuddy 会话完成并验收通过；后续发布材料不需要写码方。
+
 
 ## 1. 下一步（按顺序）
 
-1. 用户把 **T4.37b 卡**粘进**新的 WorkBuddy 会话**；开工前先跑三行（`git log -1`、`git status --short`、`Get-Content D:\new\artifacts\T4.37a-fix\workbuddy\head.txt`）。
-2. 回报回来我独立验收（重点：未登录跳转、首建管理员、退出后旧令牌失效、两账号隔离、防开放重定向、390、服务端静态 sha256==工作区）；通过后进入发布三件。
-3. 发布三件前清 MinIO 孤儿 74–79。
+1. **T4.10 README + 录屏**（安装/快速开始/截图/短录屏，30 分钟能跑通口径，真实数据）。
+2. **T4.9 开源最小集**：LICENSE、CHANGELOG、`v0.1.0` tag 与 release；发布前清 MinIO 历史孤儿 74–79。
+3. **T4.11 简历材料**：只填实测值（帧率、数量、全量 483 等），不吹。
+4. 每件做完：验收/自检证据落 `artifacts/T4.x/` + 更新 `state.md`/`tasks.md`，最后统一 commit/push。
 
 ## 2. 别踩的坑（最高频）
 
 1. **DONE 最后写**（D-069）；`transcript:""` 也算正常 DONE（D-048）；`todos/keypoints` null≠[]（D-072/D-111）；**`segments` 旧任务/PASTE 是 null、空音频是 `[]`**；**`speaker_map` 旧任务/未标注/清除后是 null（落 NULL，不是 `{}`）**；`ai_tier` 诚实；三档级联 CLOUD→LOCAL→EXTRACTIVE。
-2. **认证是横切**（K-46）：`/api/v1/**` 全要 `Bearer <API_TOKEN>`，只豁免 `/api/v1/share/` 和 **GET `/api/v1/tasks/\d+/audio`**（签名替代 Bearer）；**禁止**再放开别的 `/tasks` 路径（`PATCH /speaker-map` 已实测匿名 401）。
-3. **播放器 URL 不许带 API_TOKEN**：必须 `POST /tasks/{id}/audio-token` 拿签名 URL；`<audio>` 不能带 Authorization 头。**T4.37 要把 userId 绑进签名**。
+2. **认证是横切**（K-46）：`/api/v1/**` 要 `Bearer <账号令牌 | API_TOKEN>`（**双凭据**，`API_TOKEN` ≡ 1 号账号）；豁免仅 `POST /api/v1/auth/login` + `/register`、`/api/v1/share/`、GET `/api/v1/tasks/\d+/audio`（签名替代 Bearer）；**浏览器走登录页**（T4.37b：账号密码 → `localStorage.mn_token`，401 自动回登录页），不再粘贴 token。**禁止**再放开别的 `/tasks` 路径（`PATCH /speaker-map` 已实测匿名 401）。
+3. **播放器 URL 不许带 API_TOKEN**：`POST /tasks/{id}/audio-token` 拿短时签名 URL；`<audio>` 不能带 Authorization 头。**签名已绑 userId**（T4.37a：`?u=&exp=&sig=` 三段，HMAC key=API_TOKEN，验签+归属双闸；旧两段 URL 404）。
 4. **实验不改 `.env`**：临时 override + **用完删除并恢复**（K-44）；改 compose 网络属性必须 `down` 再 `up`。配额紧张时用 override 提高 `QUOTA_TASKS_PER_DAY`，别改 `.env`。
 5. **配置判据打在消费点**（K-51）；新增配置键三处同步（`application.yml` / `.env.example` / `配置清单.md`）；**新增详情键只增在最后**（现 **16 键**，T4.36 加了 `speaker_map`）。
 6. **先 commit → 再 build/up → 再全量**（K-68/K-77）；`head.txt` 记**提交后** HEAD；全量前 `git status` 必须干净。**改 static/ 必须重建 app 镜像**（静态文件在镜像里；我验过服务端 sha256 == 工作区）。
@@ -32,14 +34,18 @@
 15. **容器到宿主的测试服务**：`host.docker.internal` 在容器里可能是 IPv6（K-85）→ 宿主服务双栈，Windows 上 `IPV6_V6ONLY=0` 必须在 `bind` 前设。
 16. **外部工具/输出**：先判输出可解析再 parse（K-82）；重构命令调用别漏程序名（K-83）；子进程 stderr 排空 + 从进程启动起算的看门狗。
 17. **前端写操作必须"点一下再读 API"**（K-80）；全量 `ASR_SMOKE_AUDIO` 用真实语音 `D:\datasets\meeting-notes-samples\probe.wav`。
+18. **前端跳转/重定向类验收断言取"跳转当时"快照**（K-92）：等待谓词只匹配 **path**（别让 `?next=/tasks.html` 里的目标路径误匹配）；"退出/清理"排在断言之后。
+19. **登录/多用户前端现状**（T4.37b）：浏览器统一走 `login.html`（账号密码 → localStorage `mn_token/mn_user`）；`API_TOKEN` 只用于外部接入；401 → 清登录态 → 跳 `login.html?next=<站内路径>`（`login.html`/`share.html` 不跳）；`?next=` 只允许字符白名单站内路径（协议/`//` 拒绝）；**改 `static/` 必须重建 app 镜像并比对服务端 sha256**。
 
 ## 3. 关键文件
 
-`state.md`（权威状态）· `tasks.md`（T4.32a/b、T4.35a/b/c、T4.36、T4.37a、T4.37a-fix 已 ✅ 行；T4.37b 已出卡行）· `tasks-starter.md`（**T4.36 ✅、T4.37a ✅（首验不通过→修复）、T4.37a-fix ✅、T4.37b 卡已就绪**）· `decisions.md`（**149 条**，最新 D-149）· `踩坑与复盘-面试用.md`（**K-01~K-91**）· `review/`（**64 份**，最新 `2026-11-18-T4.37a-fix验收.md`）· `接入指南.md`（§3.9/§3.9a 链接导入、§3.10 音频流（`u=` 三段签名）、§3.11 说话人标注、**§3.12 账号 API**、§3.2 详情 **16 键**）· `配置清单.md`（**41 个 app.* 键**，新增 `AUTH_REGISTRATION_ENABLED`）· `rules/dev.md`（§4.1 第 11 条）· `scripts/test.ps1`（全量 483 / `-UnitOnly` 465）· `app/src/main/java/.../web/{AuthController,AuthService,PasswordHasher,TokenService,ApiTokenFilter}.java` + `common/UserContext.java`（T4.37a 新增/改造）· `app/src/main/resources/static/`（**T4.37b 要改：新增 `login.html`，改 `auth.js` 与 index/tasks/task/settings 的页头**）· `app/src/main/resources/db/migration/`（V1–V8，**V8=app_user**）· `tools/sync-docs-to-code.ps1`。
+`state.md`（权威状态）· `tasks.md`（T4.32a/b、T4.35a/b/c、T4.36、T4.37a、T4.37a-fix、**T4.37b ✅** 行）· `tasks-starter.md`（T4.36 ✅、T4.37a ✅、T4.37a-fix ✅、**T4.37b ✅ 已完成**）· `decisions.md`（**150 条**，最新 D-150）· `踩坑与复盘-面试用.md`（**K-01~K-92**）· `review/`（**65 份**，最新 `2026-11-18-T4.37b验收.md`）· `接入指南.md`（§3 双凭据/登录页、§3.9 链接导入、§3.10 音频流（`u=` 三段签名）、§3.11 说话人标注、§3.12 账号 API、§3.2 详情 **16 键**）· `配置清单.md`（**41 个 app.* 键**）· `rules/dev.md`（§4.1 第 11 条）· `scripts/test.ps1`（全量 483 / `-UnitOnly` 465）· `app/src/main/java/.../web/{AuthController,AuthService,PasswordHasher,TokenService,ApiTokenFilter}.java` + `common/UserContext.java`（T4.37a）· `app/src/main/resources/static/`（**T4.37b 已改：`login.html` 新增、`auth.js`、4 页页头、`style.css`**）· `app/src/main/resources/db/migration/`（V1–V8，**V8=app_user**）· `tools/sync-docs-to-code.ps1`。
+
 
 ## 4. 未决
 
-- **推送**：origin 与本地一致（含 T4.37a/T4.37a-fix 验收文档与 T4.37b 卡），待推 0。2026-11-18 凌晨 FlClash 的 HTTPS 通道曾故障约 2 小时（HTTP 200、HTTPS 全 000），已恢复；以后同类现象先按"代理 TLS 故障"排查，不要动本地提交。
+- **推送**：origin 待推 1（`ad10350` + 本次验收文档），推完同步。2026-11-18 凌晨 FlClash 的 HTTPS 通道曾故障约 2 小时（HTTP 200、HTTPS 全 000），已恢复；以后同类现象先按"代理 TLS 故障"排查，不要动本地提交。
+- **T4.37b 已通过（`ad10350`）**：登录页/首建管理员/退出后旧令牌 401/两账号隔离/防开放重定向/390；P3 残余见 state.md（localStorage 登录态、1 条死 CSS、注册开关运行态未验）。
 - **T4.37a-fix 已通过（`437018f`）**：并发同名 500→409、认领原子化（并发认领恰 1 个 ADMIN）；P3 残余见 state.md。
 - **T4.37a P3 残余（接受）**：无登录限流、令牌无 TTL、多设备单令牌互挤、注册开关关闭仅单测（运行态未验）、并发登录最后写赢、`UserContext` 对新增异步路径的隐性要求（K-90）、>4 路极端并发未压测、首个访客可认领管理员（部署后立即创建管理员）。
 - **T4.36 P3 残余（接受）**：组序仅首现序不可拖拽、同名/别名不自动合并、菜单无 Escape/外点关闭、分组视图 `scrollIntoView nearest` 长列表需手动滚、缺 `speaker_map` 键视同清空（宽松）、键前导零归一化、自动说话人分离不做（先 spike 再定）、`speaker.prevMap` 无害死代码、缺 Content-Type 回 415（未写入 §3.11）。
