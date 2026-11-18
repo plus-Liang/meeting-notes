@@ -1,17 +1,17 @@
-# 交接：录音纪要平台（更新 2026-11-18 16:45，给下一个会话 / 新会话 WorkBuddy）
+# 交接：录音纪要平台（更新 2026-11-18 17:35，给下一个会话 / 新会话 WorkBuddy）
 
 ## 0. 当前位置
 
-- 产品提交 **`386c9f9`**（T4.37a，**首验不通过：1 个 P2**），工作区干净；**origin 已同步（含 T4.37a 验收文档与收尾卡，与本地一致，待推 0）**；栈 5/5 healthy。**D-122 批次已通过 19 张**（T4.23…T4.30 含收尾、T4.32a、T4.32b、T4.35a、T4.35b、T4.35c、T4.36）；**T4.37a 待收尾**。
-- 配额（11-18）：已用 **28 分钟 / 28 任务**（上限 200/100，余量足）。任务总数 **291**（全 DONE、DEAD 0、user_id 全 1）；MinIO **297 前缀 = 291 + 历史 6 孤儿（74–79）**；`app_user` **1 行占位 admin 未认领**（等 T4.37b 首次访问创建）。
-- **下一张 = `T4.37a-fix`（卡已写在 `tasks-starter.md`，直接粘卡消息即可；继续在 T4.37a 那个 WorkBuddy 会话做）**：只改 `AuthService`——`createUser` 唯一键冲突 catch `DuplicateKeyException` → **409 `USERNAME_TAKEN`**；管理员认领改**原子条件 UPDATE**（`WHERE id=1 AND password_hash='!'`，影响 0 行→走普通注册路径）；单测 + 真机 4 并发复核（只允许 200/409 且恰好 1 个 200）；收尾恢复"管理员未认领"。之后 **T4.37b 登录前端**（`login.html` + `auth.js` 401→登录页），再发布三件（T4.10 → T4.9 → T4.11）；不做 T4.31 PWA / T4.33 INBOX / T4.34 RSS。
-- **会话策略（按用户要求区分）**：T4.36 已在**同一 WorkBuddy 会话**完成；**T4.37a-fix 同一会话继续**（同一张卡的首验缺陷、代码上下文强相关，最省）；**T4.37b 视收尾干净度**决定续会话或新会话。
+- 产品提交 **`437018f`**（T4.37a-fix），工作区干净；**origin 已同步（含 T4.37a/T4.37a-fix 验收文档与 T4.37b 卡，与本地一致，待推 0）**；栈 5/5 healthy。**D-122 批次已通过 20 张**（T4.23…T4.30 含收尾、T4.32a、T4.32b、T4.35a、T4.35b、T4.35c、T4.36、**T4.37a（首验不通过 → 收尾后转通过）**）。
+- 配额（11-18）：已用 **36 分钟 / 36 任务**（上限 200/100，余量足）。任务总数 **299**（全 DONE、DEAD 0、user_id 全 1）；MinIO **305 前缀 = 299 + 历史 6 孤儿（74–79）**；`app_user` **1 行占位 admin 未认领**（等 T4.37b 首次访问创建）。
+- **下一张 = T4.37b 登录/多用户前端（卡已写在 `tasks-starter.md`，直接粘卡消息即可；必须新开 WorkBuddy 会话）**：`login.html`（登录 + 首次创建管理员/注册 + `?next=` 站内防开放重定向）+ `auth.js` 401→登录页（删 token 弹窗）+ index/tasks/task/settings 页头当前用户/退出 + `style.css`；**只前端零后端**。之后发布三件（T4.10 → T4.9 → T4.11）；不做 T4.31 PWA / T4.33 INBOX / T4.34 RSS。
+- **会话策略（按用户要求区分）**：T4.36、T4.37a、T4.37a-fix 均按规则用同一会话；**T4.37b 必须新会话**（纯前端层，与后端账号大卡上下文不相关且旧会话已很长）。
 
 ## 1. 下一步（按顺序）
 
-1. 用户把 **`T4.37a-fix` 卡**粘进**原来的 T4.37a WorkBuddy 会话**（不是新会话）；开工前先跑三行（`git log -1`、`git status --short`、`Get-Content D:\new\artifacts\T4.37a\workbuddy\head.txt`）。
-2. 回报回来我独立验收（重点：4 并发同名注册无 500、恰好 1 个 200；并发认领只有 1 个 admin；既有 464/482/0-0 仍绿；收尾恢复"管理员未认领"）；通过后写 **T4.37b 前端卡**。
-3. T4.37b 之后发布三件；发布前清 MinIO 孤儿 74–79。
+1. 用户把 **T4.37b 卡**粘进**新的 WorkBuddy 会话**；开工前先跑三行（`git log -1`、`git status --short`、`Get-Content D:\new\artifacts\T4.37a-fix\workbuddy\head.txt`）。
+2. 回报回来我独立验收（重点：未登录跳转、首建管理员、退出后旧令牌失效、两账号隔离、防开放重定向、390、服务端静态 sha256==工作区）；通过后进入发布三件。
+3. 发布三件前清 MinIO 孤儿 74–79。
 
 ## 2. 别踩的坑（最高频）
 
@@ -35,13 +35,13 @@
 
 ## 3. 关键文件
 
-`state.md`（权威状态）· `tasks.md`（T4.32a/b、T4.35a/b/c、T4.36 已 ✅ 行；T4.37a 首验不通过 + T4.37a-fix 行）· `tasks-starter.md`（**T4.36 卡已 ✅，T4.37a 卡 ⚠️ 首验不通过，T4.37a-fix 卡已就绪**）· `decisions.md`（**148 条**，最新 D-148）· `踩坑与复盘-面试用.md`（**K-01~K-91**）· `review/`（**63 份**，最新 `2026-11-18-T4.37a验收.md`）· `接入指南.md`（§3.9/§3.9a 链接导入、§3.10 音频流（`u=` 三段签名）、§3.11 说话人标注、**§3.12 账号 API**、§3.2 详情 **16 键**）· `配置清单.md`（**41 个 app.* 键**，新增 `AUTH_REGISTRATION_ENABLED`）· `rules/dev.md`（§4.1 第 11 条）· `scripts/test.ps1`（全量 482 / `-UnitOnly` 464）· `app/src/main/java/.../web/{AuthController,AuthService,PasswordHasher,TokenService,ApiTokenFilter}.java` + `common/UserContext.java`（T4.37a 新增/改造）· `app/src/main/resources/db/migration/`（V1–V8，**V8=app_user**）· `tools/sync-docs-to-code.ps1`。
+`state.md`（权威状态）· `tasks.md`（T4.32a/b、T4.35a/b/c、T4.36、T4.37a、T4.37a-fix 已 ✅ 行；T4.37b 已出卡行）· `tasks-starter.md`（**T4.36 ✅、T4.37a ✅（首验不通过→修复）、T4.37a-fix ✅、T4.37b 卡已就绪**）· `decisions.md`（**149 条**，最新 D-149）· `踩坑与复盘-面试用.md`（**K-01~K-91**）· `review/`（**64 份**，最新 `2026-11-18-T4.37a-fix验收.md`）· `接入指南.md`（§3.9/§3.9a 链接导入、§3.10 音频流（`u=` 三段签名）、§3.11 说话人标注、**§3.12 账号 API**、§3.2 详情 **16 键**）· `配置清单.md`（**41 个 app.* 键**，新增 `AUTH_REGISTRATION_ENABLED`）· `rules/dev.md`（§4.1 第 11 条）· `scripts/test.ps1`（全量 483 / `-UnitOnly` 465）· `app/src/main/java/.../web/{AuthController,AuthService,PasswordHasher,TokenService,ApiTokenFilter}.java` + `common/UserContext.java`（T4.37a 新增/改造）· `app/src/main/resources/static/`（**T4.37b 要改：新增 `login.html`，改 `auth.js` 与 index/tasks/task/settings 的页头**）· `app/src/main/resources/db/migration/`（V1–V8，**V8=app_user**）· `tools/sync-docs-to-code.ps1`。
 
 ## 4. 未决
 
-- **推送**：origin 与本地一致（含 T4.37a 验收文档与收尾卡），待推 0。2026-11-18 凌晨 FlClash 的 HTTPS 通道曾故障约 2 小时（HTTP 200、HTTPS 全 000），已恢复；以后同类现象先按"代理 TLS 故障"排查，不要动本地提交。
-- **T4.37a P2-1（待修）**：并发同名注册 500（`T4.37a-fix` 卡已出，同一 WorkBuddy 会话）。
-- **T4.37a P3 残余（接受）**：无登录限流、令牌无 TTL、多设备单令牌互挤、注册开关关闭仅单测（运行态未验）、并发登录最后写赢、`UserContext` 对新增异步路径的隐性要求（K-90）、验收清掉 E2E 产生的测试分享行（非用户数据）。
+- **推送**：origin 与本地一致（含 T4.37a/T4.37a-fix 验收文档与 T4.37b 卡），待推 0。2026-11-18 凌晨 FlClash 的 HTTPS 通道曾故障约 2 小时（HTTP 200、HTTPS 全 000），已恢复；以后同类现象先按"代理 TLS 故障"排查，不要动本地提交。
+- **T4.37a-fix 已通过（`437018f`）**：并发同名 500→409、认领原子化（并发认领恰 1 个 ADMIN）；P3 残余见 state.md。
+- **T4.37a P3 残余（接受）**：无登录限流、令牌无 TTL、多设备单令牌互挤、注册开关关闭仅单测（运行态未验）、并发登录最后写赢、`UserContext` 对新增异步路径的隐性要求（K-90）、>4 路极端并发未压测、首个访客可认领管理员（部署后立即创建管理员）。
 - **T4.36 P3 残余（接受）**：组序仅首现序不可拖拽、同名/别名不自动合并、菜单无 Escape/外点关闭、分组视图 `scrollIntoView nearest` 长列表需手动滚、缺 `speaker_map` 键视同清空（宽松）、键前导零归一化、自动说话人分离不做（先 spike 再定）、`speaker.prevMap` 无害死代码、缺 Content-Type 回 415（未写入 §3.11）。
 - **T4.35c P3 残余（接受）**：滚动跟随增强、重渲染不保留滚动/高亮位置、无键盘快捷键、`share.html` 不加播放器、高亮精度 ≤250ms。
 - **T4.35b P3 残余（接受）**：**音频 GET 已绑 user_id（T4.37a 收口，验签+归属双闸）**；PASTE 保护依赖签发闸；`HEAD /audio` 未实现、多段 Range 416；MinIO 416 兜底未注入故障；签名无吊销。

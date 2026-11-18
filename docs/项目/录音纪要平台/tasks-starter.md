@@ -2855,7 +2855,7 @@ F-15 控制在 ≤30 行并集中一处；新增静态资源不引第三方库�
 > - **残留（D-139）**：零新建音频任务（唯一允许 1 条 PASTE 文本任务，用完删）；删 B 账号与任务后 `task`/`task_result` 计数回 279；`.env` 不动、无 override、无 `/tmp` 残留；`git status` 干净、不 push。
 > **禁止**：改 `static/*`（b 卡才做）；加前端依赖/新 Maven 依赖；OAuth/短信/邮件/找回密码/角色管理后台/多租户；改 `API_TOKEN` 语义为不兼容或改其它既有错误码；令牌或密码明文落库/打日志（DB 只存哈希）；删改历史任务或 `user_id`；多 commit；用真实 ASR 新建音频任务做验证；把 `AUTH_REGISTRATION_ENABLED` 写死在代码里。
 
-## T4.37a-fix T4.37a 收尾：并发同名注册 500 → 409（约 20–30 分钟；D-148；**同一 WorkBuddy 会话继续**；起点 `386c9f9`）
+## T4.37a-fix T4.37a 收尾：并发同名注册 500 → 409（约 20–30 分钟；D-148；**同一 WorkBuddy 会话继续**；起点 `386c9f9`）✅ 已完成（`437018f`，2026-11-18，第 64 份报告，D-149）
 
 > **先跑三行报给我**：`git -C D:\new\projects\meeting-notes log --oneline -1`、`git -C D:\new\projects\meeting-notes status --short`、`Get-Content D:\new\artifacts\T4.37a\workbuddy\head.txt`。
 > **会话说明**：**继续在 T4.37a 那个 WorkBuddy 会话里做**（代码刚写完、上下文强相关，这是同一张卡的首验缺陷收尾，不是新卡）。只读「这张卡 + `handoff.md` 第 0–2 节 + `AGENT.md` §2/§4」；证据落 `D:\new\artifacts\T4.37a-fix\workbuddy\`；回报 ≤40 行。
@@ -2870,6 +2870,45 @@ F-15 控制在 ≤30 行并集中一处；新增静态资源不引第三方库�
 > - 门禁：`-UnitOnly` 全绿 → **单 commit `fix(T4.37a)`**（或 `feat(T4.37a)` 单 commit，只一次提交）→ `docker compose build app && up -d app` → 全量 `scripts\test.ps1` 全绿（K-68/K-77）→ 可维护性 0/0 → `head.txt` 记提交后 HEAD。
 > - **收尾（D-139）**：删掉验证用的测试账号（`app_user WHERE id>=2`）与 quota 行、**把 1 号账号恢复未认领**（`username='admin', password_hash='!', token_hash=NULL, token_issued_at=NULL`）；任务数保持 291、全 DONE、user_id 全 1；`.env` 不动、无 override、`/tmp` 无残留、`git status` 干净、不 push。
 > **禁止**：改前端/其它契约/错误码语义；吞所有数据完整性异常；把并发窗口"用 sleep 测试"糊过去；多 commit；新建音频任务（并发验注册不需要任务）。
+
+## T4.37b 登录/多用户前端：登录页 + 首次创建管理员 + 401→登录页 + 页头当前用户/退出（约 3–4 小时；D-122；**必须新开 WorkBuddy 会话**；依赖 T4.37a 已通过 `437018f`）
+
+> **先跑三行报给我**：`git -C D:\new\projects\meeting-notes log --oneline -1`、`git -C D:\new\projects\meeting-notes status --short`、`Get-Content D:\new\artifacts\T4.37a-fix\workbuddy\head.txt`。
+> **会话说明**：**本卡必须新开一个 WorkBuddy 会话**（纯前端层：static HTML/JS/CSS；上一个会话是后端账号大卡，上下文不相关且已很长）。只读「这张卡 + `handoff.md` 第 0–2 节 + `AGENT.md` §2/§4」；证据落 `D:\new\artifacts\T4.37b\workbuddy\`；回报 ≤40 行。
+> **本卡只改前端（`app/src/main/resources/static/`）+ 必要时 `接入指南` 一句话**；**零后端改动、零迁移、零契约变更**。
+> **后端已就绪（不要重做）**：`POST /api/v1/auth/register|login`、`POST /api/v1/auth/logout`、`GET /api/v1/auth/me`；双凭据（`API_TOKEN`=1 号账号；账号令牌=具体用户）；`app_user` 出厂占位 admin 未认领（`password_hash='!'`）——**首次注册=认领管理员**；重复用户名 409 `USERNAME_TAKEN`、错密码 401 `INVALID_CREDENTIALS`、注册关闭 403 `REGISTRATION_DISABLED`、参数错 400 `INVALID_PARAM`；**并发注册已修（只 1 个 200）**，前端仍要防双击。
+
+> **要证明的事**：未登录访问任一业务页 → **跳登录页**；首次使用能在页面上**创建管理员**；登录后页头显示当前账号、可退出（退出后旧令牌失效且回到登录页）；**两个账号在浏览器里各看各的**（B 看不到 A 的任务，直接开 A 的详情页显示"任务不存在"）；`?next=` 只回跳站内路径（**防开放重定向**）；390 可操作；`share.html` 匿名只读不受影响。
+
+> **改动（按此实现）**：
+> 1. **新增 `static/login.html`**：单卡片，标题「录音纪要平台 · 登录」。两个模式切换：
+>    - **登录**：用户名 + 密码 + 「登录」按钮；
+>    - **首次使用 / 注册**：用户名 + 密码 + 确认密码 + 「创建账号」按钮；文案注明「**第一个创建的账号将成为管理员**；如实例已关闭注册会提示联系管理员」。
+>    - 提交调 `POST api/v1/auth/login|register`（**裸 fetch，不带 Bearer**）；成功写 `localStorage.mn_token=token`、`localStorage.mn_user=JSON.stringify({user_id,username,role})` → `location.replace(安全 next 或 index.html)`。
+>    - 错误就地显示可读文案：401→「用户名或密码错误」；409→「用户名已被占用」；403→「注册已关闭，请联系管理员」；400→显示服务端 message；网络→「服务暂时不可用」。**提交中禁用按钮**（防双击）；密码框提交后清空；`autocomplete` 合理；两模式切换时清错误。
+>    - `?next=`：**只接受站内相对路径**（`/^[A-Za-z0-9_\-./?=&%]+$/` 且不以 `//`、`http`、`javascript:` 开头；非法一律回 index.html）；已登录访问 login.html → 直接 `replace` 到 next/index（避免重复登录）。
+>    - 无 CDN/框架；复用 `style.css` 变量；`<script src="auth.js">` 放最前。
+> 2. **改 `static/auth.js`**：
+>    - `apiFetch` 收 401 时：清 `mn_token`/`mn_user` → 跳 `login.html?next=<当前相对路径+search>`（**在 login.html 内不跳，防循环**：用 `window.__MN_LOGIN_PAGE` 或判断 `location.pathname`）；**删除原 `mnAskToken` token 弹窗**（及其 overlay 代码），保留 `mnGetToken`。
+>    - 新增 `mnCurrentUser()`（读 `mn_user`，坏数据返回 null）、`mnLogout()`（`POST api/v1/auth/logout`（带 token）→ 无论成败清本地 → 跳 login.html）、`mnRenderUserBar()`：找页面 `[data-mn-userbar]` 容器 → 显示 `username`（role=ADMIN 加「管理员」小徽标）+「退出」按钮；无 token 时显示「登录」链接（跳 login.html）；`mn_user` 缺失时用 `GET api/v1/auth/me` 兜底填充一次。
+> 3. **4 个页面加页头占位**：`index.html`/`tasks.html`/`task.html`/`settings.html` 的 `</nav>` 前加 `<span class="mn-userbar" data-mn-userbar></span>`；`auth.js` 末尾自动 `mnRenderUserBar()`（DOM ready 后）。**`share.html` 不加**（匿名只读，保持现状）。
+> 4. **`style.css`**：`.mn-userbar`（右侧、小字、徽标样式）、登录卡片/表单/错误文案/.btn 复用现有变量；640 断点下页头不换行、登录卡片 100% 宽、390 无横向溢出；无新 CDN/字体。
+> 5. **文档**：`接入指南.md` §3 开头「浏览器页面首次调 API 会弹框粘贴 API_TOKEN」这句改为「浏览器走登录页（T4.37b），`API_TOKEN` 只用于外部接入」；其余契约不动；改完跑 `tools\sync-docs-to-code.ps1`。
+
+> **固定判据（缺一不可）**：
+> - **Playwright（我验收会照此复核；用已有任务 552/535/237，零新建任务）**：
+>   1) 未登录打开 `tasks.html` → 自动到 `login.html?next=https…/tasks.html`（URL 断言）；
+>   2) 首次创建管理员（页面上「创建账号」，测试密码）→ 跳回 `tasks.html`、**页头显示 admin+管理员徽标**、列表 299 条（数据断言用 counts）；**回读 `/auth/me` 确认登录态**（K-80 点→回读）；
+>   3) 退出 → 回 login.html、`localStorage.mn_token` 已清、旧 token 打 API 401；
+>   4) 错密码 → 页面显示「用户名或密码错误」（无 500/无 alert）；重复用户名注册 → 显示「用户名已被占用」；两次密码不一致/密码 <8 → 前端就地提示且**不发请求**；双击登录只发一次（按钮禁用）；
+>   5) 注册用户 B → 自动登录 → `tasks.html` 空列表（counts 0）；直接打开 `task.html?id=552` → 页面显示「任务不存在」（不泄露）；`settings.html` 显示 0/0 配额；B 页头显示 B；退出；
+>   6) `login.html?next=https://evil.com` → 不跳外站（停留 or 回 index）；`?next=/tasks.html?status=DONE` 正常回跳；
+>   7) 390×844：登录页无横向溢出、可提交；登录后 tasks 页无溢出、userbar 可见；
+>   8) 552 详情（管理员登录后）：播放器/句子/说话人 chip 仍工作（回归）；`share.html` 匿名打开一条已撤销/有效的分享链接行为与今天一致（不要求登录、不出现登录跳转）；
+>   9) console error 0 / pageerror 0。
+> - **门禁**：`-UnitOnly` 全绿（应仍 465，前端改动不增删单测；若给 auth.js 写纯函数测试则按项目现状——静态 JS 无测试框架，不新增）→ **单 commit `feat(T4.37b)`** → `docker compose build app && up -d app`（**改了 static 必须重建**）→ 全量 `scripts\test.ps1` 全绿（K-68/K-77）→ 可维护性 0/0（不改 Java 应 0/0）→ **服务端静态 == 工作区 sha256**（task.html 等逐文件，K-80 前置）→ `head.txt` 记提交后 HEAD。
+> - **收尾（D-139）**：删测试账号 B（psql `DELETE FROM app_user WHERE id>=2` 与其 quota 行）、**把 1 号账号恢复未认领**（`username='admin', password_hash='!', token_hash=NULL, token_issued_at=NULL`，供真实首次使用创建管理员）；任务数保持 299、全 DONE、user_id 全 1；`.env` 不动、无 override、无 `/tmp` 残留、`git status` 干净、不 push。
+> **禁止**：改后端接口/契约/迁移/`share.html` 语义；引 CDN/框架/字体；把 `API_TOKEN` 写进前端；继续用 token 粘贴弹窗；登录态存 cookie 以外的奇怪位置（只用 localStorage `mn_token`/`mn_user`）；多 commit；新建任务做验证；弱密码/明文日志。
 
 ## 每张卡做完都要给你的回报
 
