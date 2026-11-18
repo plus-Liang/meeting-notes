@@ -56,12 +56,13 @@ class AudioStreamServiceTest {
         stubTask(543L, "DONE", "UPLOAD", "s3://meetingnotes/tasks/543/a.wav");
         AudioStreamService.AudioTokenResponse t = newService().issue(543L, 1L);
         assertNotNull(t.url());
-        assertTrue(t.url().startsWith("/api/v1/tasks/543/audio?exp="), "url 精确绑定 taskId：" + t.url());
+        assertTrue(t.url().startsWith("/api/v1/tasks/543/audio?u=1&exp="),
+                "T4.37a：url 绑定 taskId 且带 u=userId：" + t.url());
         assertFalse(t.url().contains(TOKEN), "URL 里绝不出现 API_TOKEN");
         String sig = t.url().substring(t.url().indexOf("sig=") + 4);
         assertEquals(64, sig.length(), "HMAC-SHA256 hex 64 位");
         String exp = t.url().split("exp=")[1].split("&")[0];
-        assertTrue(newService().verify(543L, exp, sig), "刚签发的签名必须验过");
+        assertTrue(newService().verify(543L, 1L, exp, sig), "刚签发的签名必须验过");
         assertNotNull(t.expiresAt());
     }
 
@@ -91,26 +92,27 @@ class AudioStreamServiceTest {
         assertEquals(400, blank.getStatus());
     }
 
-    /* ---- 验签矩阵（卡判据：正确/改 taskId/改 exp/过期/空 sig/长度异常 → 拒绝） ---- */
+    /* ---- 验签矩阵（卡判据：正确/改 taskId/改 exp/改 u/过期/空 sig/长度异常 → 拒绝） ---- */
 
     @Test
     void signatureMatrix() {
         AudioStreamService svc = newService();
         long exp = java.time.Instant.now().getEpochSecond() + 300;
-        String sig = svc.sign(543L, exp);
-        assertTrue(svc.verify(543L, Long.toString(exp), sig), "正确签名通过");
+        String sig = svc.sign(543L, exp, 1L);
+        assertTrue(svc.verify(543L, 1L, Long.toString(exp), sig), "正确签名通过");
 
-        assertFalse(svc.verify(544L, Long.toString(exp), sig), "改 taskId → 拒绝（绑定 taskId）");
-        assertFalse(svc.verify(543L, Long.toString(exp + 1), sig), "改 exp → 拒绝（绑定 exp）");
-        assertFalse(svc.verify(543L, Long.toString(exp - 3600),
-                svc.sign(543L, exp - 3600)), "过去时间（过期）→ 拒绝");
-        assertFalse(svc.verify(543L, Long.toString(exp), ""), "空 sig → 拒绝");
-        assertFalse(svc.verify(543L, Long.toString(exp), null), "null sig → 拒绝");
-        assertFalse(svc.verify(543L, "", sig), "空 exp → 拒绝");
-        assertFalse(svc.verify(543L, "abc", sig), "非数字 exp → 拒绝");
-        assertFalse(svc.verify(543L, Long.toString(exp), sig.substring(0, 63)), "长度异常（63 位）→ 拒绝");
-        assertFalse(svc.verify(543L, Long.toString(exp), sig + "0"), "长度异常（65 位）→ 拒绝");
-        assertFalse(svc.verify(543L, Long.toString(exp), sig.toUpperCase()), "大写 hex → 拒绝（形状不符）");
+        assertFalse(svc.verify(544L, 1L, Long.toString(exp), sig), "改 taskId → 拒绝（绑定 taskId）");
+        assertFalse(svc.verify(543L, 2L, Long.toString(exp), sig), "改 userId → 拒绝（T4.37a 绑定 u）");
+        assertFalse(svc.verify(543L, 1L, Long.toString(exp + 1), sig), "改 exp → 拒绝（绑定 exp）");
+        assertFalse(svc.verify(543L, 1L, Long.toString(exp - 3600),
+                svc.sign(543L, exp - 3600, 1L)), "过去时间（过期）→ 拒绝");
+        assertFalse(svc.verify(543L, 1L, Long.toString(exp), ""), "空 sig → 拒绝");
+        assertFalse(svc.verify(543L, 1L, Long.toString(exp), null), "null sig → 拒绝");
+        assertFalse(svc.verify(543L, 1L, "", sig), "空 exp → 拒绝");
+        assertFalse(svc.verify(543L, 1L, "abc", sig), "非数字 exp → 拒绝");
+        assertFalse(svc.verify(543L, 1L, Long.toString(exp), sig.substring(0, 63)), "长度异常（63 位）→ 拒绝");
+        assertFalse(svc.verify(543L, 1L, Long.toString(exp), sig + "0"), "长度异常（65 位）→ 拒绝");
+        assertFalse(svc.verify(543L, 1L, Long.toString(exp), sig.toUpperCase()), "大写 hex → 拒绝（形状不符）");
     }
 
     /* ---- Range 解析矩阵（卡判据） ---- */
@@ -164,10 +166,11 @@ class AudioStreamServiceTest {
     }
 
     @Test
-    void differentTasksProduceDifferentSignatures() {
+    void differentTasksAndUsersProduceDifferentSignatures() {
         AudioStreamService svc = newService();
         long exp = java.time.Instant.now().getEpochSecond() + 300;
-        assertNotEquals(svc.sign(1L, exp), svc.sign(2L, exp), "签名必须绑定 taskId");
+        assertNotEquals(svc.sign(1L, exp, 1L), svc.sign(2L, exp, 1L), "签名必须绑定 taskId");
+        assertNotEquals(svc.sign(1L, exp, 1L), svc.sign(1L, exp, 2L), "签名必须绑定 userId（T4.37a）");
     }
 
     /* ---- Content-Type 映射 ---- */

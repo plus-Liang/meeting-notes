@@ -80,6 +80,17 @@ class TaskQueryServiceTest {
     }
 
     /** T4.21：列表辨识三字段——keywords 解析 / 坏 JSON → [] / summary_head 40 字截断 / template 透传。 */
+
+    @org.junit.jupiter.api.BeforeEach
+    void setUpUserContextT437a() {
+        com.meetingnotes.common.UserContext.set(1L);
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    void clearUserContextT437a() {
+        com.meetingnotes.common.UserContext.clear();
+    }
+
     @Test
     void listItemsCarryKeywordsSummaryHeadAndTemplate() throws Exception {
         stubRowsWithKeywords(2, 9L,

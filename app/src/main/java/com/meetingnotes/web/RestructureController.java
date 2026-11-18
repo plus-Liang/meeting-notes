@@ -1,6 +1,7 @@
 package com.meetingnotes.web;
 
 import com.meetingnotes.common.ApiException;
+import com.meetingnotes.common.UserContext;
 import com.meetingnotes.task.RestructureService;
 import com.meetingnotes.task.TemplateResolver;
 import org.springframework.http.MediaType;
@@ -21,8 +22,6 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1")
 public class RestructureController {
 
-    /** 认证体系接入前固定单用户（与 TaskController 一致）。 */
-    private static final long DEFAULT_USER_ID = 1L;
 
     private final RestructureService restructureService;
 
@@ -42,6 +41,6 @@ public class RestructureController {
             throw new ApiException(400, "INVALID_PARAM",
                     "template 必填（meeting/course/interview/podcast/shortvideo 5 选 1）");
         }
-        return restructureService.restructure(DEFAULT_USER_ID, id, template);
+        return restructureService.restructure(UserContext.current(), id, template);
     }
 }

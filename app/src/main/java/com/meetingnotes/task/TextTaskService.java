@@ -1,6 +1,7 @@
 package com.meetingnotes.task;
 
 import com.meetingnotes.common.ApiException;
+import com.meetingnotes.common.UserContext;
 import com.meetingnotes.common.TaskCreatedResponse;
 import com.meetingnotes.upload.SubtitleParser;
 import org.slf4j.Logger;
@@ -38,8 +39,6 @@ public class TextTaskService {
 
     private static final Logger log = LoggerFactory.getLogger(TextTaskService.class);
 
-    /** 认证体系接入前固定单用户（与 TaskService 一致）。 */
-    private static final long DEFAULT_USER_ID = 1L;
 
     /** PASTE/字幕解析后文本上限（卡 2：trim 后 1..100_000 字符）。 */
     static final int MAX_TEXT_CHARS = 100_000;
@@ -133,7 +132,7 @@ public class TextTaskService {
                             RETURNING id
                             """,
                     rs -> rs.next() ? rs.getLong(1) : null,
-                    DEFAULT_USER_ID, sha256, (long) bytes.length);
+                    UserContext.current(), sha256, (long) bytes.length);
             if (newId == null) {
                 return null;
             }
@@ -141,7 +140,7 @@ public class TextTaskService {
             // 幂等命中路径（newId == null）不写——旧任务保留自己的模板（F-17：幂等键不含 template）。
             jdbc.update("INSERT INTO task_result (task_id, template) VALUES (?, ?)",
                     newId, resolution.template());
-            quotaService.consume(DEFAULT_USER_ID, 0);
+            quotaService.consume(UserContext.current(), 0);
             try {
                 s3.putObject(PutObjectRequest.builder().bucket(bucket).key(objectKey(newId)).build(),
                         RequestBody.fromBytes(bytes));
@@ -154,7 +153,7 @@ public class TextTaskService {
             return newId;
         });
         if (taskId == null) {
-            TextTaskService.ExistingTask existing = findIdAndStatusByHash(DEFAULT_USER_ID, sha256);
+            TextTaskService.ExistingTask existing = findIdAndStatusByHash(UserContext.current(), sha256);
             if (existing == null) {
                 throw new ApiException(500, "INTERNAL_ERROR", "幂等冲突回查未找到已有任务，请联系管理员");
             }

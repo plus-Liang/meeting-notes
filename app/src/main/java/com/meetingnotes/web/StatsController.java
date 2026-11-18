@@ -1,6 +1,7 @@
 package com.meetingnotes.web;
 
 import com.meetingnotes.task.StatsService;
+import com.meetingnotes.common.UserContext;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -16,8 +17,6 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1")
 public class StatsController {
 
-    /** 认证体系接入前固定单用户（与 TaskController 一致）。 */
-    private static final long DEFAULT_USER_ID = 1L;
 
     private final StatsService statsService;
 
@@ -27,6 +26,6 @@ public class StatsController {
 
     @GetMapping("/stats")
     public StatsService.StatsResponse stats() {
-        return statsService.stats(DEFAULT_USER_ID);
+        return statsService.stats(UserContext.current());
     }
 }

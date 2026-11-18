@@ -1,6 +1,7 @@
 package com.meetingnotes.task;
 
 import com.meetingnotes.common.ApiException;
+import com.meetingnotes.common.UserContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -27,8 +28,6 @@ public class TaskRetryService {
 
     private static final Logger log = LoggerFactory.getLogger(TaskRetryService.class);
 
-    /** 认证体系接入前固定单用户（与 TaskService 一致）。 */
-    private static final long DEFAULT_USER_ID = 1L;
 
     /** 批量上限（卡 2：1..20 个，去重）。 */
     static final int MAX_IDS = 20;
@@ -67,7 +66,7 @@ public class TaskRetryService {
             }
             String status = jdbc.query(
                     "SELECT status FROM task WHERE id = ? AND user_id = ?",
-                    rs -> rs.next() ? rs.getString(1) : null, id, DEFAULT_USER_ID);
+                    rs -> rs.next() ? rs.getString(1) : null, id, UserContext.current());
             if (status == null) {
                 skipped.add(new Skipped(id, "NOT_FOUND"));
                 continue;

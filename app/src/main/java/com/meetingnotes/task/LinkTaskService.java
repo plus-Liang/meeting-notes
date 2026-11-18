@@ -1,6 +1,7 @@
 package com.meetingnotes.task;
 
 import com.meetingnotes.common.ApiException;
+import com.meetingnotes.common.UserContext;
 import com.meetingnotes.common.TaskCreatedResponse;
 import com.meetingnotes.fetch.MediaFetcher;
 import com.meetingnotes.upload.AudioDurationProbe;
@@ -44,8 +45,6 @@ public class LinkTaskService {
 
     private static final Logger log = LoggerFactory.getLogger(LinkTaskService.class);
 
-    /** 认证体系接入前固定单用户（与 TaskService / TextTaskService 一致）。 */
-    private static final long DEFAULT_USER_ID = 1L;
     private static final int HEAD_BYTES = 16;
 
     private final JdbcTemplate jdbc;
@@ -142,14 +141,14 @@ public class LinkTaskService {
                         RETURNING id
                         """,
                         rs -> rs.next() ? rs.getLong(1) : null,
-                        DEFAULT_USER_ID, sha256, durationSec, size);
+                        UserContext.current(), sha256, durationSec, size);
                 if (newId == null) {
                     return null; // 冲突：同用户已有同内容任务，回查交给事务外
                 }
                 jdbc.update("INSERT INTO task_result (task_id, template) VALUES (?, ?)",
                         newId, resolution.template());
                 int minutes = (int) Math.max(1, Math.ceil(durationSec / 60.0));
-                quotaService.consume(DEFAULT_USER_ID, minutes);
+                quotaService.consume(UserContext.current(), minutes);
                 String key = "tasks/" + newId + "/" + filename;
                 try {
                     s3.putObject(software.amazon.awssdk.services.s3.model.PutObjectRequest.builder()
@@ -166,7 +165,7 @@ public class LinkTaskService {
 
             if (taskId == null) {
                 // 幂等命中（与上传同口径）：返回库里真实状态；命中 DEAD → 复活重投（D-049）
-                ExistingTask existing = findIdAndStatusByHash(DEFAULT_USER_ID, sha256);
+                ExistingTask existing = findIdAndStatusByHash(UserContext.current(), sha256);
                 if (existing == null) {
                     throw new ApiException(500, "INTERNAL_ERROR", "幂等冲突回查未找到已有任务，请联系管理员");
                 }

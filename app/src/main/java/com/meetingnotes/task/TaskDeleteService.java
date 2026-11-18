@@ -1,6 +1,7 @@
 package com.meetingnotes.task;
 
 import com.meetingnotes.common.ApiException;
+import com.meetingnotes.common.UserContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -31,8 +32,6 @@ public class TaskDeleteService {
 
     private static final Logger log = LoggerFactory.getLogger(TaskDeleteService.class);
 
-    /** 认证体系接入前固定单用户（与 TaskService 一致）。 */
-    private static final long DEFAULT_USER_ID = 1L;
 
     /** 批量删除上限（卡口径 1..100，去重）。 */
     static final int MAX_IDS = 100;
@@ -90,7 +89,7 @@ public class TaskDeleteService {
     public int deleteAllFailed() {
         List<Long> ids = jdbc.query(
                 "SELECT id FROM task WHERE user_id = ? AND status = 'DEAD' ORDER BY id",
-                (rs, i) -> rs.getLong(1), DEFAULT_USER_ID);
+                (rs, i) -> rs.getLong(1), UserContext.current());
         int deleted = 0;
         for (Long id : ids) {
             DeleteOutcome outcome = deleteOne(id);
@@ -121,7 +120,7 @@ public class TaskDeleteService {
     private DeleteOutcome deleteOneInTx(long taskId) {
         String status = jdbc.query(
                 "SELECT status FROM task WHERE id = ? AND user_id = ? FOR UPDATE",
-                rs -> rs.next() ? rs.getString(1) : null, taskId, DEFAULT_USER_ID);
+                rs -> rs.next() ? rs.getString(1) : null, taskId, UserContext.current());
         if (status == null) {
             return new DeleteOutcome(taskId, false, "NOT_FOUND", null);
         }

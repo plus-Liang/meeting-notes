@@ -2,6 +2,7 @@ package com.meetingnotes.web;
 
 import com.meetingnotes.ai.AiStructuringRouter;
 import com.meetingnotes.task.QuotaService;
+import com.meetingnotes.common.UserContext;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -15,8 +16,6 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1")
 public class SettingsController {
 
-    /** 认证体系接入前固定单用户（与 TaskService 一致）。 */
-    private static final long DEFAULT_USER_ID = 1L;
 
     private final QuotaService quotaService;
     private final AiStructuringRouter router;
@@ -40,7 +39,7 @@ public class SettingsController {
 
     @GetMapping("/settings")
     public SettingsResponse settings() {
-        QuotaService.Usage usage = quotaService.currentUsage(DEFAULT_USER_ID);
+        QuotaService.Usage usage = quotaService.currentUsage(UserContext.current());
         QuotaView quota = new QuotaView(
                 usage.usedMinutes(), quotaService.minutesPerDay(),
                 usage.usedTasks(), quotaService.tasksPerDay(),

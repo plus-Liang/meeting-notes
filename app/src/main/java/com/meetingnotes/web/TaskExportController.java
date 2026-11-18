@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.meetingnotes.common.ApiException;
+import com.meetingnotes.common.UserContext;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -32,8 +33,6 @@ import java.util.Set;
 @RequestMapping("/api/v1")
 public class TaskExportController {
 
-    /** 认证接入前固定单用户（与 TaskController 一致）。 */
-    private static final long DEFAULT_USER_ID = 1L;
 
     /** include 合法值（固定节序）；由 {@link TaskMarkdownExporter} 的节常量派生，防两处漂移。 */
     private static final List<String> VALID_INCLUDE = List.of(TaskMarkdownExporter.SECTION_SUMMARY,
@@ -56,7 +55,7 @@ public class TaskExportController {
         if (!"md".equals(format)) {
             throw new ApiException(400, "INVALID_PARAM", "format 目前只支持 md");
         }
-        RenderedExport rendered = render(id, DEFAULT_USER_ID, jdbc, mapper, parseInclude(include));
+        RenderedExport rendered = render(id, UserContext.current(), jdbc, mapper, parseInclude(include));
         if (rendered.skipReason() != null) {
             throw exportError(id, rendered.skipReason());
         }

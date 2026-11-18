@@ -44,6 +44,17 @@ class TaskZipExportControllerTest {
 
     /* ===== parseIds 400 矩阵 ===== */
 
+
+    @org.junit.jupiter.api.BeforeEach
+    void setUpUserContextT437a() {
+        com.meetingnotes.common.UserContext.set(1L);
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    void clearUserContextT437a() {
+        com.meetingnotes.common.UserContext.clear();
+    }
+
     @Test
     void parseIdsRejectsMissingBlankNonNumericAndOver20() {
         TaskZipExportController c = new TaskZipExportController(jdbc, new com.fasterxml.jackson.databind.ObjectMapper());

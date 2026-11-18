@@ -77,6 +77,17 @@ class TaskServiceValidationTest {
         return new MockMultipartFile("file", "audio.wav", null, all);
     }
 
+
+    @org.junit.jupiter.api.BeforeEach
+    void setUpUserContextT437a() {
+        com.meetingnotes.common.UserContext.set(1L);
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    void clearUserContextT437a() {
+        com.meetingnotes.common.UserContext.clear();
+    }
+
     @Test
     void executableRenamedToMp3IsRejected400InvalidMedia() {
         // MZ 头（Windows PE）改名 .mp3：扩展名不作数，文件头必拒（spec N6）

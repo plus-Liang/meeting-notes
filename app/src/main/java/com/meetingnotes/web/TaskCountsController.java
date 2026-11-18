@@ -1,6 +1,7 @@
 package com.meetingnotes.web;
 
 import com.meetingnotes.task.TaskQueryService;
+import com.meetingnotes.common.UserContext;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -15,8 +16,6 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1")
 public class TaskCountsController {
 
-    /** 认证体系接入前固定单用户（与 TaskController 一致）。 */
-    private static final long DEFAULT_USER_ID = 1L;
 
     private final TaskQueryService taskQueryService;
 
@@ -26,6 +25,6 @@ public class TaskCountsController {
 
     @GetMapping("/tasks/counts")
     public TaskQueryService.TaskCounts counts() {
-        return taskQueryService.counts(DEFAULT_USER_ID);
+        return taskQueryService.counts(UserContext.current());
     }
 }

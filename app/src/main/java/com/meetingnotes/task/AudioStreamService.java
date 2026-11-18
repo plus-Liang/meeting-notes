@@ -19,8 +19,9 @@ import java.util.Map;
  * 签发（POST /tasks/{id}/audio-token，Bearer 保护）产出一条短时签名 URL；
  * 播放（GET /tasks/{id}/audio?sig=&exp=，免 Bearer）只认签名。
  *
- * <p>签名口径：HMAC-SHA256，key = {@code app.security.api-token}（复用现有键派生，不新增 secret 键），
- * 数据 = {@code taskId + "\n" + exp}（exp 为 epoch 秒）——**绑定 taskId 与 exp**，改任一项即失效。
+ * <p>签名口径（T4.37a 升级，收 T4.35b P3-1）：HMAC-SHA256，key = {@code app.security.api-token}
+ * （复用现有键派生，不新增 secret 键），数据 = {@code taskId + "\n" + exp + "\n" + userId}
+ * （exp 为 epoch 秒）——**绑定 taskId、exp 与 userId**，改任一项即失效。
  * TTL {@code app.audio.token-ttl-sec}（env AUDIO_TOKEN_TTL_SEC，默认 600 秒；URL 可分享但只读、短时）。
  *
  * <p>签发拒绝语义（卡面）：任务不存在/不属于当前用户 → 404 TASK_NOT_FOUND；
@@ -73,18 +74,18 @@ public class AudioStreamService {
                     "该任务没有可播放的音频（文本任务或尚未完成转写）");
         }
         long exp = Instant.now().getEpochSecond() + ttlSec;
-        String sig = sign(taskId, exp);
-        String url = "/api/v1/tasks/" + taskId + "/audio?exp=" + exp + "&sig=" + sig;
+        String sig = sign(taskId, exp, userId);
+        String url = "/api/v1/tasks/" + taskId + "/audio?u=" + userId + "&exp=" + exp + "&sig=" + sig;
         return new AudioTokenResponse(url, OffsetDateTime.ofInstant(Instant.ofEpochSecond(exp),
                 OffsetDateTime.now().getOffset()));
     }
 
-    /** HMAC-SHA256(key=API_TOKEN, data=taskId+"\n"+exp) 的 hex（绑定 taskId 与 exp，改任一即失效）。 */
-    String sign(long taskId, long exp) {
+    /** HMAC-SHA256(key=API_TOKEN, data=taskId+"\n"+exp+"\n"+userId) 的 hex（三段绑定，改任一即失效）。 */
+    String sign(long taskId, long exp, long userId) {
         try {
             Mac mac = Mac.getInstance("HmacSHA256");
             mac.init(new SecretKeySpec(hmacKey, "HmacSHA256"));
-            byte[] out = mac.doFinal((taskId + "\n" + exp).getBytes(StandardCharsets.UTF_8));
+            byte[] out = mac.doFinal((taskId + "\n" + exp + "\n" + userId).getBytes(StandardCharsets.UTF_8));
             return HexFormat.of().formatHex(out);
         } catch (Exception e) {
             throw new IllegalStateException("HMAC-SHA256 不可用", e);
@@ -92,7 +93,7 @@ public class AudioStreamService {
     }
 
     /** 验签：空/形状异常/过期/不匹配一律 false（调用方统一 404，不区分失败原因，不泄露）。 */
-    public boolean verify(long taskId, String exp, String sig) {
+    public boolean verify(long taskId, long userId, String exp, String sig) {
         if (exp == null || sig == null || exp.isBlank() || sig.isBlank()) {
             return false;
         }
@@ -109,7 +110,7 @@ public class AudioStreamService {
         if (expSec < now || expSec > now + ttlSec * 10) {
             return false; // 已过期；上限防远古/离谱未来值
         }
-        String expected = sign(taskId, expSec);
+        String expected = sign(taskId, expSec, userId);
         return MessageDigest.isEqual(expected.getBytes(StandardCharsets.UTF_8),
                 sig.getBytes(StandardCharsets.UTF_8)); // 常量时间比较
     }

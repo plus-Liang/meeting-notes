@@ -1,6 +1,7 @@
 package com.meetingnotes.web;
 
 import com.meetingnotes.common.ApiException;
+import com.meetingnotes.common.UserContext;
 import com.meetingnotes.task.TaskQueryService;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -18,8 +19,6 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1")
 public class TaskListController {
 
-    /** 认证接入前固定单用户（与 TaskController 一致）。 */
-    private static final long DEFAULT_USER_ID = 1L;
 
     private final TaskQueryService taskQueryService;
 
@@ -75,7 +74,7 @@ public class TaskListController {
             favoriteFilter = Boolean.parseBoolean(value);
         }
         String labelFilter = label == null || label.isBlank() ? null : label.trim();
-        return taskQueryService.list(DEFAULT_USER_ID, statusFilter, lim, before,
+        return taskQueryService.list(UserContext.current(), statusFilter, lim, before,
                 TaskQueryService.normalizeQ(q), labelFilter, favoriteFilter);
     }
 }

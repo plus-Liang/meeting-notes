@@ -34,6 +34,8 @@ public class StructuringService {
     static final int MAX_SUMMARY_CHARS = 200;
     static final int MAX_KEYWORDS = 10;
     private static final int RAW_TRACE_CHARS = 200;
+    /** T4.37a：异步链路按 taskId 解析归属（worker 线程无 UserContext ThreadLocal，卡面第 7 条）。 */
+    private static final String RESOLVE_USER_SQL = "SELECT user_id FROM task WHERE id = ?";
 
     private final ObjectProvider<ChatModel> cloudModel;
     private final ObjectProvider<ChatModel> localModel;
@@ -73,14 +75,18 @@ public class StructuringService {
         }
         String template = explicitTemplate != null ? explicitTemplate : templateOf(taskId);
         log.info("结构化模板：{}", template);
-        GlossaryTermSource.GlossaryInjection injection = termSource.inject();
+        // T4.37a：归属按 task 行解析（查不到 → EMPTY 不抛）；不读 ThreadLocal（worker/重跑线程）
+        List<Long> owner = jdbc.query(RESOLVE_USER_SQL, (rs, i) -> rs.getLong(1), taskId);
+        Long userId = (owner == null || owner.isEmpty()) ? null : owner.get(0);
+        GlossaryTermSource.GlossaryInjection injection = userId == null
+                ? GlossaryTermSource.GlossaryInjection.EMPTY : termSource.inject(userId);
         injection = injection == null || injection.termCount() <= 0
                 ? GlossaryTermSource.GlossaryInjection.EMPTY : injection;
-        log.info("术语注入：{} 条（≤20）/ 长度 {} 字", injection.termCount(), injection.text().length());
+        log.info("术语注入：{} 条（≤20）/ 长度 {} 字（userId={}）", injection.termCount(), injection.text().length(), userId);
         AiTier tier = router.preferredTier();
         log.info("结构化首选档：{}", tier);
         while (tier != null) {
-            StructuringResult result = attempt(tier, transcript, injection.text(), template);
+            StructuringResult result = attempt(tier, transcript, injection.text(), template, userId);
             if (result != null) {
                 persist(taskId, result, template);
                 return true;
@@ -96,12 +102,13 @@ public class StructuringService {
     }
 
     /** 单档尝试：任何失败都返回 null（由上层降级），异常不外抛。EXTRACTIVE 不做模板分化（F-18，只落 template）。 */
-    private StructuringResult attempt(AiTier tier, String transcript, String glossaryText, String template) {
+    private StructuringResult attempt(AiTier tier, String transcript, String glossaryText,
+                                      String template, Long userId) {
         try {
             return switch (tier) {
                 case CLOUD -> fromModel(cloudModel, AiTier.CLOUD, transcript, glossaryText, template);
                 case LOCAL -> fromModel(localModel, AiTier.LOCAL, transcript, glossaryText, template);
-                case EXTRACTIVE -> extractive(transcript);
+                case EXTRACTIVE -> extractive(transcript, userId);
             };
         } catch (RuntimeException e) {
             log.warn("{} 档结构化异常（任务仍 DONE）：{}", tier, e.toString());
@@ -109,15 +116,15 @@ public class StructuringService {
         }
     }
 
-    private StructuringResult extractive(String transcript) {
+    private StructuringResult extractive(String transcript, Long userId) {
         if (!extractiveEnabled) {
             log.warn("第三档抽取式兜底被关闭（app.llm.fallback-extractive=false），跳过");
             return null;
         }
         StructuringResult result = ExtractiveStructurer.extract(transcript);
         result = withGroundedTodos(result, transcript);
-        // F-15（D-089）：依据校验在前（对原文），词表确定性替换在后（right_text 不在原文，先替换会被误杀）
-        return ExtractiveGlossaryApplier.apply(result, termSource.terms());
+        // F-15（D-089）：依据校验在前（对原文），词表确定性替换在后（先替换会被误杀）；T4.37a：任务行缺失 → 空词表
+        return ExtractiveGlossaryApplier.apply(result, userId == null ? List.of() : termSource.terms(userId));
     }
 
     /** 云档/本地档：一次调用 → 诊断 → 解析 → 依据校验。 */
@@ -234,16 +241,12 @@ public class StructuringService {
     }
 
     private static String contentOf(ChatResponse response) {
-        if (response == null || response.getResult() == null || response.getResult().getOutput() == null) {
-            return null;
-        }
+        if (response == null || response.getResult() == null || response.getResult().getOutput() == null) { return null; }
         return response.getResult().getOutput().getText();
     }
 
     private static String finishReasonOf(ChatResponse response) {
-        if (response == null || response.getResult() == null || response.getResult().getMetadata() == null) {
-            return "unknown";
-        }
+        if (response == null || response.getResult() == null || response.getResult().getMetadata() == null) { return "unknown"; }
         return response.getResult().getMetadata().getFinishReason();
     }
 
@@ -271,11 +274,8 @@ public class StructuringService {
     }
 
     private static String abbreviate(String text) {
-        return text == null ? "null" : truncate(text, RAW_TRACE_CHARS);
-    }
-
-    private static String truncate(String text, int maxChars) {
-        return text.length() <= maxChars ? text : text.substring(0, maxChars);
+        if (text == null) { return "null"; }
+        return text.length() <= RAW_TRACE_CHARS ? text : text.substring(0, RAW_TRACE_CHARS);
     }
 
     /** 摘要句边界截断（T4.16b/D-107）：≤200 原样；超长在 [0,200) 内找最后一个句末标点截到它含标点（治「…证据链。未明确」末句腰斩）；找不到退回 200 硬截。诊断日志 truncate 不动。 */

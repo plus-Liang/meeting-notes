@@ -21,9 +21,6 @@ public class GlossaryTermSource {
     /** 注入文本总长上限（卡 1：≈400~500 tok，仍在 ⑦ 预算余量内）。 */
     static final int MAX_TOTAL_CHARS = 400;
 
-    /** 认证接入前固定单用户（与 TaskService/TaskController 一致，D-040）。 */
-    private static final long DEFAULT_USER_ID = 1L;
-
     private final JdbcTemplate jdbc;
 
     public GlossaryTermSource(JdbcTemplate jdbc) {
@@ -43,9 +40,9 @@ public class GlossaryTermSource {
             ORDER BY hits DESC, priority DESC, wrong_text ASC LIMIT ?
             """;
 
-    /** 默认单用户的注入文本。 */
-    public GlossaryInjection inject() {
-        return injectText(DEFAULT_USER_ID);
+    /** 指定用户的注入文本（T4.37a：显式 userId 入参——异步链路不许读 UserContext ThreadLocal）。 */
+    public GlossaryInjection inject(long userId) {
+        return injectText(userId);
     }
 
     GlossaryInjection injectText(long userId) {
@@ -72,9 +69,9 @@ public class GlossaryTermSource {
     }
 
     /** F-15（D-089）：EXTRACTIVE 确定性替换用的词条列表——与 inject **同一查询口径**；空表 → 空列表 → 输出逐字节不变。 */
-    List<Term> terms() {
+    List<Term> terms(long userId) {
         return jdbc.query(SELECT_SQL,
                 (rs, i) -> new Term(rs.getString("wrong_text"), rs.getString("right_text")),
-                DEFAULT_USER_ID, MAX_TERMS);
+                userId, MAX_TERMS);
     }
 }

@@ -48,6 +48,17 @@ class TaskRetryServiceTest {
                 ArgumentMatchers.<ResultSetExtractor<String>>any(), eq(id), eq(1L))).thenReturn(status);
     }
 
+
+    @org.junit.jupiter.api.BeforeEach
+    void setUpUserContextT437a() {
+        com.meetingnotes.common.UserContext.set(1L);
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    void clearUserContextT437a() {
+        com.meetingnotes.common.UserContext.clear();
+    }
+
     @Test
     void revivesOnlyDeadAndSkipsOthersWithoutFailing() {
         stubStatus(7L, "DEAD");

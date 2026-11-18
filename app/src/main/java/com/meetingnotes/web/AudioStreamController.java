@@ -1,6 +1,7 @@
 package com.meetingnotes.web;
 
 import com.meetingnotes.common.ApiException;
+import com.meetingnotes.common.UserContext;
 import com.meetingnotes.task.AudioStreamService;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -25,8 +26,9 @@ import java.util.Map;
  * 音频流入口（T4.35b，播放器用）：
  * <ul>
  *   <li>POST /api/v1/tasks/{id}/audio-token —— 签发短时签名 URL（Bearer 由 ApiTokenFilter 横切，K-46）；</li>
- *   <li>GET /api/v1/tasks/{id}/audio?exp=&amp;sig= —— 免 Bearer 但必须验签+过期+绑定 taskId；
- *       验签失败/过期/不匹配 → 统一 404 TASK_NOT_FOUND（不泄露路径存在性）；**绝不回退成无签名下载**。</li>
+ *   <li>GET /api/v1/tasks/{id}/audio?u=&amp;exp=&amp;sig= —— 免 Bearer 但必须验签+过期+绑定 taskId+userId
+ *       （T4.37a 三段签名，收 T4.35b P3-1）；验签失败/过期/不匹配 → 统一 404 TASK_NOT_FOUND（不泄露路径存在性）；
+ *       **绝不回退成无签名下载**。</li>
  * </ul>
  * 流式转发 MinIO 对象（不整文件进内存）；Content-Type 按 key 扩展名；Range: bytes=… → 206 +
  * Content-Range + Accept-Ranges: bytes（&lt;audio&gt; seek 必需）；无 Range → 200 全量；
@@ -53,30 +55,42 @@ public class AudioStreamController {
     @PostMapping("/api/v1/tasks/{id}/audio-token")
     @ResponseBody
     public AudioStreamService.AudioTokenResponse issueToken(@PathVariable("id") long id) {
-        return audioStreamService.issue(id, defaultUserId());
+        return audioStreamService.issue(id, UserContext.current());
     }
 
-    /** 认证体系接入前固定单用户（与 TaskService/LinkTaskService 一致，D-040 同口径）。 */
-    private static long defaultUserId() {
-        return 1L;
+    /** u 请求参数解析：空/非数字/长度异常一律 null（调用方统一 404，不泄露）。 */
+    private static Long parseUserId(String u) {
+        if (u == null || u.isBlank() || !u.matches("\\d{1,12}")) {
+            return null;
+        }
+        try {
+            return Long.parseLong(u);
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     @GetMapping("/api/v1/tasks/{id}/audio")
     public void audio(@PathVariable("id") long id,
+                      @RequestParam(value = "u", required = false) String u,
                       @RequestParam(value = "exp", required = false) String exp,
                       @RequestParam(value = "sig", required = false) String sig,
                       HttpServletRequest request,
                       HttpServletResponse response) throws IOException {
+        // T4.37a：签名绑定 userId（三段 taskId+exp+userId）——u 缺失/形状异常 → 404（不泄露）
+        Long userId = parseUserId(u);
         // 验签闸：失败统一 404（不泄露"路径存在但签名错"），且绝不回退成无签名下载
-        if (!audioStreamService.verify(id, exp, sig)) {
+        if (userId == null || !audioStreamService.verify(id, userId, exp, sig)) {
             throw new ApiException(404, "TASK_NOT_FOUND", "音频签名无效或已过期，请重新签发");
         }
+        // 验签成功后再校验任务归属（user_id 与 u 不符 → 404，不泄露存在性；T4.35b P3-1 收口）
         Map<String, Object> row = jdbc.query(
-                "SELECT COALESCE(source_uri, '') AS source_uri, size_bytes FROM task WHERE id = ? AND status = 'DONE'",
+                "SELECT COALESCE(source_uri, '') AS source_uri, size_bytes FROM task"
+                        + " WHERE id = ? AND user_id = ? AND status = 'DONE'",
                 rs -> rs.next()
                         ? Map.of("source_uri", rs.getString(1), "size_bytes", rs.getLong(2))
                         : null,
-                id);
+                id, userId);
         if (row == null) {
             // 签名合法但任务已不在（被删/状态回退）：仍 404，不泄露
             throw new ApiException(404, "TASK_NOT_FOUND", "任务 " + id + " 不存在");

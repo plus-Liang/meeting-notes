@@ -1,6 +1,7 @@
 package com.meetingnotes.web;
 
 import com.meetingnotes.common.ApiException;
+import com.meetingnotes.common.UserContext;
 import com.meetingnotes.common.TaskCreatedResponse;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -46,8 +47,6 @@ import java.util.Map;
 @RequestMapping("/api/v1")
 public class TaskController {
 
-    /** 认证接入前固定单用户（与 TaskService 一致）。 */
-    private static final long DEFAULT_USER_ID = 1L;
 
     /** T2.12：status 过滤只允许任务状态机的五个值，其它 → 400 INVALID_PARAM（不再静默空列表）。 */
     /** 状态筛选白名单（包内共享：T4.29 起列表端点在 TaskListController）。 */
@@ -134,7 +133,7 @@ public class TaskController {
     /** 术语表只读列表（T4.1 设置页）：hits desc 取 ≤100。 */
     @GetMapping("/glossary")
     public List<GlossaryRepository.GlossaryRow> glossary() {
-        return glossaryRepository.listTop(DEFAULT_USER_ID, 100);
+        return glossaryRepository.listTop(UserContext.current(), 100);
     }
 
     /** 首页 → 提交页（T1.6）。静态资源由 Spring Boot 提供，这里只做根路径转发。 */
@@ -245,7 +244,7 @@ public class TaskController {
                             rs.getString("transcript_punctuated"), rs.getString("template"), segments,
                             speakerMap);
                 },
-                id, DEFAULT_USER_ID);
+                id, UserContext.current());
         if (resp == null) {
             throw new ApiException(404, "TASK_NOT_FOUND", "任务 " + id + " 不存在");
         }
@@ -262,7 +261,7 @@ public class TaskController {
         List<TaskMutationService.Correction> corrections =
                 body == null || body.corrections() == null ? List.of() : body.corrections();
         TaskMutationService.CorrectionOutcome outcome =
-                taskMutationService.applyCorrections(id, DEFAULT_USER_ID, corrections);
+                taskMutationService.applyCorrections(id, UserContext.current(), corrections);
         List<CorrectionResponse.GlossaryEntryView> entries = new ArrayList<>();
         for (GlossaryRepository.Entry entry : outcome.glossary()) {
             entries.add(new CorrectionResponse.GlossaryEntryView(
@@ -280,7 +279,7 @@ public class TaskController {
             throw new ApiException(400, "INVALID_PARAM", "请求体必须包含布尔字段 done");
         }
         TaskMutationService.TodoUpdateResult result =
-                taskMutationService.setTodoDone(id, DEFAULT_USER_ID, index, body.done());
+                taskMutationService.setTodoDone(id, UserContext.current(), index, body.done());
         TaskMutationService.TodoData data = result.todoData();
         return new TodoUpdateResponse(result.taskId(), result.index(),
                 new TodoItemView(data.action(), data.owner(), data.deadline(), data.done()));
@@ -291,7 +290,7 @@ public class TaskController {
     public TodoDeleteResponse deleteTodo(@PathVariable("id") long id,
                                          @PathVariable("index") int index) {
         TaskMutationService.TodoDeleteResult result =
-                taskMutationService.deleteTodo(id, DEFAULT_USER_ID, index);
+                taskMutationService.deleteTodo(id, UserContext.current(), index);
         return new TodoDeleteResponse(result.taskId(), result.index(),
                 result.removedCount(), result.remainingCount());
     }

@@ -173,6 +173,11 @@ app:
   security:
     api-token: ${API_TOKEN:change-me-api-token}
 
+  auth:
+    # T4.37a：开放注册开关（1 号管理员的首次注册认领不受此开关限制）
+    # false → POST /api/v1/auth/register 对非认领路径回 403 REGISTRATION_DISABLED
+    registration-enabled: ${AUTH_REGISTRATION_ENABLED:true}
+
   quota:
     minutes-per-day: ${QUOTA_MINUTES_PER_DAY:120}
     tasks-per-day: ${QUOTA_TASKS_PER_DAY:50}

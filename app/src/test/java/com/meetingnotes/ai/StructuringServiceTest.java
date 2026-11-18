@@ -209,10 +209,12 @@ class StructuringServiceTest {
         assertFalse(newService(false).structure(15L, TRANSCRIPT), "第三档被开关关掉时降级链耗尽 → 字段留空");
 
         // T3.8（K-31）：varargs never() 按"逐位 matcher"才不会空过——这里改为可靠断言：
-        // jdbc 只发生 1 次 query（读模板，只读），除此之外**零交互**（失败路径零写库是真绿，
+        // jdbc 只发生 2 次 query（读模板 + T4.37a 读归属，均只读），除此之外**零交互**（失败路径零写库是真绿，
         // persist 若发生，verifyNoMoreInteractions 必红）
         verify(jdbc, times(1)).query(contains("COALESCE(template"),
                 ArgumentMatchers.<RowMapper<String>>any(), eq(15L));
+        verify(jdbc, times(1)).query(contains("SELECT user_id FROM task WHERE id = ?"),
+                ArgumentMatchers.<RowMapper<Long>>any(), eq(15L));
         verifyNoMoreInteractions(jdbc);
     }
 
@@ -346,7 +348,9 @@ class StructuringServiceTest {
     @Test
     void glossaryInjectionReachesThePrompt() {
         // 词表非空：注入段（含"术语表"与改写指令）必须真的进 Prompt 内容
-        when(termSource.inject()).thenReturn(new GlossaryTermSource.GlossaryInjection(
+        // T4.37a：归属按 task 行解析（stub SELECT user_id），inject 显式收 userId
+        stubTaskOwner(30L, 1L);
+        when(termSource.inject(1L)).thenReturn(new GlossaryTermSource.GlossaryInjection(
                 "【术语表（原文说法 → 正确写法）】章总→张总", 1));
         when(cloudProvider.getIfAvailable()).thenReturn(cloudModel);
         when(cloudModel.call(any(Prompt.class))).thenReturn(response(VALID_JSON, "stop"));
@@ -365,6 +369,7 @@ class StructuringServiceTest {
     @Test
     void emptyGlossaryKeepsPromptByteIdentical() {
         // 空表回归判据：不注入任何内容——提示词里没有"术语表"字样（termSource 未打桩返回 null，同样按空处理）
+        stubTaskOwner(31L, 1L);
         when(cloudProvider.getIfAvailable()).thenReturn(cloudModel);
         when(cloudModel.call(any(Prompt.class))).thenReturn(response(VALID_JSON, "stop"));
 
@@ -373,7 +378,17 @@ class StructuringServiceTest {
         ArgumentCaptor<Prompt> captor = ArgumentCaptor.forClass(Prompt.class);
         verify(cloudModel).call(captor.capture());
         assertFalse(captor.getValue().getContents().contains("术语表"), "空词表不得改变提示词");
-        verify(termSource, times(1)).inject();
+        verify(termSource, times(1)).inject(1L);
+    }
+
+    /** T4.37a：stub 归属解析（SELECT user_id FROM task WHERE id = ?）+ 模板读取（避免 strict-stubbing 误报）。 */
+    private void stubTaskOwner(long taskId, long userId) {
+        when(jdbc.query(org.mockito.ArgumentMatchers.contains("SELECT user_id FROM task WHERE id = ?"),
+                ArgumentMatchers.<org.springframework.jdbc.core.RowMapper<Long>>any(), eq(taskId)))
+                .thenReturn(List.of(userId));
+        when(jdbc.query(org.mockito.ArgumentMatchers.contains("COALESCE(template"),
+                ArgumentMatchers.<org.springframework.jdbc.core.RowMapper<String>>any(), eq(taskId)))
+                .thenReturn(List.of("meeting"));
     }
 
     // ---- T3.9 模板机制 ----
@@ -501,14 +516,15 @@ class StructuringServiceTest {
 
     @Test
     void extractiveRouteReadsGlossaryAndCorrectsWrongTerms() {
-        // 集成：EXTRACTIVE 路径必须调 terms() 读词表；summary 来自原文句子（含错词"工作副盘"）
+        // 集成：EXTRACTIVE 路径必须调 terms(userId) 读词表；summary 来自原文句子（含错词"工作副盘"）
         // → 词表确定性替换为"工作复盘"后落库
-        when(termSource.terms()).thenReturn(List.of(new GlossaryTermSource.Term("工作副盘", "工作复盘")));
-        // inject() 未打桩 → null → 提示词不注入（CLOUD 才注入；EXTRACTIVE 走代码层替换）
+        stubTaskOwner(60L, 1L);
+        when(termSource.terms(1L)).thenReturn(List.of(new GlossaryTermSource.Term("工作副盘", "工作复盘")));
+        // inject(1L) 未打桩 → null → 提示词不注入（CLOUD 才注入；EXTRACTIVE 走代码层替换）
 
         assertTrue(extractiveOnlyService().structure(60L, "我们本周要整理工作副盘并提交。"));
 
-        verify(termSource, times(1)).terms();
+        verify(termSource, times(1)).terms(1L);
         ArgumentCaptor<String> summary = ArgumentCaptor.forClass(String.class);
         verify(jdbc).update(contains("UPDATE task_result"), summary.capture(), anyString(),
                 anyString(), isNull(), eq("EXTRACTIVE"), eq("meeting"), eq(60L));
@@ -519,7 +535,8 @@ class StructuringServiceTest {
     @Test
     void emptyGlossaryKeepsExtractiveOutputUnchanged() {
         // 词表空 → 替换零发生，EXTRACTIVE 输出保留原文写法（逐字节不变的 T3.6 同款回归判据）
-        when(termSource.terms()).thenReturn(List.of());
+        stubTaskOwner(61L, 1L);
+        when(termSource.terms(1L)).thenReturn(List.of());
 
         assertTrue(extractiveOnlyService().structure(61L, "我们本周要整理工作副盘并提交。"));
 

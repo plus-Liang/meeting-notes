@@ -2,6 +2,7 @@ package com.meetingnotes.web;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.meetingnotes.common.ApiException;
+import com.meetingnotes.common.UserContext;
 import com.meetingnotes.task.TaskMetaService;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -30,8 +31,6 @@ import java.util.List;
 @RequestMapping("/api/v1")
 public class TaskMetaController {
 
-    /** 认证接入前固定单用户（与 TaskController 一致）。 */
-    private static final long DEFAULT_USER_ID = 1L;
 
     /** 卡口径：最多 10 个标签。 */
     static final int MAX_LABELS = 10;
@@ -63,12 +62,12 @@ public class TaskMetaController {
             }
             favorite = node.asBoolean();
         }
-        return taskMetaService.update(DEFAULT_USER_ID, id, labels, favorite);
+        return taskMetaService.update(UserContext.current(), id, labels, favorite);
     }
 
     @GetMapping("/tasks/{id}/meta")
     public TaskMetaService.TaskMeta read(@PathVariable("id") long id) {
-        return taskMetaService.read(DEFAULT_USER_ID, id);
+        return taskMetaService.read(UserContext.current(), id);
     }
 
     /** labels 校验：数组、≤10、元素为字符串、trim 后 1–20 字、去重保序。 */

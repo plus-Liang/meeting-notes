@@ -1,5 +1,6 @@
 package com.meetingnotes.web;
 
+import com.meetingnotes.common.UserContext;
 import com.meetingnotes.task.SpeakerMapService;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -27,7 +28,7 @@ public class SpeakerMapController {
     public SpeakerMapService.SpeakerMapResponse updateSpeakerMap(
             @PathVariable("id") long id,
             @RequestBody SpeakerMapRequest body) {
-        return speakerMapService.update(id, 1L /* 认证体系接入前固定单用户（D-040 同口径） */,
+        return speakerMapService.update(id, UserContext.current(),
                 body == null ? null : body.speakerMap());
     }
 

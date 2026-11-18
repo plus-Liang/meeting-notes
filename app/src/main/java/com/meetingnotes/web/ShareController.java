@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.meetingnotes.common.ApiException;
+import com.meetingnotes.common.UserContext;
 import com.meetingnotes.common.ShareTokens;
 import com.meetingnotes.task.ShareService;
 import org.springframework.http.MediaType;
@@ -33,8 +34,6 @@ import java.util.List;
 @RequestMapping("/api/v1")
 public class ShareController {
 
-    /** 认证接入前固定单用户（与 TaskController 一致）。 */
-    private static final long DEFAULT_USER_ID = 1L;
 
     private final ShareService shareService;
     private final JdbcTemplate jdbc;
@@ -69,13 +68,13 @@ public class ShareController {
 
     @PostMapping("/tasks/{id}/share")
     public ShareCreatedResponse create(@PathVariable("id") long id) {
-        ShareService.ShareCreated created = shareService.create(DEFAULT_USER_ID, id);
+        ShareService.ShareCreated created = shareService.create(UserContext.current(), id);
         return new ShareCreatedResponse(created.taskId(), created.token(), created.url(), created.expiresAt());
     }
 
     @DeleteMapping("/tasks/{id}/share")
     public ShareRevokedResponse revoke(@PathVariable("id") long id) {
-        return new ShareRevokedResponse(shareService.revokeAll(DEFAULT_USER_ID, id));
+        return new ShareRevokedResponse(shareService.revokeAll(UserContext.current(), id));
     }
 
     /** K-46：匿名只读——按 SHA256(hash) 查有效链接，不存在/撤销/过期统一 404 SHARE_NOT_FOUND（不区分原因）。 */

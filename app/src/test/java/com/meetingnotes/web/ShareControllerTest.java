@@ -87,7 +87,7 @@ class ShareControllerTest {
     @Test
     void filterExemptsOnlySharePrefix() {
         com.meetingnotes.web.ApiTokenFilter filter =
-                new com.meetingnotes.web.ApiTokenFilter("t", new com.fasterxml.jackson.databind.ObjectMapper());
+                new com.meetingnotes.web.ApiTokenFilter("t", jdbc, new com.fasterxml.jackson.databind.ObjectMapper());
         HttpServletRequest shareReq = mock(HttpServletRequest.class);
         when(shareReq.getRequestURI()).thenReturn("/api/v1/share/abc-token");
         assertTrue(filter.shouldNotFilter(shareReq), "匿名只读分享前缀豁免");

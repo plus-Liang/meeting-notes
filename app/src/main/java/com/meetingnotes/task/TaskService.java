@@ -3,6 +3,7 @@ package com.meetingnotes.task;
 import com.meetingnotes.upload.AudioDurationProbe;
 import com.meetingnotes.upload.MediaMagic;
 import com.meetingnotes.common.ApiException;
+import com.meetingnotes.common.UserContext;
 import com.meetingnotes.common.TaskCreatedResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -42,8 +43,6 @@ public class TaskService {
 
     private static final Logger log = LoggerFactory.getLogger(TaskService.class);
 
-    /** 认证体系接入前（spec US-9 属后续卡），先固定单用户。 */
-    private static final long DEFAULT_USER_ID = 1L;
     private static final int HEAD_BYTES = 16;
 
     private final JdbcTemplate jdbc;
@@ -136,7 +135,7 @@ public class TaskService {
                         RETURNING id
                         """,
                         rs -> rs.next() ? rs.getLong(1) : null,
-                        DEFAULT_USER_ID, sha256, durationSec, size);
+                        UserContext.current(), sha256, durationSec, size);
                 if (newId == null) {
                     return null; // 冲突：同用户已有同内容任务，回查交给事务外（事务内不能留未决状态）
                 }
@@ -147,7 +146,7 @@ public class TaskService {
                         newId, resolution.template());
                 // 5) 配额（N8）：只在"本请求确实新建了任务"时消费；429 抛出 → 事务回滚
                 int minutes = (int) Math.max(1, Math.ceil(durationSec / 60.0));
-                quotaService.consume(DEFAULT_USER_ID, minutes);
+                quotaService.consume(UserContext.current(), minutes);
                 // 6) MinIO（tasks/{taskId}/）→ 回填 source_uri；失败 → 事务回滚，不留无对象的任务
                 String key = "tasks/" + newId + "/" + sanitizeFilename(file.getOriginalFilename(), format);
                 try {
@@ -164,7 +163,7 @@ public class TaskService {
 
             if (taskId == null) {
                 // 幂等命中（T2.1）：返回库里真实状态；命中 DEAD → 复活重投（D-049）
-                ExistingTask existing = findIdAndStatusByHash(DEFAULT_USER_ID, sha256);
+                ExistingTask existing = findIdAndStatusByHash(UserContext.current(), sha256);
                 if (existing == null) {
                     // 理论不可达：约束冲突却查不到行。宁可暴露也不给假 201。
                     throw new ApiException(500, "INTERNAL_ERROR", "幂等冲突回查未找到已有任务，请联系管理员");

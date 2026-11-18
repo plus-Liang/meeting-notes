@@ -31,6 +31,17 @@ class TaskMetaControllerTest {
         return new ObjectMapper().readTree(s);
     }
 
+
+    @org.junit.jupiter.api.BeforeEach
+    void setUpUserContextT437a() {
+        com.meetingnotes.common.UserContext.set(1L);
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    void clearUserContextT437a() {
+        com.meetingnotes.common.UserContext.clear();
+    }
+
     @Test
     void labelsValidationMatrix() throws Exception {
         // 11 个标签 → 400

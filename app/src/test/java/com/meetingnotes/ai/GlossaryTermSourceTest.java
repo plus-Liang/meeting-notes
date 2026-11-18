@@ -48,7 +48,7 @@ class GlossaryTermSourceTest {
     void sqlOrdersByHitsPriorityAndCapsWithLimit() {
         when(jdbc.query(contains("FROM glossary"), any(RowMapper.class), any(), anyInt()))
                 .thenReturn(List.of());
-        newSource().inject();
+        newSource().inject(1L);
 
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
         verify(jdbc).query(sql.capture(), ArgumentMatchers.<RowMapper>any(), any(), anyInt());
@@ -62,7 +62,7 @@ class GlossaryTermSourceTest {
         when(jdbc.query(contains("FROM glossary"), any(RowMapper.class), any(), anyInt()))
                 .thenReturn(List.of());
 
-        GlossaryTermSource.GlossaryInjection injection = newSource().inject();
+        GlossaryTermSource.GlossaryInjection injection = newSource().inject(1L);
 
         assertEquals("", injection.text(), "空表返回空串（不注入、不报错）");
         assertEquals(0, injection.termCount());
@@ -74,7 +74,7 @@ class GlossaryTermSourceTest {
         stubRows(IntStream.range(0, 30).mapToObj(i -> new String[]{"词" + i, "正" + i})
                 .flatMap(p -> java.util.stream.Stream.of(p[0], p[1])).toArray(String[]::new));
 
-        GlossaryTermSource.GlossaryInjection injection = newSource().inject();
+        GlossaryTermSource.GlossaryInjection injection = newSource().inject(1L);
 
         assertEquals(20, injection.termCount(), "上限 20 条");
     }
@@ -85,7 +85,7 @@ class GlossaryTermSourceTest {
         stubRows(IntStream.range(0, 20).mapToObj(i -> new String[]{"错误说法甲乙丙丁" + i, "正确写法甲乙丙丁" + i})
                 .flatMap(p -> java.util.stream.Stream.of(p[0], p[1])).toArray(String[]::new));
 
-        GlossaryTermSource.GlossaryInjection injection = newSource().inject();
+        GlossaryTermSource.GlossaryInjection injection = newSource().inject(1L);
 
         assertTrue(injection.text().length() <= 400, "总长 ≤400 字，实际 " + injection.text().length());
         assertTrue(injection.termCount() < 20, "400 字截断后不足 20 条，实际 " + injection.termCount());

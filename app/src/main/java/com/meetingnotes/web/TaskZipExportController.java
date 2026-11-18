@@ -2,6 +2,7 @@ package com.meetingnotes.web;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.meetingnotes.common.ApiException;
+import com.meetingnotes.common.UserContext;
 import com.meetingnotes.task.TaskQueryService;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -41,8 +42,6 @@ import java.util.zip.ZipOutputStream;
 @RequestMapping("/api/v1")
 public class TaskZipExportController {
 
-    /** 认证接入前固定单用户（与 TaskController 一致）。 */
-    private static final long DEFAULT_USER_ID = 1L;
 
     /** zip 批量上限（卡口径 ≤20）。 */
     static final int MAX_ZIP_IDS = 20;
@@ -62,7 +61,10 @@ public class TaskZipExportController {
     public ResponseEntity<StreamingResponseBody> exportZip(
             @RequestParam(name = "ids", required = false) String ids) {
         List<Long> idList = parseIds(ids);
-        List<Long> exportable = filterExportable(idList, DEFAULT_USER_ID, jdbc);
+        // T4.37a：StreamingResponseBody 的 lambda 跑在异步线程（无 UserContext ThreadLocal）——
+        // 必须在请求线程先解析 userId，再显式传入 lambda（卡面第 6 条：逐个核对请求线程 vs 异步线程）
+        long userId = UserContext.current();
+        List<Long> exportable = filterExportable(idList, userId, jdbc);
         if (exportable.isEmpty()) {
             throw new ApiException(400, "INVALID_PARAM",
                     "没有可导出的任务（全部不存在、未完成或无转写文本）");
@@ -70,7 +72,7 @@ public class TaskZipExportController {
         String stamp = DateTimeFormatter.ofPattern("yyyyMMdd-HHmm").format(LocalDateTime.now());
         /* 流式阶段遍历**完整请求列表**（不是预检后的子集）：预检剔除的 id 也要进 _errors.txt（卡口径"跳过逐条说明"） */
         StreamingResponseBody body = out ->
-                streamZip(out, idList, DEFAULT_USER_ID, jdbc, mapper, TaskExportController.parseInclude(null));
+                streamZip(out, idList, userId, jdbc, mapper, TaskExportController.parseInclude(null));
         return ResponseEntity.ok()
                 .contentType(MediaType.valueOf("application/zip"))
                 .header("Content-Disposition", "attachment; filename=\"meeting-notes-" + stamp + ".zip\"")

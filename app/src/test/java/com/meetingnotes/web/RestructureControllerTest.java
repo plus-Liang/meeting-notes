@@ -27,6 +27,17 @@ class RestructureControllerTest {
         return new RestructureController(service);
     }
 
+
+    @org.junit.jupiter.api.BeforeEach
+    void setUpUserContextT437a() {
+        com.meetingnotes.common.UserContext.set(1L);
+    }
+
+    @org.junit.jupiter.api.AfterEach
+    void clearUserContextT437a() {
+        com.meetingnotes.common.UserContext.clear();
+    }
+
     @Test
     void missingOrBlankTemplateReturns400Required() {
         ApiException e1 = assertThrows(ApiException.class,
