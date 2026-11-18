@@ -1818,6 +1818,19 @@
 - **依据**：`review/2026-11-17-T4.35b验收.md`（第 60 份）；`artifacts/T4.35b/lead-verify/`（unitonly 429、full 447、maintainability 0/0、probe.py + probe.log 24/24、probe-result.json、e2e-browser.js + log 4/4、e2e-browser-result.json）；数据 263 任务全 DONE、MinIO 269=263+历史 6 孤儿无新增；配额 112/98。
 - **已排除项**：把老任务 237 的 `audio/mp4` 当 Content-Type 错误（其 source key 是 m4a/mp4，映射正确）；把 mp3 任务 270 的 200/206 当偶然（扩了第二种媒体类型）；把 `HEAD` 未实现当缺陷（卡面只要求 `<audio>` Range GET，已记 P3）；把"PASTE 签发 400"当 500（实测 400 `INVALID_PARAM`，符合卡面）。
 
+### D-146 T4.35c 通过：前端播放器落地（点句 seek / 高亮跟随 / null 与 [] 双降级）；"点句即自动播放 → 进度断言要先暂停"入坑 K-88；T4.36 确认无需迁移（V1 已有 speaker_map）
+
+- **日期**：2026-11-18｜**决策人**：DSH
+- **结论**：
+  1. **T4.35c 通过**（`bbe2ca3`，4 文件 +180/−2，单 commit，**只动 static + 文档**）：详情页 DONE 且 `segments` 非空 → 新增「播放」卡（`<audio controls preload="metadata">`，src 走 `audio-token` 签名、**同一任务只签发一次、失败/过期重签一次**）+ 句子列表（`mm:ss` + 文本、可滚动）；**点句 → `audio.currentTime=start` + 手势内 `play()`**；`timeupdate/seeked` 按 `start<=t<end`（间隙取最近前一句）**只给当前句加高亮**并 `scrollIntoView({block:'nearest'})`；**`segments` 为 null 或 `[]` 都不渲染播放器**（双降级，原文照旧）；audio-token 失败显示可读错误、不阻塞其它区。**后端与详情 15 键零改动**。**17 张 ✅ → 18 张 ✅**。
+  2. 我独立验证：`-UnitOnly` **429/429 exit 0**、可维护性 **0/0**、全量 **447/447 exit 0**；**服务端静态 == 工作区 sha256 逐一相等**（`task.html 43CDCAB9…`、`style.css D7EA1014…`，重建镜像生效）；Playwright **10/10**：task 552 播放卡+18 句+音频可解码；**点第 3 句 → 自动播放 → 暂停后 `currentTime=8.000` == `start=8`**；点第 5 句高亮唯一 `data-idx=4`；**播放推进后高亮前进到 idx 5**（`currentTime=20.20`）；play/pause 切换正常；390/1280 溢出 **0/0**、audio 宽 334≤390；task 535 句子 35 条；**旧任务 237 无 `#playerCard`、`audio` 数量 0、原文 3099 字正常**；console/pageerror **0**（我在注入 token 之后、页面打开前挂监听器，无启动期 401 噪声）。**UI 探针零新建任务**（探针前后 DB 均 267）。
+  3. **新坑 K-88**：**播放/seek 类进度断言必须先控制播放状态**——点句会**自动播放**，等 1.2s 再读 `currentTime` 得到 8.55（真实在播）会被误判成"seek 不准"；正确口径是**点击 → 暂停 → 读 `currentTime` 与目标 `start` 比**（或断言目标命中而非当前时刻）。写码方首轮因此假红，改口径后 8.000 精确命中。
+  4. **T4.36 无需迁移（核实）**：`task_result.speaker_map JSONB` **V1 建表就有**（D-1 早期预留），T4.36 只加 PATCH 端点 + 详情第 16 键 + 前端用法；不要为它白写 V8 迁移。
+  5. 残余（P3，接受）：高亮句出列表可视区时自动 `scrollIntoView` 会轻微牵动"边听边翻看别处"的用户（可加"用户滚动后暂停跟随 5s"增强）；重渲染不保留滚动/高亮位置（DONE 后不再轮询，日常无影响）；无键盘快捷键；`share.html` 不加播放器（卡面明确）；高亮精度受 `timeupdate` ~4Hz 限制（≤250ms，可接受）；签名 URL 在 DOM（设计即"可分享只读短时"）。
+  6. **会话策略（按用户要求区分）**：T4.36 继续在**同一个 WorkBuddy 会话**做——它刚改完 `task.html` 的句子列表，说话人 chip 就挂在这套句子上，强相关且省重读；**T4.37（登录/多用户）必须新会话**（大卡横切、要收音频签名绑 userId）。
+- **依据**：`review/2026-11-18-T4.35c验收.md`（第 61 份）；`artifacts/T4.35c/lead-verify/`（unitonly 429、full 447、maintainability 0/0、ui-probe.js + ui-probe.log 10/10、ui-result.json、served-* sha256）；数据 271 任务全 DONE、MinIO 277=271+历史 6 孤儿无新增；配额 8 分钟/8 任务（日切后）。
+- **已排除项**：把首轮 `seekOk:false`（8.55）当 seek 缺陷（是自动播放导致的时移，K-88）；把旧任务 237 无播放器当漏渲染（双降级是卡面要求）；把"重渲染不保留滚动位置"当缺陷（DONE 后不再轮询，实际无影响）；把启动期 401 当 console 缺陷（我改挂监听器时机后 0 错误）；把 T4.36 想当然写成需要 V8 迁移（V1 已有 `speaker_map`，实测确认）。
+
 ---
 
 ## 面试速查（由本文件派生，勿单独维护）

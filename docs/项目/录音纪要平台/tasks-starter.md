@@ -2766,7 +2766,7 @@ F-15 控制在 ≤30 行并集中一处；新增静态资源不引第三方库�
 > - 残留清理（D-139）：本卡不建任务；核对容器 `/tmp`、MinIO 对象数不变、`.env` 未动。
 > **禁止**：把 `API_TOKEN` 放进 URL；豁免整个 `/api/v1/tasks/`；改详情 15 键；把 MinIO 桶/对象设为公开；改前端播放器（35c）；多 commit。
 
-## T4.35c 前端播放器：`<audio>` + 点句 seek + 当前句高亮（约 2–3 小时；D-122；**依赖 T4.35b 已通过 `f6d850f`**）
+## T4.35c 前端播放器：`<audio>` + 点句 seek + 当前句高亮（约 2–3 小时；D-122；**依赖 T4.35b 已通过 `f6d850f`**）**✅ 已通过（2026-11-18，`bbe2ca3`，第 61 份报告，D-146；我独立 429/429 单元 + 447/447 全量 + 服务端静态 sha256 一致 + Playwright 10/10（点第 3 句暂停后 currentTime=8.000、高亮推进、237 双降级）；K-88）**
 
 > **先跑三行报给我**：`git -C D:\new\projects\meeting-notes log --oneline -1`、`git -C D:\new\projects\meeting-notes status --short`、`Get-Content D:\new\artifacts\T4.35b\workbuddy\head.txt`。
 > **会话说明**：这张卡请在 **T4.35b 同一个会话里继续做**（你刚写的 `audio-token`/`audio` 契约还在上下文里，省一次重读）；但这是**新卡 T4.35c**，不是继续改 T4.35b——先跑上面三行报给我再动手。**只看这张卡 + `handoff.md` 第 0–2 节 + `AGENT.md` §2/§4**；证据落 `D:\new\artifacts\T4.35c\workbuddy\`；回报 ≤40 行。
@@ -2793,6 +2793,31 @@ F-15 控制在 ≤30 行并集中一处；新增静态资源不引第三方库�
 > - **配额说明**：当前 98/100、**00:00 日切重置**；若全量 E2E 撞 429 `QUOTA_EXCEEDED`，临时 override 提高 `QUOTA_TASKS_PER_DAY`（如 500）跑完整全量，**验完删 override**；不许改 `.env`、不许删任务证据行。
 > - 残留清理（D-139）：零新建任务；核对 `/tmp`、MinIO 对象数不变、无 override 残留、`.env` 未动。
 > **禁止**：改后端契约/详情 15 键；新建任务做 UI 验证；引 CDN/前端框架；改 `share.html`；用裸 API_TOKEN 拼 audio src（必须走签发）；多 commit。
+
+## T4.36 手工说话人：句子打标签 + 分组显示（约 2–3 小时；D-122；**依赖 T4.35c 已通过 `bbe2ca3`**）
+
+> **先跑三行报给我**：`git -C D:\new\projects\meeting-notes log --oneline -1`、`git -C D:\new\projects\meeting-notes status --short`、`Get-Content D:\new\artifacts\T4.35c\workbuddy\head.txt`。
+> **会话说明**：这张卡**继续在同一个会话里做**（你刚改完 `task.html` 的句子列表，说话人 chip 就挂在这套句子上）；但这是**新卡 T4.36**，不是继续改 T4.35c——先跑上面三行报给我再动手。只看「这张卡 + `handoff.md` 第 0–2 节 + `AGENT.md` §2/§4」；证据落 `D:\new\artifacts\T4.36\workbuddy\`；回报 ≤40 行。
+> **配额**：日切后余量充足，但**本卡仍零新建任务**——验证用已有任务 **552（18 段）/535（35 段）/237（无 segments）**。
+> **已核实（别白写迁移）**：`task_result.speaker_map JSONB` **V1 建表就有**（`app/src/main/resources/db/migration/V1__init.sql` 第 31 行），**本卡不需要新迁移**。
+>
+> **要证明的事**：详情页能手工给句子打说话人标签 → 落库 `speaker_map`（句子下标 → 标签）→ 刷新/回读仍生效；句子/转写区能**按说话人分组显示**（无标签句归"未标注"）；无 `segments` 的任务不显示这些 UI；零新建任务、不改 `segments` 与已有 15 键。
+> 本卡**不做**：自动说话人分离（先 spike 再定，不承诺）；`speaker_profile` 档案表（P2 暂不用）；改 ASR/摘要/待办。
+>
+> **改动（后端 + 前端 + 文档，单 commit）**：
+> 1. 新 `PATCH /api/v1/tasks/{id}/speaker-map`（Bearer 由 `ApiTokenFilter` 横切）：body `{"speaker_map":{"3":"说话人 1","4":"说话人 1","10":"说话人 2"}}`（键=**句子下标字符串**，值=标签 1–20 字符、去首尾空白）。校验：不存在/非本人 → 404 `TASK_NOT_FOUND`；非 DONE / 无 segments → 400 `INVALID_PARAM`；键非整数/负/越界（≥ segments 长度）、值空或 >20 字、条目 >200 → 400 `INVALID_PARAM`；成功 200 返回 `{"speaker_map":{…}}`；**只更新 speaker_map + updated_at**，不碰其它列；`{}` = 清除（落 `{}` 或 NULL，**写进文档定一种**）。
+> 2. 详情 `GET /tasks/{id}` **只增第 16 键** `speaker_map`（对象或 null；旧任务/未标注 = null），键序加在最后；列表/导出/其它端点不动。
+> 3. 前端 `task.html`：35c 句子列表每行加**说话人 chip**（点击弹选择：已有标签 + 新建标签 + 清除）；保存走 PATCH 后**回读详情**（K-80），失败就地提示并回滚；加「分组视图」切换——有映射时按说话人分组显示句子（组内保持原序、未标注组在最后），无映射时与今天一致；无 `segments` 时整块不显示；390 可操作。
+> 4. 文档：权威版 `接入指南.md` 新增 **§3.11「说话人标注（手工）」** + §3.2 详情 **16 键**；无新配置、无迁移。改完跑 `tools\sync-docs-to-code.ps1`（只改权威版）。
+>
+> **判据（缺一不可）**：
+> - 单测：校验矩阵（正常 map / 非 DONE / 无 segments / 键非数字 / 键越界 / 值空 / 值超 20 字 / 条目 >200 / 空 map 清除 / 不存在任务 404），断言状态码 + 错误码；详情 16 键键序（扩 `TaskStatusResponseTest`）。
+> - **真机（零新建任务）**：已有任务 552 → PATCH 三句标签 → 200 → GET 详情 `speaker_map` 与写入一致、**16 键**；改标签回读生效；`{}` 清除后与文档一致；历史任务 237 的 `speaker_map=null`。
+> - **Playwright（K-80 点→回读）**：552 详情点第 1 句 chip → 选/新建"说话人 A" → **回读详情**确认映射；再给第 3 句设"说话人 B" → 分组视图出现 2 组 + 未标注组；390 无横向溢出、chip 可点、分组可读；console/pageerror 0。
+> - UI 验证前后 `SELECT count(*) FROM task` 不变（零新建任务）。
+> - `-UnitOnly` 全绿 → commit（单 commit `feat(T4.36)`）→ **`docker compose build app && up -d app`**（改了 static 必须重建）→ 全量（K-68）→ 可维护性 0/0；`head.txt` 记提交后 HEAD。
+> - 残留清理（D-139）：零新建任务；`/tmp`、MinIO 对象数、override、`.env` 逐条核对。
+> **禁止**：加自动说话人分离/改 ASR；写 V8 迁移（V1 已有 `speaker_map`）；改 `segments`/摘要/待办/已有 15 键语义；新建任务做验证；引 CDN/框架；多 commit。
 
 ## 每张卡做完都要给你的回报
 
