@@ -63,7 +63,7 @@ a{color:inherit;text-decoration:none}
 
 /* ── 按钮：黑承担动作，印章红只在“此刻/重点” ── */
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:42px;padding:0 20px;cursor:pointer;
-  border:1px solid var(--ink);background:var(--ink);color:#fff;border-radius:2px;
+  border:1px solid var(--ink);background:var(--ink);color:#fff;border-radius:999px;
   font:500 13px/1 var(--sans);letter-spacing:.02em;transition:background .15s,border-color .15s,color .15s,transform .1s}
 .btn:hover{background:#000}
 .btn:active{transform:scale(.985)}
@@ -71,7 +71,7 @@ a{color:inherit;text-decoration:none}
 .btn.ghost:hover{background:transparent;border-color:var(--ink)}
 .btn.seal{background:var(--seal);border-color:var(--seal)}
 .btn.seal:hover{background:var(--seal-deep);border-color:var(--seal-deep)}
-.btn.sm{height:34px;padding:0 13px;font-size:12px}
+.btn.sm{height:34px;padding:0 15px;font-size:12px}
 .linkish{display:inline-flex;align-items:center;height:42px;font:500 13px/1 var(--sans);color:var(--ink);
   border-bottom:1px solid var(--rule);padding:0 2px;cursor:pointer;transition:border-color .16s,color .16s}
 .linkish:hover{color:var(--seal);border-bottom-color:var(--seal)}
@@ -118,12 +118,12 @@ ol.pts li::before{content:counter(p,decimal-leading-zero);position:absolute;left
 .todo{display:flex;gap:10px;align-items:flex-start;padding:11px 0;border-top:1px dotted var(--rule);font:400 13px/1.7 var(--sans);color:var(--ink-2)}
 .todo .bx{width:14px;height:14px;border:1px solid var(--ink-2);flex:none;margin-top:4px;background:var(--leaf)}
 .kw{display:flex;flex-wrap:wrap;gap:7px}
-.kw b{font:400 11px/1 var(--mono);letter-spacing:.06em;padding:6px 9px;border:1px solid var(--rule);color:var(--ink-2);background:var(--leaf);font-weight:400}
+.kw b{font:400 11px/1 var(--mono);letter-spacing:.06em;padding:6px 10px;border:1px solid var(--rule);color:var(--ink-2);background:var(--leaf);font-weight:400;border-radius:999px}
 .facts{display:grid;grid-template-columns:1fr auto;gap:0 14px;font:400 12px/1.6 var(--sans);color:var(--ink-2)}
 .facts dt,.facts dd{padding:7px 0;border-top:1px dotted var(--rule)}
 .facts dd{font:400 12px/1.6 var(--mono);color:var(--ink);text-align:right;font-variant-numeric:tabular-nums}
 .chips{display:flex;flex-wrap:wrap;gap:6px}
-.chip{font:400 12px/1 var(--sans);padding:7px 11px;border:1px solid var(--rule);background:transparent;color:var(--ink-2);cursor:pointer;border-radius:2px;transition:.15s}
+.chip{font:400 12px/1 var(--sans);padding:7px 13px;border:1px solid var(--rule);background:transparent;color:var(--ink-2);cursor:pointer;border-radius:999px;transition:.15s}
 .chip:hover{border-color:var(--ink);color:var(--ink)}
 .chip[aria-pressed="true"]{background:var(--ink);border-color:var(--ink);color:#fff}
 .chip.seal[aria-pressed="true"]{background:var(--seal);border-color:var(--seal)}
@@ -141,9 +141,9 @@ ol.pts li::before{content:counter(p,decimal-leading-zero);position:absolute;left
 .kv b{font:400 12px/1.6 var(--mono);color:var(--ink);font-variant-numeric:tabular-nums}
 
 /* ── 播放器（自绘，含竖向音量与倍速选中态） ── */
-.player{margin-top:8px;border:1px solid var(--rule);background:var(--leaf)}
-.pl-row{display:flex;align-items:center;gap:14px;padding:13px 15px}
-.pl-play{width:40px;height:40px;border:1px solid var(--ink);background:var(--ink);color:#fff;cursor:pointer;
+.player{margin-top:8px;border:1px solid var(--rule);background:var(--leaf);border-radius:14px}
+.pl-row{display:flex;align-items:center;gap:14px;padding:13px 16px}
+.pl-play{width:40px;height:40px;border:1px solid var(--ink);background:var(--ink);color:#fff;cursor:pointer;border-radius:50%;
   display:grid;place-items:center;flex:none;transition:background .15s}
 .pl-play:hover{background:#000}
 .pl-time{font:400 12px/1 var(--mono);color:var(--ink-2);font-variant-numeric:tabular-nums;white-space:nowrap}
@@ -151,18 +151,18 @@ ol.pts li::before{content:counter(p,decimal-leading-zero);position:absolute;left
 .pl-bar i{position:absolute;inset:0 auto 0 0;width:38%;background:var(--seal)}
 .pl-bar::after{content:"";position:absolute;left:0;top:-5px;bottom:-5px;width:38%}
 .pl-knob{position:absolute;left:38%;top:50%;width:11px;height:11px;border-radius:50%;background:var(--seal);transform:translate(-50%,-50%)}
-.pl-btn{width:34px;height:34px;border:1px solid var(--rule);background:transparent;cursor:pointer;color:var(--ink-2);
+.pl-btn{width:34px;height:34px;border:1px solid var(--rule);background:transparent;cursor:pointer;color:var(--ink-2);border-radius:50%;
   display:grid;place-items:center;transition:.15s}
 .pl-btn:hover{border-color:var(--ink);color:var(--ink)}
 .pl-btn[aria-pressed="true"]{border-color:var(--ink);color:var(--ink)}
 .pl-menu{position:absolute;right:0;bottom:44px;background:var(--leaf);border:1px solid var(--rule);
-  box-shadow:0 12px 28px rgba(20,18,14,.16);padding:5px;min-width:104px;z-index:2}
-.pl-menu button{display:block;width:100%;text-align:left;padding:8px 11px;border:0;background:transparent;cursor:pointer;
-  font:400 12px/1 var(--mono);color:var(--ink-2);transition:.12s}
+  box-shadow:0 12px 28px rgba(20,18,14,.16);padding:6px;min-width:110px;z-index:2;border-radius:14px}
+.pl-menu button{display:block;width:100%;text-align:left;padding:8px 12px;border:0;background:transparent;cursor:pointer;
+  font:400 12px/1 var(--mono);color:var(--ink-2);transition:.12s;border-radius:999px}
 .pl-menu button:hover{background:var(--paper-2);color:var(--ink)}
 .pl-menu button.on{background:var(--ink);color:#fff}
-.pl-vol{display:flex;flex-direction:column;align-items:center;gap:2px;padding:9px 8px 8px;background:var(--leaf);
-  border:1px solid var(--rule);box-shadow:0 12px 28px rgba(20,18,14,.16);position:absolute;right:0;bottom:44px;z-index:2}
+.pl-vol{display:flex;flex-direction:column;align-items:center;gap:2px;padding:10px 8px 9px;background:var(--leaf);
+  border:1px solid var(--rule);box-shadow:0 12px 28px rgba(20,18,14,.16);position:absolute;right:0;bottom:44px;z-index:2;border-radius:999px}
 .pl-vol .tr{width:4px;height:74px;background:var(--rule);position:relative}
 .pl-vol .tr i{position:absolute;left:0;right:0;bottom:0;height:62%;background:var(--ink)}
 .pl-vol .lb{font:400 11px/1 var(--mono);color:var(--ink-3);margin-top:6px}
@@ -177,26 +177,26 @@ ol.pts li::before{content:counter(p,decimal-leading-zero);position:absolute;left
 .spec .demo{display:flex;flex-wrap:wrap;gap:11px;align-items:center}
 .field{display:flex;flex-direction:column;gap:7px;width:300px}
 .field label{font:400 12px/1.4 var(--sans);color:var(--ink-2)}
-.field input{height:42px;padding:0 13px;border:1px solid var(--rule);background:var(--leaf);color:var(--ink);
-  font:400 14px/1 var(--sans);border-radius:2px;width:100%}
+.field input{height:42px;padding:0 16px;border:1px solid var(--rule);background:var(--leaf);color:var(--ink);
+  font:400 14px/1 var(--sans);border-radius:999px;width:100%}
 .field input::placeholder{color:var(--ink-3)}
 .field input:focus{outline:none;border-color:var(--ink);box-shadow:0 0 0 3px rgba(20,18,14,.08)}
-.segis{display:flex;border:1px solid var(--rule)}
-.segis button{height:36px;padding:0 13px;border:0;border-right:1px solid var(--rule);background:transparent;cursor:pointer;
+.segis{display:flex;border:1px solid var(--rule);border-radius:999px;overflow:hidden}
+.segis button{height:36px;padding:0 15px;border:0;border-right:1px solid var(--rule);background:transparent;cursor:pointer;border-radius:0;
   font:400 12px/1 var(--sans);color:var(--ink-2);transition:.14s}
 .segis button:last-child{border-right:0}
 .segis button:hover{background:var(--paper-2);color:var(--ink)}
 .segis button[aria-pressed="true"]{background:var(--ink);color:#fff}
 .badge{display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 8px;border:1px solid var(--rule);
-  font:400 11px/1 var(--mono);color:var(--ink-2);background:var(--leaf);border-radius:2px}
+  font:400 11px/1 var(--mono);color:var(--ink-2);background:var(--leaf);border-radius:999px}
 .badge i{width:5px;height:5px;border-radius:50%}
 .badge.ok{color:var(--done);border-color:#c3d3bf;background:#f1f6f0}
 .badge.ok i{background:var(--done)}
 .badge.bad{color:var(--bad);border-color:#e3c6c0;background:#fbf0ed}
 .badge.bad i{background:var(--bad)}
-.toast{display:inline-flex;align-items:center;gap:9px;background:var(--ink);color:#fff;padding:11px 16px;border-radius:2px;
+.toast{display:inline-flex;align-items:center;gap:9px;background:var(--ink);color:#fff;padding:11px 18px;border-radius:999px;
   font:400 12.5px/1 var(--sans);box-shadow:0 10px 24px rgba(20,18,14,.22)}
-.empty{border:1px dashed var(--rule);padding:26px;text-align:center;width:100%}
+.empty{border:1px dashed var(--rule);padding:26px;text-align:center;width:100%;border-radius:16px}
 .empty b{display:block;font:600 15px/1.5 var(--serif);margin-bottom:6px}
 .empty span{font:400 12.5px/1.7 var(--sans);color:var(--ink-3)}
 footer{display:flex;justify-content:space-between;gap:18px;margin-top:44px;padding:18px 0 36px;border-top:1px solid var(--rule-ink);
@@ -261,19 +261,19 @@ footer{display:flex;justify-content:space-between;gap:18px;margin-top:44px;paddi
 
   <section class="inlets" aria-label="提交方式">
     <div class="inlet">
-      <span class="step">步骤 01 · 文件</span>
+      <span class="step">文件</span>
       <h2>音视频文件</h2>
       <p>拖入或选择文件，按文件名自动识别模板。单文件 200 MB、60 分钟以内，可一次批量 20 个。</p>
       <div class="acts"><button class="btn">选择文件</button><button class="linkish">拖拽区</button></div>
     </div>
     <div class="inlet">
-      <span class="step">步骤 02 · 链接</span>
+      <span class="step">直链</span>
       <h2>音视频直链</h2>
       <p>贴入音视频直链可直接转写；平台页面链接只做预览核对，不抓取内容。</p>
       <div class="acts"><button class="btn">粘贴链接</button><button class="linkish">先预览</button></div>
     </div>
     <div class="inlet">
-      <span class="step">步骤 03 · 录制</span>
+      <span class="step">录音</span>
       <h2>浏览器录音</h2>
       <p>直接在本页说话录制，停止后命名进入转写队列，流程与上传一致。</p>
       <div class="acts"><button class="btn ghost">开始录制</button><span style="font:400 12px/1 var(--sans);color:var(--ink-3)">未开始</span></div>
@@ -411,7 +411,7 @@ footer{display:flex;justify-content:space-between;gap:18px;margin-top:44px;paddi
           <div class="pl-vol" style="position:static;box-shadow:none"><div class="tr"><i></i></div><span class="lb">音量</span></div>
         </div>
         <div><div class="eyebrow" style="margin:0 0 7px">抽屉头栏</div>
-          <div style="border:1px solid var(--rule);background:var(--leaf);width:300px">
+          <div style="border:1px solid var(--rule);background:var(--leaf);width:300px;border-radius:14px;overflow:hidden">
             <div style="display:flex;align-items:center;gap:12px;padding:12px 14px;border-bottom:1px solid var(--rule)">
               <span style="font:600 15px/1.4 var(--serif)">任务 #552</span>
               <span class="badge ok" style="margin-left:auto"><i></i>已完成</span>
