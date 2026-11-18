@@ -593,3 +593,51 @@ details.example[open] summary { margin-bottom: var(--sp-3); }
   transition: border-color var(--dur-color) var(--ease);
 }
 #recName:focus { outline: none; border-color: var(--ink); box-shadow: 0 0 0 3px rgba(26, 26, 26, .12); }
+
+/* ===== T4.35c：播放器——<audio> + 点句 seek + 当前句高亮（复用现有变量，无 CDN） ===== */
+#taskAudio { width: 100%; display: block; }
+.seg-list {
+  list-style: none;
+  margin: var(--sp-3) 0 0;
+  padding: 0;
+  max-height: 420px;
+  overflow-y: auto;
+  border-top: 1px solid var(--border);
+}
+.seg-item { border-bottom: 1px solid var(--border); }
+.seg-line {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: baseline;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 0;
+  padding: var(--sp-2) var(--sp-1);
+  cursor: pointer;
+  color: var(--ink);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
+  border-radius: var(--r-xs);
+  transition: background-color var(--dur-color) var(--ease);
+}
+.seg-line:hover { background: var(--surface-muted); }
+.seg-ts {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-3);
+  min-width: 44px;
+}
+.seg-text { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.seg-line.seg-current {
+  background: var(--accent-tint);
+  color: var(--accent-deep);
+  font-weight: var(--fw-semibold);
+}
+.seg-line.seg-current .seg-ts { color: var(--accent-deep); }
+.seg-line:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; }
+@media (max-width: 640px) {
+  .seg-list { max-height: 320px; }
+  .seg-line { padding: var(--sp-2); font-size: var(--fs-base); }
+  .seg-ts { min-width: 40px; }
+}

@@ -502,7 +502,7 @@
       body = '<div class="section"><p class="error-text">转写失败。原因：' + escapeHtml(errorTextOf(data.error_code)) + '</p>' +
         '<p class="hint">请检查 ASR 服务是否正常后，可在<a href="tasks.html">任务列表</a>按"失败"筛选并批量重试。</p></div>';
     } else if (status === 'DONE') {
-      body = summaryHtml(data) + keypointsHtml(data) + todosHtml(data) + transcriptHtml(data) +
+      body = playerHtml(data) + summaryHtml(data) + keypointsHtml(data) + todosHtml(data) + transcriptHtml(data) +
         metaHtml() + restructureHtml(data) + shareHtml(data) + exportHtml(data) + deleteHtml(data);
     } else {
       body = '<p class="hint">未知状态：' + escapeHtml(status) + '</p>';
@@ -518,6 +518,7 @@
       bindRestructure(data);
       bindShare(data);
       bindCopyTranscript(data);
+      initPlayer(data);
     }
     return status === 'DONE' || status === 'DEAD';
   }
@@ -530,6 +531,132 @@
     el.classList.add('sent-highlight');
     el.scrollIntoView({ block: 'center', behavior: 'smooth' });
     setTimeout(function () { el.classList.remove('sent-highlight'); }, 2000);
+  }
+
+  /* ===== T4.35c：播放器——<audio> + 点句 seek + 当前句高亮 =====
+   * 只读：src 走 POST /tasks/{id}/audio-token 短时签名（绝不拿 API_TOKEN 拼 src，K-46）；
+   * 同一任务只签发一次，失败/过期重签一次（卡面）；segments 为 null 或 [] → 不渲染播放器（双降级，
+   * 原文区与今天完全一致）；audio-token 失败 → 播放卡内可读错误，不阻塞原文/摘要渲染。 */
+  var player = { segs: null, audio: null, issueCount: 0, curIdx: -1 };
+
+  function fmtTs(sec) {
+    var s = Math.floor(sec);
+    var m = Math.floor(s / 60);
+    function pad(n) { return n < 10 ? '0' + n : String(n); }
+    return pad(m) + ':' + pad(s % 60);
+  }
+
+  function playerHtml(data) {
+    var segs = data.segments;
+    if (!segs || !segs.length) return ''; /* null（旧任务/PASTE）与 []（空音频）都不渲染，卡面双降级 */
+    player.segs = segs;
+    var rows = segs.map(function (s, i) {
+      return '<li class="seg-item"><button type="button" class="seg-line" data-idx="' + i +
+        '" data-start="' + s.start + '" aria-label="跳到第 ' + (i + 1) + ' 句">' +
+        '<span class="seg-ts">' + fmtTs(s.start) + '</span>' +
+        '<span class="seg-text">' + escapeHtml(s.text) + '</span></button></li>';
+    }).join('');
+    return '<div class="section" id="playerCard"><h2>播放</h2>' +
+      '<p id="playerMsg" class="hint" hidden></p>' +
+      '<div id="playerBody" hidden><audio id="taskAudio" controls preload="metadata"></audio>' +
+      '<p class="hint">点任意句子跳到该句；播放时当前句自动高亮。</p>' +
+      '<ol class="seg-list" id="segList">' + rows + '</ol></div></div>';
+  }
+
+  function showPlayerMsg(text) {
+    var msg = document.getElementById('playerMsg');
+    if (!msg) return;
+    msg.hidden = !text;
+    msg.className = 'error-text';
+    msg.textContent = text;
+  }
+
+  function issueAudioToken() {
+    player.issueCount += 1;
+    postJson('api/v1/tasks/' + id + '/audio-token', {}).then(function (resp) {
+      if (resp.__httpStatus === 200 && resp.url) {
+        var audio = document.getElementById('taskAudio');
+        audio.src = resp.url;
+        player.audio = audio;
+        document.getElementById('playerBody').hidden = false;
+        showPlayerMsg('');
+      } else if (player.issueCount < 2) {
+        issueAudioToken(); /* 失败/过期重签一次（卡面） */
+      } else {
+        showPlayerMsg('播放不可用（' + (resp.code || resp.__httpStatus) + '）：' +
+          (resp.message || '未知错误') + '。原文、摘要与导出不受影响。');
+      }
+    }, function () {
+      if (player.issueCount < 2) {
+        issueAudioToken();
+      } else {
+        showPlayerMsg('网络异常，播放暂时不可用。原文、摘要与导出不受影响。');
+      }
+    });
+  }
+
+  /** 当前句：start<=t<end 命中即返回；句间隙取最近前一句（卡面口径）；t 在首句之前 → -1。 */
+  function currentSegIndex(t) {
+    var cur = -1;
+    for (var i = 0; i < player.segs.length; i++) {
+      if (player.segs[i].start <= t) {
+        cur = i;
+        if (t < player.segs[i].end) return i;
+      } else {
+        break;
+      }
+    }
+    return cur;
+  }
+
+  function highlightSeg(idx, force) {
+    if (!force && idx === player.curIdx) return;
+    player.curIdx = idx;
+    var list = document.getElementById('segList');
+    if (!list) return;
+    list.querySelectorAll('.seg-current').forEach(function (n) { n.classList.remove('seg-current'); });
+    if (idx < 0) return;
+    var line = list.querySelector('.seg-line[data-idx="' + idx + '"]');
+    if (line) {
+      line.classList.add('seg-current');
+      line.scrollIntoView({ block: 'nearest' }); /* 不抢用户滚动：nearest 只在出视野时贴边 */
+    }
+  }
+
+  function initPlayer(data) {
+    if (!player.segs) return; /* null/[]：双降级，页面无 <audio> 元素 */
+    issueAudioToken();
+    var audio = document.getElementById('taskAudio');
+    /* 播放中签名过期（audio 加载 404）→ 重签一次 */
+    audio.addEventListener('error', function () {
+      if (player.issueCount < 2) {
+        var wasPlaying = !audio.paused;
+        issueAudioToken();
+        var timer = setInterval(function () {
+          var fresh = document.getElementById('taskAudio');
+          if (fresh && fresh.readyState >= 1) {
+            clearInterval(timer);
+            if (wasPlaying) fresh.play();
+          }
+        }, 300);
+      }
+    });
+    /* 点句 → seek（用户手势内同时 play）；K-80 写路径口径：真点真读 audio.currentTime */
+    document.getElementById('segList').addEventListener('click', function (ev) {
+      var line = ev.target.closest('.seg-line');
+      if (!line || !player.audio) return;
+      var start = parseFloat(line.getAttribute('data-start'));
+      if (isNaN(start)) return;
+      player.audio.currentTime = start;
+      player.audio.play();
+    });
+    /* timeupdate → 当前句高亮跟随（间隙用最近前一句）；只在句切换时滚动，不抢用户滚动 */
+    audio.addEventListener('timeupdate', function () {
+      highlightSeg(currentSegIndex(audio.currentTime));
+    });
+    audio.addEventListener('seeked', function () {
+      highlightSeg(currentSegIndex(audio.currentTime), true);
+    });
   }
 
   /* T4.15⑨：待办渲染与交互（checkbox → PATCH {done}；删除 → DELETE；乐观更新 + 失败回滚 + 行内错误） */
