@@ -2,15 +2,16 @@
 
 ## 0. 当前位置
 
-- 产品提交 **`d54766a`**（T4.36），工作区干净；**origin 已同步（含本次验收提交，与本地一致，待推 0）**；栈 5/5 healthy。**D-122 批次已通过 19 张**（T4.23…T4.30 含收尾、T4.32a、T4.32b、T4.35a、T4.35b、T4.35c、T4.36）。
+- 产品提交 **`d54766a`**（T4.36），工作区干净；**origin 已同步（含 T4.36 验收提交与 T4.37a 卡，与本地一致，待推 0）**；栈 5/5 healthy。**D-122 批次已通过 19 张**（T4.23…T4.30 含收尾、T4.32a、T4.32b、T4.35a、T4.35b、T4.35c、T4.36）。
 - 配额（11-18 新的一天）：已用 **12 分钟 / 12 任务**（上限 200/100，余量足）。任务总数 **279**（全 DONE、DEAD 0）；MinIO **285 前缀 = 279 + 历史 6 孤儿（74–79）**；`task_result.speaker_map` 非空行 0（验证脏数据已清）。
-- **下一张 = T4.37 登录/多用户（必须新会话）**：登录/注册/会话 + 替换 27 处 `DEFAULT_USER_ID` + 数据隔离 + 配额按人；**必须把 userId 绑进音频签名**（收 T4.35b P3-1）。之后发布三件（T4.10 README+录屏 → T4.9 → T4.11）；不做 T4.31 PWA / T4.33 INBOX / T4.34 RSS。
-- **会话策略（按用户要求区分）**：T4.36 已在**同一 WorkBuddy 会话**完成（延续 `task.html` 句子列表）；**T4.37 必须新会话**（大卡横切、要收音频签名绑 userId）。
+- **下一张 = T4.37a 账号体系后端（必须新会话；卡已写在 `tasks-starter.md`，直接粘卡消息即可）**：V8 `app_user`（占位管理员 id=1，历史 279 条归 1 号）+ PBKDF2 密码 + 单令牌轮换 + `ApiTokenFilter` 双凭据（`API_TOKEN`=1 号账号，兼容既有接入）+ `UserContext` 替换 **16 类 47 处** + worker 链路按 taskId 解析 userId + **音频签名绑 `u=` userId**（收 T4.35b P3-1）+ `AUTH_REGISTRATION_ENABLED`；**只后端、不改前端**。之后 **T4.37b 登录前端**（`login.html` + `auth.js` 401→登录页），再发布三件（T4.10 → T4.9 → T4.11）；不做 T4.31 PWA / T4.33 INBOX / T4.34 RSS。
+- **会话策略（按用户要求区分）**：T4.36 已在**同一 WorkBuddy 会话**完成；**T4.37a 必须新会话**（横切 16 类 47 处、改认证面、要收音频签名绑 userId），**T4.37b 视 a 收尾干净度**（同一会话续或新会话）。
 
 ## 1. 下一步（按顺序）
 
-1. 我先写 **T4.37 卡**（新会话第一张）；新会话开工前先跑三行（`git log -1`、`git status --short`、`Get-Content D:\new\artifacts\T4.36\workbuddy\head.txt`）。
-2. T4.37 完成后发布三件在批次之后；发布前清 MinIO 孤儿 74–79。
+1. 用户把 **T4.37a 卡**粘进**新的 WorkBuddy 会话**；新会话开工前先跑三行（`git log -1`、`git status --short`、`Get-Content D:\new\artifacts\T4.36\workbuddy\head.txt`）。
+2. T4.37a 回报回来我独立验收（重点：双账号隔离、`API_TOKEN` 兼容、音频 `u=` 绑定、收尾恢复"管理员未认领"）；通过后写 **T4.37b 前端卡**。
+3. T4.37b 之后发布三件；发布前清 MinIO 孤儿 74–79。
 
 ## 2. 别踩的坑（最高频）
 
@@ -32,7 +33,7 @@
 
 ## 3. 关键文件
 
-`state.md`（权威状态）· `tasks.md`（T4.32a/b、T4.35a/b/c、T4.36 已 ✅ 行）· `tasks-starter.md`（**T4.36 卡已 ✅，T4.37 卡待我写**）· `decisions.md`（**147 条**，最新 D-147）· `踩坑与复盘-面试用.md`（**K-01~K-89**）· `review/`（**62 份**，最新 `2026-11-18-T4.36验收.md`）· `接入指南.md`（§3.9/§3.9a 链接导入、§3.10 音频流、**§3.11 说话人标注**、§3.2 详情 **16 键**）· `配置清单.md` · `rules/dev.md`（§4.1 第 11 条）· `scripts/test.ps1`（全量 457 / `-UnitOnly` 439）· `app/src/main/resources/static/{task.html,style.css,app.js}`（35c/36 已改）· `app/src/main/java/.../web/SpeakerMapController.java` + `task/SpeakerMapService.java`（T4.36 新增）· `app/src/main/resources/db/migration/`（V1–V7，**V1 已有 speaker_map**）· `tools/sync-docs-to-code.ps1`。
+`state.md`（权威状态）· `tasks.md`（T4.32a/b、T4.35a/b/c、T4.36 已 ✅ 行）· `tasks-starter.md`（**T4.36 卡已 ✅，T4.37a 卡已就绪**）· `decisions.md`（**147 条**，最新 D-147）· `踩坑与复盘-面试用.md`（**K-01~K-89**）· `review/`（**62 份**，最新 `2026-11-18-T4.36验收.md`）· `接入指南.md`（§3.9/§3.9a 链接导入、§3.10 音频流、**§3.11 说话人标注**、§3.2 详情 **16 键**）· `配置清单.md` · `rules/dev.md`（§4.1 第 11 条）· `scripts/test.ps1`（全量 457 / `-UnitOnly` 439）· `app/src/main/resources/static/{task.html,style.css,app.js}`（35c/36 已改）· `app/src/main/java/.../web/SpeakerMapController.java` + `task/SpeakerMapService.java`（T4.36 新增）· `app/src/main/resources/db/migration/`（V1–V7，**V1 已有 speaker_map**）· `tools/sync-docs-to-code.ps1`。
 
 ## 4. 未决
 

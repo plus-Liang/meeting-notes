@@ -2819,6 +2819,42 @@ F-15 控制在 ≤30 行并集中一处；新增静态资源不引第三方库�
 > - 残留清理（D-139）：零新建任务；`/tmp`、MinIO 对象数、override、`.env` 逐条核对。
 > **禁止**：加自动说话人分离/改 ASR；写 V8 迁移（V1 已有 `speaker_map`）；改 `segments`/摘要/待办/已有 15 键语义；新建任务做验证；引 CDN/框架；多 commit。
 
+## T4.37a 账号体系后端：注册/登录/令牌 + 全仓 userId 替换 + 音频签名绑 userId（约 1 天；D-122；**必须新开 WorkBuddy 会话**；依赖 T4.36 已通过 `d54766a`）
+
+> **先跑三行报给我**：`git -C D:\new\projects\meeting-notes log --oneline -1`、`git -C D:\new\projects\meeting-notes status --short`、`Get-Content D:\new\artifacts\T4.36\workbuddy\head.txt`。
+> **会话说明**：**本卡必须新开一个 WorkBuddy 会话**（横切全仓 16 个类、要改认证面，旧会话上下文是说话人/播放器，不相关）。只读「这张卡 + `handoff.md` 第 0–2 节 + `AGENT.md` §2/§4」；证据落 `D:\new\artifacts\T4.37a\workbuddy\`；回报 ≤40 行。
+> **本卡只做后端 + 文档，不改任何前端（`static/*` 零改动）**——前端登录页/401 跳转是下一张 **T4.37b**。
+> **已核实（别自创）**：`app_user` 表**不存在**（V1–V7 无）；`task/glossary/speaker_profile/quota/share_link` 的 `user_id` **已存在**且历史数据全是 `user_id=1`；`DEFAULT_USER_ID = 1L` 散在 **16 个类、47 处**（`task/` 5、`web/` 10、`ai/` 1）；`AudioStreamController` 里另有 `defaultUserId()` 一处。
+
+> **要证明的事**：账号能注册/登录/注销、令牌能识别到具体用户；**同一实例两个账号互相看不到、改不了、删不了对方任务**（列表/详情/导出/删除/标签/分享/音频/术语表/统计/配额全部按人）；**全局 `API_TOKEN` 仍等价 1 号账号（管理员）**，既有接入契约与全量 E2E 零破坏；音频签名**绑定 userId**（换 u 即 404）；历史 279 条任务归 1 号账号、不动数据。
+
+> **架构（按此实现，不许自创）**：
+> 1. **迁移 `V8__app_user.sql`**：`app_user(id BIGSERIAL PK, username VARCHAR(32) NOT NULL, password_hash VARCHAR(200) NOT NULL DEFAULT '!', role VARCHAR(16) NOT NULL DEFAULT 'USER', token_hash CHAR(64), token_issued_at TIMESTAMPTZ, created_at TIMESTAMPTZ NOT NULL DEFAULT now())`；唯一索引 `ux_app_user_username ON app_user (lower(username))`、部分唯一索引 `ux_app_user_token ON app_user (token_hash) WHERE token_hash IS NOT NULL`；**插入占位管理员** `(1,'admin','!','ADMIN')` 并 `setval(pg_get_serial_sequence('app_user','id'),1,true)`；**不做任何历史数据迁移**（`user_id=1` = 1 号账号/管理员）。
+> 2. **密码哈希用 JDK PBKDF2**（**禁止新增依赖**）：`PBKDF2WithHmacSHA256`，16B `SecureRandom` 盐、**120000 次**、256 位；存 `pbkdf2-sha256$120000$<base64salt>$<base64hash>`；校验解析失败一律 false、常量时间比较；密码 8–64 字符（去首尾空白后判断，空/超长 400）。
+> 3. **令牌**：登录/注册成功返回 `token`（32B SecureRandom → Base64URL 无填充，**明文只在响应出现一次**）；DB 只存 `SHA-256 hex` 到 `token_hash`；**同一用户只保留一个有效令牌**（重新登录轮换，旧令牌立即失效）；无 TTL（P3）；logout 清空 `token_hash`。
+> 4. **`ApiTokenFilter` 双凭据**：`Authorization: Bearer <API_TOKEN>`（常量时间比较）→ **userId=1（1 号账号=管理员座位）**；否则把 token 的 SHA-256 查 `app_user.token_hash` → 该用户 id；都不匹配 → 401 `UNAUTHORIZED`（消息改成"缺少或无效的凭据：请带 Authorization: Bearer <账号令牌或 API_TOKEN>"）。过滤器写 `UserContext`（ThreadLocal）→ `finally` 必须 `clear()`。**豁免面只加两条精确路径**：`POST /api/v1/auth/login`、`POST /api/v1/auth/register`（其余保持现状：`/api/v1/share/` 前缀 + GET `^/api/v1/tasks/\d+/audio$`）。`/auth/logout`、`/auth/me` 仍要认证。
+> 5. **新端点（`AuthController`，全部 `/api/v1/auth/`）**：`POST /register {username,password}`；`POST /login {username,password}`；`POST /logout`（Bearer）；`GET /me`。注册规则：用户名 trim 3–32、字符集 `[A-Za-z0-9_\-\u4e00-\u9fa5]`、大小写不敏感唯一（重复 → **409 `USERNAME_TAKEN`**）；**若 1 号账号未认领（`password_hash='!'`）→ 本次注册就是认领管理员**（写入 id=1、role=ADMIN、返回 token，忽略注册开关）；否则受开关控制：`AUTH_REGISTRATION_ENABLED`（默认 `true`；关闭 → **403 `REGISTRATION_DISABLED`**），新用户 role=USER、id 自增。登录失败统一 **401 `INVALID_CREDENTIALS`**（不泄露用户名是否存在）。响应统一 `{token, user_id, username, role}`（logout `{revoked:true}`）。
+> 6. **`UserContext`（新 `com.meetingnotes.common.UserContext`）**：`set/current/clear`；`current()` 未设置时抛 `IllegalStateException`（不静默回退 1，防止漏改的端点悄悄变回单用户）。**把 16 个类的 `DEFAULT_USER_ID` 全部替换成 `UserContext.current()`**（含 `AudioStreamController.defaultUserId()`），逐个核对是"请求线程"还是"异步线程"。
+> 7. **异步链路不许用 ThreadLocal**（否则 NPE/泄漏）：`StructuringService`（worker 里跑）先 `SELECT user_id FROM task WHERE id=?` 解析任务归属，再调 `GlossaryTermSource.inject(userId)` / `terms(userId)`；任务查不到 → 返回 `EMPTY` 不抛。`GlossaryTermSource` 删掉 `DEFAULT_USER_ID`，`inject()/terms()` 改成显式 `long userId` 入参（调用点全改）。
+> 8. **音频签名绑 userId（收 T4.35b P3-1）**：URL 改 `/api/v1/tasks/{id}/audio?u={userId}&exp=&sig=`；签名数据改 `taskId+"\n"+exp+"\n"+userId`（HMAC key 仍=API_TOKEN，不新增 secret）；验签成功后再 `SELECT ... FROM task WHERE id=? AND user_id=?` 校验归属（不属该 u → 404 `TASK_NOT_FOUND`，不泄露存在性）；`u` 形状异常/长度异常 → 404。**旧 2 段签名 URL 立即失效（TTL 10 分钟，可接受），文档 §3.10 写清改口径**。
+> 9. **配置**：`application.yml` 加 `app.auth.registration-enabled: ${AUTH_REGISTRATION_ENABLED:true}`；`.env.example` + `配置清单.md` §2 同步（唯一新增键，其余键零改动）。
+> 10. **错误码只增 3 个**（§3.4 码表只增不重排）：`USERNAME_TAKEN`(409) / `INVALID_CREDENTIALS`(401) / `REGISTRATION_DISABLED`(403)；参数校验仍 400 `INVALID_PARAM`。
+> 11. **文档**：`接入指南.md` §3 开头认证说明改"两种凭据"（账号令牌 / API_TOKEN=1 号账号）、新增 **§3.12 账号 API（T4.37a）**、§3.4 码表 +3、§3.10 签名公式与 URL 改 `u=` 三段、§3.11 不动；`配置清单.md` +1 键；改完跑 `tools\sync-docs-to-code.ps1`（只改权威版）。
+
+> **判据（缺一不可）**：
+> - **单测**：`PasswordHasherTest`（正确/错误/不同盐/坏格式 false）、`AuthServiceTest`（首注册认领 admin id=1 ADMIN；再注册 USER；重复大小写 409；密码 7 字 400；用户名非法 400；登录成功/失败 401；重登轮换旧令牌失效；logout 后 401；开关关闭 403）、`ApiTokenFilterTest`（API_TOKEN→1、用户 token→id、无/错→401、login/register/share/audio 豁免、`UserContext` 必清）、`AudioStreamServiceTest` 改+补（URL 含 `u`、三段签名、篡改 u 验签 false）、`UserContextTest`；**所有既有测试（含 E2E）必须全绿**（`API_TOKEN` 兼容的硬判据）。
+> - **真机（我给的起点：`app_user` 只有占位 admin；任务 279 全 user_id=1）**：
+>   1) 注册管理员（临时密码）→ 200 token、`/auth/me` id=1 role=ADMIN；admin token `GET /tasks` **279 条**、`GET /tasks/552` 200、`POST /tasks/552/audio-token` 200 且 URL **含 `u=1`**、取 URL 200/Range 206；
+>   2) 注册用户 B → id=2 USER；B `GET /tasks` **0 条**、`counts` 0、`GET /tasks/552`、`POST /tasks/552/audio-token`、`POST /tasks/552/share`、`PATCH /tasks/552/meta`、`DELETE /tasks/552` **全部 404**；B 的 `/glossary`、`/stats`、`/settings` 均为空/0；admin 的列表仍 279；
+>   3) B 用 `POST /tasks`（JSON 文本任务，1 条）→ DONE；B 列表 1 条、admin 列表不含它；B 导出自己 200、admin 导出 B 的 id 拿不到内容；**删掉这条 B 任务**（B token DELETE）；
+>   4) 篡改：admin 的 URL 改 `u=2` → 404、改 `sig` → 404、过期 → 404；
+>   5) 兼容：`Bearer API_TOKEN` 打 list/detail/export/audio-token/share/meta/settings/stats 全 200；
+>   6) 登录/注销：B 重登 → 旧 token 401；logout → 该 token 401；错密码 401；`Admin` vs `admin` 重名 409；
+>   7) **收尾恢复**：删 B 的测试任务 → psql `DELETE FROM app_user WHERE id>=2` → **把 1 号账号恢复未认领**（`UPDATE app_user SET username='admin', password_hash='!', token_hash=NULL, token_issued_at=NULL WHERE id=1`）→ 最终 `SELECT count(*) FROM app_user`=1、任务 279 全 DONE、`user_id` 全 1；**报告里写明"管理员未认领，等 T4.37b 首次访问创建"**。
+> - **门禁**：`-UnitOnly` 全绿 → **单 commit `feat(T4.37a)`** → `docker compose build app && up -d app` → 全量 `scripts\test.ps1` 全绿（K-68/K-77）→ 可维护性 0/0（`AuthController`/`AuthService` 防超 300 行，可拆 `PasswordHasher`/`TokenService`）→ `head.txt` 记提交后 HEAD。
+> - **残留（D-139）**：零新建音频任务（唯一允许 1 条 PASTE 文本任务，用完删）；删 B 账号与任务后 `task`/`task_result` 计数回 279；`.env` 不动、无 override、无 `/tmp` 残留；`git status` 干净、不 push。
+> **禁止**：改 `static/*`（b 卡才做）；加前端依赖/新 Maven 依赖；OAuth/短信/邮件/找回密码/角色管理后台/多租户；改 `API_TOKEN` 语义为不兼容或改其它既有错误码；令牌或密码明文落库/打日志（DB 只存哈希）；删改历史任务或 `user_id`；多 commit；用真实 ASR 新建音频任务做验证；把 `AUTH_REGISTRATION_ENABLED` 写死在代码里。
+
 ## 每张卡做完都要给你的回报
 
 ```text
