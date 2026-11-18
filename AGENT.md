@@ -36,6 +36,19 @@
 6. **回报 ≤40 行**：不复述卡片、不贴大段代码/日志、不贴完整 git diff（只贴 `--stat`）。
 7. 动手前先给"改动文件清单 ≤10 行"的计划，然后**一次改完**，少来回。
 
+### 1.2 设计类任务（T4.40+）：先读 `design-skills/`
+
+**任何"整站设计 / 视觉改版 / 重做页面"任务，动手前必须先读这两份技能**（仓库内副本，只读不改）：
+
+1. `design-skills/impeccable/SKILL.md`（v4.9.2，Apache-2.0）——设计词汇 + 24 个命令 playbook + 确定性 slop 检测器。
+   本项目是 **Operate 模式（App UI，不是营销站）**：优先读 `reference/new-work.md`、`craft-floor.md`、`critique-rubric.md`、`polish.md`、`audit.md`、`typeset.md`、`layout.md`；`PRODUCT.md` / `DESIGN.md` 放**仓库根**。
+   - **检测门禁**（每卡必跑，已验证 `npx -y impeccable detect` v4.9.2 可用）：
+     `npx -y impeccable detect app/src/main/resources/static --json`（源码）+ `npx -y impeccable detect http://127.0.0.1:8080/login.html --json`（渲染页）；已登录页用 Playwright 带 token 渲染后 `page.content()` 落 `file://` 快照再检测。
+     **目标：warning 0**；advisory 逐条处理或 `impeccable-disable` + 写明理由。基线（T4.39）：14 条（6 warning `pulsing-dot` / 8 advisory `codex-grid-background`）。
+2. `design-skills/taste-skill/SKILL.md`（v2.5.1，MIT）——取其**质量标准/验收方法**（一个设计系统、左右等边、真实状态视觉、安静微交互、在真实浏览器看 1440/1024/768/390、完成度 gate）；**不套**其营销站资产（真实照片/hero 着色器/外链图片/公司站一屏一节）。
+
+硬约束（优先于技能建议）：**不引 CDN / 前端框架 / 外链字体 / 图标库 / 外部图片**；不改后端接口与行为；六页（index/tasks/task/settings/login/share）+ 抽屉 + 播放器统一；390/768 不回归；深色/浅色以 `PRODUCT.md` + `DESIGN.md` 定稿为准。
+
 ---
 
 ## 2. 十二条硬约束（违反任一条 = 返工，不接受"先做进去以后再改"）
