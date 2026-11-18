@@ -52,6 +52,7 @@
 </footer>
 <script src="auth.js"></script>
 <script src="app.js"></script>
+<script src="drawer.js"></script>
 <script>
 (function () {
   var listEl = document.getElementById('list');
@@ -219,7 +220,9 @@
       labelsHtml +
       summaryHtml(item) + '</span>' +
       '<span class="task-side">' + identityHtml(item) + ' ' + badgeHtml(item.status) + ' ' +
-      '<a href="task.html?id=' + item.id + '" target="_blank" rel="noopener">详情</a></span></div>';
+      '<a href="task.html?id=' + item.id + '" class="task-detail-link" data-task-id="' + item.id +
+      '" data-task-name="' + escapeHtml(name).replace(/"/g, '&quot;') + '" ' +
+      'aria-label="查看任务 #' + item.id + ' 详情">详情</a></span></div>';
   }
 
   var EMPTY_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
@@ -329,7 +332,8 @@
       ? '<p class="hint">服务暂时不可用，以下为本浏览器上次提交的缓存：</p>' +
         index.map(function (item) {
           return '<div class="task-row"><span class="task-name"><span class="task-title">#' + item.id + ' ' + escapeHtml(item.name) + '</span></span>' +
-            '<span class="task-side"><a href="task.html?id=' + item.id + '" target="_blank" rel="noopener">详情</a></span></div>';
+            '<span class="task-side"><a href="task.html?id=' + item.id + '" class="task-detail-link" data-task-id="' + item.id +
+            '" data-task-name="' + escapeHtml(item.name).replace(/"/g, '&quot;') + '">详情</a></span></div>';
         }).join('')
       : emptyOfflineHtml();
   }
@@ -508,6 +512,8 @@
   });
 
   renderFilterBar();
+  /* T4.38：详情站内抽屉（列表 URL 不变、不新开标签；ESC/遮罩关闭） */
+  mnBindDrawerLinks(listEl);
   fetchCounts(); /* T4.24：状态计数改调 /tasks/counts（真计数无上限，页面可见时 30s 自动刷新保留） */
   getJson('api/v1/tasks?limit=20').then(function (data) {
     if (data.__httpStatus === 200) { loadFirst(false); }

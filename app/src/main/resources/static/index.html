@@ -64,27 +64,34 @@
   <div class="card" id="linkCard">
     <h2 style="margin-top:0">从链接导入</h2>
     <p class="hint">贴一个音/视频直链可直接转写；平台页面链接会先出确认卡（标题/封面/时长），不自动抓取，仓库不含平台解析器。</p>
-    <div class="tpl-pick">
+    <div class="link-field">
       <label for="linkUrl">链接</label>
       <input type="text" id="linkUrl" maxlength="2000" autocomplete="off" spellcheck="false"
              placeholder="https://…（音/视频直链或页面链接）">
     </div>
-    <p><button id="linkPreviewBtn">预览</button></p>
-    <div id="linkPreviewBox" hidden>
-      <p id="linkTitle" class="ok-text" style="margin-bottom:4px"></p>
-      <p class="hint" id="linkMeta"></p>
-      <p id="linkActions">
+    <div class="link-actions">
+      <button id="linkPreviewBtn">预览</button>
+      <span class="hint">先预览确认标题与时长，再决定是否转写。</span>
+    </div>
+    <div id="linkMsg" class="link-msg" aria-live="polite"></div>
+    <div id="linkPreviewBox" class="link-preview" hidden>
+      <div class="link-preview-row">
+        <div class="link-preview-info">
+          <p id="linkTitle" class="link-preview-title"></p>
+          <p class="link-preview-meta" id="linkMeta"></p>
+        </div>
+      </div>
+      <div class="link-preview-actions" id="linkActions">
         <button id="linkSubmitBtn">直接转写</button>
         <button type="button" class="btn-secondary" id="linkByofBtn" hidden>用外部工具抓取</button>
         <button type="button" class="btn-secondary" id="linkByofDisabled" disabled hidden>外部抓取未启用</button>
-      </p>
-      <ol id="linkGuide" class="hint" hidden style="padding-left:20px">
+      </div>
+      <ol id="linkGuide" class="link-guide" hidden>
         <li>在该平台把视频/音频导出成文件（或用你自己安装的下载工具）</li>
         <li>回到本页面（手机上也可用浏览器打开本站）</li>
         <li>用上方「上传音/视频」直接上传文件</li>
       </ol>
     </div>
-    <p id="linkMsg" class="hint" hidden></p>
   </div>
 
   <div class="card" id="recCard">
@@ -162,6 +169,7 @@
 </footer>
 <script src="auth.js"></script>
 <script src="app.js"></script>
+<script src="drawer.js"></script>
 <script>
 (function () {
   var MAX_UPLOAD_BYTES = 200 * 1024 * 1024; /* 与服务端 TASK_MAX_SIZE_BYTES 默认一致，仅前端提示，服务端仍是权威 */
@@ -312,10 +320,13 @@
         '<span class="task-name"><span class="task-title">' + escapeHtmlIndex(name) + '</span>' +
         '<span class="task-meta">' + fmtDuration(item.duration_sec) + ' · ' + fmtDate(item.created_at) + '</span></span>' +
         '<span class="task-side">' + badgeHtmlIndex(item.status) + ' ' +
-        '<a href="task.html?id=' + item.id + '" target="_blank" rel="noopener">详情</a></span></div>';
+        '<a href="task.html?id=' + item.id + '" class="task-detail-link" data-task-id="' + item.id +
+        '" data-task-name="' + escapeHtmlIndex(name).replace(/"/g, '&quot;') + '">详情</a></span></div>';
     }).join('');
     card.hidden = false;
   }, function () { /* 静默隐藏 */ });
+  /* T4.38：详情站内抽屉（列表 URL 不变、不新开标签） */
+  mnBindDrawerLinks(document.getElementById('recentList'));
 
   function escapeHtmlIndex(s) {
     return String(s === undefined || s === null ? '' : s)
@@ -662,9 +673,9 @@
   var busy = false;
 
   function showMsg(kind, text) {
-    msgEl.hidden = !text;
-    msgEl.className = kind === 'error' ? 'error-text' : 'hint';
-    msgEl.textContent = text;
+    /* T4.38：占位固定不跳动——#linkMsg 常驻（.link-msg 固定最小高度），出错只换文案不挪布局 */
+    msgEl.className = 'link-msg' + (kind === 'error' ? ' error-text' : (text ? ' hint' : ''));
+    msgEl.textContent = text || '';
   }
 
   function setBusy(b) {
@@ -712,10 +723,14 @@
       if (data.content_type) meta += ' · ' + data.content_type.split(';')[0];
       metaEl.textContent = meta;
       if (data.image) {
-        metaEl.textContent = meta; /* 封面以标题旁 img 呈现 */
-        titleEl.insertAdjacentHTML('afterend',
-          '<img id="linkCover" alt="封面" src="' + data.image.replace(/"/g, '&quot;') +
-          '" style="max-width:240px;max-height:135px;border-radius:8px;margin:8px 0">');
+        /* 封面以预览卡左列 img 呈现（T4.38：预览卡重排，封面/标题/时长分层） */
+        var row = box.querySelector('.link-preview-row');
+        var img = document.createElement('img');
+        img.id = 'linkCover';
+        img.alt = '封面';
+        img.className = 'link-cover';
+        img.src = data.image.replace(/"/g, '&quot;');
+        row.insertBefore(img, row.firstChild);
       }
       if (data.kind === 'direct') {
         guide.hidden = true;

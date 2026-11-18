@@ -33,6 +33,8 @@
 <script src="app.js"></script>
 <script>
 (function () {
+  /* T4.38：被站内抽屉 iframe 内嵌时藏导航/页脚（深链 task.html?id= 直接访问不受影响） */
+  if (window.self !== window.top) document.documentElement.classList.add('mn-embedded');
   var card = document.getElementById('card');
   var id = new URLSearchParams(location.search).get('id');
   if (!id || !/^\d+$/.test(id)) {
@@ -503,8 +505,12 @@
       body = '<div class="section"><p class="error-text">转写失败。原因：' + escapeHtml(errorTextOf(data.error_code)) + '</p>' +
         '<p class="hint">请检查 ASR 服务是否正常后，可在<a href="tasks.html">任务列表</a>按"失败"筛选并批量重试。</p></div>';
     } else if (status === 'DONE') {
-      body = playerHtml(data) + summaryHtml(data) + keypointsHtml(data) + todosHtml(data) + transcriptHtml(data) +
-        metaHtml() + restructureHtml(data) + shareHtml(data) + exportHtml(data) + deleteHtml(data);
+      /* T4.38：1280 两栏（左播放+转写，右摘要/待办/导出）；<1100 单栏（detail-grid 单列） */
+      body = '<div class="detail-grid">' +
+        '<div class="detail-col-main">' + playerHtml(data) + transcriptHtml(data) + '</div>' +
+        '<div class="detail-col-side">' + summaryHtml(data) + keypointsHtml(data) + todosHtml(data) +
+        metaHtml() + restructureHtml(data) + shareHtml(data) + exportHtml(data) + deleteHtml(data) + '</div>' +
+        '</div>';
     } else {
       body = '<p class="hint">未知状态：' + escapeHtml(status) + '</p>';
     }
@@ -541,6 +547,16 @@
   var player = { segs: null, audio: null, issueCount: 0, curIdx: -1 };
   var speaker = { map: null, grouped: false, menuIdx: -1, prevMap: null }; /* T4.36：说话人标注状态 */
 
+  /* T4.38：播放器内联 SVG 图标（stroke 继承 currentColor，零外部资源） */
+  var PL_ICON = {
+    play: '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5.5v13a.6.6 0 0 0 .9.5l10.2-6.5a.6.6 0 0 0 0-1L8.9 5a.6.6 0 0 0-.9.5z"/></svg>',
+    pause: '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>',
+    back: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 12H2"/><path d="M8 6l-6 6 6 6"/><text x="15" y="15" font-size="9" fill="currentColor" stroke="none" font-weight="600">10</text></svg>',
+    fwd: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 12h12"/><path d="M16 6l6 6-6 6"/><text x="0" y="15" font-size="9" fill="currentColor" stroke="none" font-weight="600">10</text></svg>',
+    vol: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5L6 9H3v6h3l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18 6a8.5 8.5 0 0 1 0 12"/></svg>',
+    mute: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5L6 9H3v6h3l5 4V5z"/><path d="M16 9l6 6M22 9l-6 6"/></svg>'
+  };
+
   function fmtTs(sec) {
     var s = Math.floor(sec);
     var m = Math.floor(s / 60);
@@ -553,10 +569,43 @@
     if (!segs || !segs.length) return ''; /* null（旧任务/PASTE）与 []（空音频）都不渲染，卡面双降级 */
     player.segs = segs;
     speaker.map = data.speaker_map || null; /* T4.36：第 16 键（null=未标注/清除，不是 {}） */
+    /* T4.38：自绘播放器（替换原生 controls）。竖向音量 hover/点击弹出；倍速 0.75/1/1.25/1.5；
+       进度条可拖 + 缓冲 + hover 时间气泡；ARIA role=slider。图标全部内联 SVG，零 CDN。 */
+    var rates = [0.75, 1, 1.25, 1.5].map(function (r) {
+      return '<button type="button" role="menuitemradio" aria-checked="' + (r === 1) +
+        '" class="' + (r === 1 ? 'on' : '') + '" data-rate="' + r + '">' + r + '×</button>';
+    }).join('');
     return '<div class="section" id="playerCard"><h2>播放</h2>' +
       '<p id="playerMsg" class="hint" hidden></p>' +
-      '<div id="playerBody" hidden><audio id="taskAudio" controls preload="metadata"></audio>' +
-      '<p class="hint">点任意句子跳到该句；播放时当前句自动高亮。点行尾「＋标注」给句子打说话人标签。</p>' +
+      '<div id="playerBody" hidden>' +
+      '<div class="player" id="playerBar">' +
+      '<div class="player-main">' +
+      '<button type="button" class="pl-btn pl-play" id="plPlay" aria-label="播放">' + PL_ICON.play + '</button>' +
+      '<button type="button" class="pl-btn btn-secondary" id="plBack" aria-label="后退 10 秒">' + PL_ICON.back + '</button>' +
+      '<button type="button" class="pl-btn btn-secondary" id="plFwd" aria-label="前进 10 秒">' + PL_ICON.fwd + '</button>' +
+      '<div class="pl-progress" id="plProgress" role="slider" tabindex="0" aria-label="播放进度"' +
+      ' aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-valuetext="00:00">' +
+      '<div class="pl-track"><div class="pl-buf" id="plBuf"></div><div class="pl-fill" id="plFill"></div>' +
+      '<div class="pl-knob" id="plKnob"></div></div>' +
+      '<div class="pl-bubble" id="plBubble" hidden>00:00</div>' +
+      '</div>' +
+      '<span class="pl-time num" id="plTime">00:00 / 00:00</span>' +
+      '<div class="pl-volume" id="plVolume">' +
+      '<button type="button" class="pl-btn btn-secondary" id="plMute" aria-label="静音" aria-pressed="false">' + PL_ICON.vol + '</button>' +
+      '<div class="pl-vol-pop" id="plVolPop">' +
+      '<div class="pl-vol-track" id="plVolTrack" role="slider" tabindex="0" aria-label="音量（竖向）"' +
+      ' aria-orientation="vertical" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100">' +
+      '<div class="pl-vol-fill" id="plVolFill"></div><div class="pl-vol-knob" id="plVolKnob"></div>' +
+      '</div></div></div>' +
+      '<div class="pl-speed" id="plSpeed">' +
+      '<button type="button" class="pl-btn btn-secondary pl-speed-btn" id="plSpeedBtn" aria-haspopup="true"' +
+      ' aria-expanded="false" aria-label="播放倍速">1×</button>' +
+      '<div class="pl-speed-menu" id="plSpeedMenu" role="menu">' + rates + '</div>' +
+      '</div>' +
+      '</div>' +
+      '<audio id="taskAudio" preload="metadata"></audio>' +
+      '</div>' +
+      '<p class="hint">点任意句子跳到该句；播放时当前句自动高亮。音量条 hover/点击弹出（竖向拖动），倍速在右侧。点行尾「＋标注」给句子打说话人标签。</p>' +
       '<p><button type="button" class="btn-secondary" id="speakerGroupBtn" hidden></button></p>' +
       '<div id="speakerMenu" class="speaker-menu" hidden>' +
       '<div class="speaker-menu-title" id="speakerMenuTitle"></div>' +
@@ -567,7 +616,9 @@
       '<div class="speaker-menu-actions"><button type="button" class="btn-secondary" id="speakerClearBtn">清除本句</button>' +
       '<button type="button" class="btn-secondary" id="speakerCloseBtn">关闭</button></div>' +
       '<p id="speakerMsg" class="hint" hidden></p></div>' +
-      '<ol class="seg-list" id="segList"></ol></div>';
+      '<ol class="seg-list" id="segList"></ol></div></div>';
+      /* ↑ 最后两个 </div>：一个关 #playerBody，一个关 #playerCard section（T4.38 修复原版少一个闭合导致
+         后续 section 全嵌进播放卡的问题——两栏布局下右栏会被吞进左栏，必须闭合） */
   }
 
   /** 单个句子行（顺序视图与分组视图共用）：seg-line（点→seek）+ seg-chip（点→说话人菜单）。 */
@@ -708,6 +759,7 @@
     bindSpeakerMenu();
     issueAudioToken();
     var audio = document.getElementById('taskAudio');
+    initPlayerChrome(audio); /* T4.38：自绘播放器（播放/±10s/拖动进度/竖音量/倍速） */
     /* 播放中签名过期（audio 加载 404）→ 重签一次 */
     audio.addEventListener('error', function () {
       if (player.issueCount < 2) {
@@ -740,6 +792,207 @@
     audio.addEventListener('seeked', function () {
       highlightSeg(currentSegIndex(audio.currentTime), true);
     });
+  }
+
+  /* ===== T4.38：自绘播放器 UI（替换原生 controls；保留 T4.35c 全部行为） =====
+   * 播放/暂停、±10s、可拖进度条（缓冲 + hover 时间气泡）、tabular-nums 时间、
+   * 竖向音量（hover/点击弹出，拖动实时 audio.volume，静音切换、键盘可调）、倍速 0.75/1/1.25/1.5。
+   * ARIA role=slider + aria-valuenow；键盘：进度 ←/→ ±5s、音量 ↑/↓ ±0.1。 */
+  function initPlayerChrome(audio) {
+    var playBtn = document.getElementById('plPlay');
+    var backBtn = document.getElementById('plBack');
+    var fwdBtn = document.getElementById('plFwd');
+    var progress = document.getElementById('plProgress');
+    var track = progress ? progress.querySelector('.pl-track') : null;
+    var fill = document.getElementById('plFill');
+    var buf = document.getElementById('plBuf');
+    var knob = document.getElementById('plKnob');
+    var bubble = document.getElementById('plBubble');
+    var timeEl = document.getElementById('plTime');
+    var volWrap = document.getElementById('plVolume');
+    var muteBtn = document.getElementById('plMute');
+    var volTrack = document.getElementById('plVolTrack');
+    var volFill = document.getElementById('plVolFill');
+    var volKnob = document.getElementById('plVolKnob');
+    var speedWrap = document.getElementById('plSpeed');
+    var speedBtn = document.getElementById('plSpeedBtn');
+    var speedMenu = document.getElementById('plSpeedMenu');
+    if (!progress || !track) return;
+    var dur = 0;
+    var RATES = [0.75, 1, 1.25, 1.5];
+
+    function clamp(x, lo, hi) { return Math.max(lo, Math.min(hi, x)); }
+
+    function renderTime() {
+      timeEl.textContent = fmtTs(audio.currentTime || 0) + ' / ' + fmtTs(dur || 0);
+    }
+    function renderProgress() {
+      var pct = dur ? clamp((audio.currentTime || 0) / dur * 100, 0, 100) : 0;
+      fill.style.width = pct + '%';
+      knob.style.left = pct + '%';
+      progress.setAttribute('aria-valuenow', String(Math.round(pct)));
+      progress.setAttribute('aria-valuetext', fmtTs(audio.currentTime || 0));
+      renderTime();
+    }
+    function renderBuf() {
+      try {
+        if (audio.buffered.length && dur) {
+          var end = audio.buffered.end(audio.buffered.length - 1);
+          buf.style.width = clamp(end / dur * 100, 0, 100) + '%';
+        }
+      } catch (e) { /* buffered 不可用忽略 */ }
+    }
+    function renderVolume() {
+      var v = audio.muted ? 0 : audio.volume;
+      volFill.style.height = (v * 100) + '%';
+      volKnob.style.bottom = (v * 100) + '%';
+      volTrack.setAttribute('aria-valuenow', String(Math.round(v * 100)));
+      var muted = audio.muted || audio.volume === 0;
+      muteBtn.setAttribute('aria-pressed', muted ? 'true' : 'false');
+      muteBtn.setAttribute('aria-label', muted ? '取消静音' : '静音');
+      muteBtn.innerHTML = muted ? PL_ICON.mute : PL_ICON.vol;
+    }
+    function renderSpeed() {
+      speedMenu.querySelectorAll('button[data-rate]').forEach(function (b) {
+        var on = Math.abs(audio.playbackRate - parseFloat(b.getAttribute('data-rate'))) < 0.01;
+        b.classList.toggle('on', on);
+        b.setAttribute('aria-checked', on ? 'true' : 'false');
+      });
+      speedBtn.textContent = audio.playbackRate + '×';
+    }
+
+    playBtn.addEventListener('click', function () {
+      if (audio.paused) audio.play(); else audio.pause();
+    });
+    audio.addEventListener('play', function () {
+      playBtn.innerHTML = PL_ICON.pause;
+      playBtn.setAttribute('aria-label', '暂停');
+    });
+    audio.addEventListener('pause', function () {
+      playBtn.innerHTML = PL_ICON.play;
+      playBtn.setAttribute('aria-label', '播放');
+    });
+    backBtn.addEventListener('click', function () {
+      audio.currentTime = clamp((audio.currentTime || 0) - 10, 0, dur || audio.duration || 0);
+    });
+    fwdBtn.addEventListener('click', function () {
+      audio.currentTime = clamp((audio.currentTime || 0) + 10, 0, dur || audio.duration || 1e9);
+    });
+
+    audio.addEventListener('timeupdate', renderProgress);
+    audio.addEventListener('progress', renderBuf);
+    function onMeta() { dur = isFinite(audio.duration) ? audio.duration : 0; progress.setAttribute('aria-valuemax', String(Math.round(dur || 0))); renderProgress(); renderBuf(); }
+    audio.addEventListener('loadedmetadata', onMeta);
+    audio.addEventListener('durationchange', onMeta);
+
+    /* 进度拖动（pointer events 统一鼠标/触控） */
+    var seeking = false;
+    function seekFromClientX(clientX) {
+      if (!dur) return;
+      var rect = track.getBoundingClientRect();
+      var x = clamp((clientX - rect.left) / rect.width, 0, 1);
+      audio.currentTime = x * dur;
+    }
+    progress.addEventListener('pointerdown', function (e) {
+      if (!dur) return;
+      seeking = true;
+      try { progress.setPointerCapture(e.pointerId); } catch (err) { /* 旧浏览器忽略 */ }
+      seekFromClientX(e.clientX);
+      e.preventDefault();
+    });
+    progress.addEventListener('pointermove', function (e) { if (seeking) seekFromClientX(e.clientX); });
+    function endSeek() { seeking = false; }
+    progress.addEventListener('pointerup', endSeek);
+    progress.addEventListener('pointercancel', endSeek);
+    progress.addEventListener('lostpointercapture', endSeek);
+    /* hover 时间气泡 */
+    progress.addEventListener('mousemove', function (e) {
+      if (!dur) return;
+      var rect = track.getBoundingClientRect();
+      var x = clamp((e.clientX - rect.left) / rect.width, 0, 1);
+      bubble.hidden = false;
+      bubble.style.left = (x * 100) + '%';
+      bubble.textContent = fmtTs(x * dur);
+    });
+    progress.addEventListener('mouseleave', function () { bubble.hidden = true; });
+    progress.addEventListener('keydown', function (e) {
+      if (e.key === 'ArrowLeft') { audio.currentTime = clamp((audio.currentTime || 0) - 5, 0, dur || 0); e.preventDefault(); }
+      else if (e.key === 'ArrowRight') { audio.currentTime = clamp((audio.currentTime || 0) + 5, 0, dur || 1e9); e.preventDefault(); }
+    });
+
+    /* 竖向音量：hover（桌面）/点击（含 390 触屏）弹出；拖动实时改 audio.volume */
+    var volDragging = false;
+    function volFromClientY(clientY) {
+      var rect = volTrack.getBoundingClientRect();
+      var y = 1 - (clientY - rect.top) / rect.height;
+      audio.volume = clamp(y, 0, 1);
+      audio.muted = false;
+      if (audio.volume > 0) player.lastVol = audio.volume;
+    }
+    volTrack.addEventListener('pointerdown', function (e) {
+      volDragging = true;
+      try { volTrack.setPointerCapture(e.pointerId); } catch (err) { /* 忽略 */ }
+      volFromClientY(e.clientY);
+      e.preventDefault();
+    });
+    volTrack.addEventListener('pointermove', function (e) { if (volDragging) volFromClientY(e.clientY); });
+    function endVolDrag() { volDragging = false; }
+    volTrack.addEventListener('pointerup', endVolDrag);
+    volTrack.addEventListener('pointercancel', endVolDrag);
+    volTrack.addEventListener('lostpointercapture', endVolDrag);
+    volTrack.addEventListener('keydown', function (e) {
+      if (e.key === 'ArrowUp') { audio.muted = false; audio.volume = clamp(audio.volume + 0.1, 0, 1); e.preventDefault(); }
+      else if (e.key === 'ArrowDown') { audio.volume = clamp(audio.volume - 0.1, 0, 1); e.preventDefault(); }
+    });
+    muteBtn.addEventListener('click', function () {
+      if (audio.muted || audio.volume === 0) {
+        audio.muted = false;
+        if (audio.volume === 0) audio.volume = player.lastVol || 1;
+      } else {
+        player.lastVol = audio.volume;
+        audio.muted = true;
+      }
+      /* Chromium 对 muted 变更不派发 volumechange：显式同步 UI（aria-pressed/图标/填充条） */
+      renderVolume();
+      /* 390 触屏无 hover：点静音钮同时弹出竖向音量（用户可直接拖），外点收起 */
+      volWrap.classList.add('open');
+    });
+    /* 点击音量容器（非按钮）钉住弹层；鼠标移出/点外收起 */
+    volWrap.addEventListener('click', function (e) {
+      if (e.target.closest('#plMute') || e.target.closest('#plVolTrack')) return;
+      volWrap.classList.toggle('open');
+    });
+    document.addEventListener('click', function (e) {
+      if (!volWrap.contains(e.target)) volWrap.classList.remove('open');
+    });
+    volWrap.addEventListener('mouseleave', function () { volWrap.classList.remove('open'); });
+
+    /* 倍速菜单 */
+    speedBtn.addEventListener('click', function () {
+      var open = speedWrap.classList.toggle('open');
+      speedBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    });
+    speedMenu.addEventListener('click', function (e) {
+      var b = e.target.closest('button[data-rate]');
+      if (!b) return;
+      audio.playbackRate = parseFloat(b.getAttribute('data-rate'));
+      speedWrap.classList.remove('open');
+      speedBtn.setAttribute('aria-expanded', 'false');
+    });
+    /* ESC 先收播放器弹层（抽屉的 ESC 关闭由父页处理） */
+    document.addEventListener('keydown', function (e) {
+      if (e.key !== 'Escape') return;
+      if (speedWrap.classList.contains('open')) {
+        speedWrap.classList.remove('open');
+        speedBtn.setAttribute('aria-expanded', 'false');
+      } else if (volWrap.classList.contains('open')) {
+        volWrap.classList.remove('open');
+      }
+    });
+
+    renderProgress();
+    renderVolume();
+    renderSpeed();
   }
 
   /* ===== T4.36：说话人标注菜单（选已有 / 新建 / 清除 → PATCH → 回读详情，K-80；失败就地提示回滚） ===== */
