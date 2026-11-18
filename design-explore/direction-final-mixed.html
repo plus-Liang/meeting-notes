@@ -1,0 +1,433 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>方向定稿 · 白纸档案（A+B 混合）— 录音纪要平台</title>
+<style>
+:root{
+  /* 纸面：近白（不是米色——避开 detector 的 cream-palette） */
+  --paper:#fbfaf7; --paper-2:#f4f1ea; --leaf:#ffffff;
+  --ink:#14120e; --ink-2:#48443b; --ink-3:#6d685c;
+  --rule:#e2ddd2; --rule-soft:#ece8dd; --rule-ink:#14120e;
+  --seal:#9d2f1b; --seal-tint:#f6e7e0; --seal-deep:#7f2415;
+  --done:#3c6236; --wait:#8a6400; --bad:#8f2318;
+  --serif:"Noto Serif SC","Source Han Serif SC","Songti SC",STSong,"STZhongsong",SimSun,Georgia,serif;
+  --sans:"PingFang SC","Microsoft YaHei","Helvetica Neue",Arial,sans-serif;
+  --mono:ui-monospace,"SF Mono","Cascadia Mono",Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-font-smoothing:antialiased}
+body{background:var(--paper);color:var(--ink);font:400 15px/1.7 var(--sans)}
+a{color:inherit;text-decoration:none}
+::selection{background:var(--seal-tint)}
+.wrap{max-width:1260px;margin:0 auto;padding:0 40px}
+
+/* ── 档案抬头（B）+ 顶栏（A） ── */
+.docket{display:flex;align-items:center;gap:20px;padding:14px 0 13px;border-bottom:1px solid var(--rule);
+  font:400 11px/1.6 var(--mono);letter-spacing:.12em;color:var(--ink-3)}
+.docket b{color:var(--ink);letter-spacing:.1em}
+.docket .r{margin-left:auto;display:flex;gap:16px}
+.top{display:flex;align-items:center;gap:40px;padding:20px 0 18px;border-bottom:1px solid var(--rule-ink)}
+.brand{font:600 18px/1.3 var(--serif);letter-spacing:.02em}
+.brand em{font:400 11px/1 var(--mono);font-style:normal;letter-spacing:.16em;color:var(--ink-3);margin-left:10px}
+.nav{display:flex;gap:26px;font:500 13px/1 var(--sans)}
+.nav a{padding-bottom:4px;border-bottom:1px solid transparent;transition:border-color .16s,color .16s}
+.nav a:hover{border-bottom-color:var(--ink)}
+.nav a[aria-current]{color:var(--seal);border-bottom-color:var(--seal)}
+.who{margin-left:auto;font:400 12px/1.5 var(--mono);color:var(--ink-2);letter-spacing:.04em}
+.who b{color:var(--ink);font-weight:500}
+.who a{margin-left:14px;border-bottom:1px solid var(--rule);padding-bottom:2px;transition:border-color .15s}
+.who a:hover{border-bottom-color:var(--ink)}
+
+/* ── 刊头：A 的巨标题 + B 的档案元信息 ── */
+.mast{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:56px;align-items:end;padding:60px 0 34px;border-bottom:1px solid var(--rule-ink)}
+.mast h1{font:600 clamp(46px,6.2vw,78px)/1.06 var(--serif);letter-spacing:-2px;text-wrap:balance}
+.mast h1 i{font-style:normal;color:var(--seal)}
+.mast .meta{display:flex;flex-direction:column;gap:0;padding-bottom:6px}
+.mast .meta div{display:flex;justify-content:space-between;gap:16px;align-items:baseline;padding:9px 0;border-top:1px solid var(--rule)}
+.mast .meta div:last-child{border-bottom:1px solid var(--rule)}
+.mast .meta dt{font:400 11px/1.6 var(--mono);letter-spacing:.12em;color:var(--ink-3);white-space:nowrap}
+.mast .meta dd{font:500 13px/1.6 var(--mono);color:var(--ink);font-variant-numeric:tabular-nums;text-align:right}
+.mast .meta dd.big{font-size:22px;letter-spacing:-.5px}
+
+/* ── 三个入口：A 的分栏 + B 的步骤编号 ── */
+.inlets{display:grid;grid-template-columns:repeat(3,1fr);gap:0;border-bottom:1px solid var(--rule-ink)}
+.inlet{padding:28px 30px 30px;display:flex;flex-direction:column;gap:10px;transition:background .16s}
+.inlet + .inlet{border-left:1px solid var(--rule)}
+.inlet:hover{background:var(--paper-2)}
+.inlet .step{font:500 11px/1 var(--mono);letter-spacing:.16em;color:var(--seal)}
+.inlet h2{font:600 20px/1.35 var(--serif);letter-spacing:-.3px}
+.inlet p{font:400 13px/1.75 var(--sans);color:var(--ink-2);max-width:27em}
+.inlet .acts{margin-top:auto;padding-top:14px;display:flex;align-items:center;gap:16px}
+
+/* ── 按钮：黑承担动作，印章红只在“此刻/重点” ── */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:42px;padding:0 20px;cursor:pointer;
+  border:1px solid var(--ink);background:var(--ink);color:#fff;border-radius:2px;
+  font:500 13px/1 var(--sans);letter-spacing:.02em;transition:background .15s,border-color .15s,color .15s,transform .1s}
+.btn:hover{background:#000}
+.btn:active{transform:scale(.985)}
+.btn.ghost{background:transparent;color:var(--ink);border-color:var(--rule)}
+.btn.ghost:hover{background:transparent;border-color:var(--ink)}
+.btn.seal{background:var(--seal);border-color:var(--seal)}
+.btn.seal:hover{background:var(--seal-deep);border-color:var(--seal-deep)}
+.btn.sm{height:34px;padding:0 13px;font-size:12px}
+.linkish{display:inline-flex;align-items:center;height:42px;font:500 13px/1 var(--sans);color:var(--ink);
+  border-bottom:1px solid var(--rule);padding:0 2px;cursor:pointer;transition:border-color .16s,color .16s}
+.linkish:hover{color:var(--seal);border-bottom-color:var(--seal)}
+button:focus-visible,a:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--seal);outline-offset:3px}
+
+/* ── 主区：左内容 + 右索引栏 ── */
+.desk{display:grid;grid-template-columns:minmax(0,1fr) 272px}
+.col{border-right:1px solid var(--rule);padding:42px 44px 0 0}
+.rail{padding:42px 0 0 36px}
+.sechead{display:flex;align-items:baseline;gap:14px;padding-bottom:12px;border-bottom:1px solid var(--rule-ink);margin-bottom:2px}
+.sechead h2{font:600 17px/1.4 var(--serif);letter-spacing:-.2px}
+.sechead .n{margin-left:auto;font:400 11px/1.6 var(--mono);letter-spacing:.1em;color:var(--ink-3);font-variant-numeric:tabular-nums}
+
+/* ── 任务台账（B）：点线下划线 leader + A 的行节奏 ── */
+.ledger{width:100%;border-collapse:collapse;table-layout:fixed}
+.ledger col.c-no{width:70px}.ledger col.c-num{width:96px}.ledger col.c-st{width:86px}
+.ledger thead th{font:400 11px/1 var(--mono);letter-spacing:.16em;color:var(--ink-3);text-align:left;
+  padding:10px 0 9px;border-bottom:1px solid var(--rule);font-weight:400}
+.ledger thead th.r,.ledger td.r{text-align:right}
+.ledger tbody tr{border-bottom:1px dotted var(--rule);cursor:pointer;transition:background .14s}
+.ledger tbody tr:hover{background:var(--paper-2)}
+.ledger td{padding:13px 0;vertical-align:top}
+.ledger .no{font:400 12px/1.5 var(--mono);color:var(--ink-3);font-variant-numeric:tabular-nums;width:64px;padding-right:10px}
+.ledger .name{padding-right:14px}
+.ledger .name b{display:block;font:500 14px/1.55 var(--sans);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ledger tbody tr:hover .name b{color:var(--seal);text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:3px}
+.ledger .name span{display:block;margin-top:3px;font:400 11px/1.7 var(--mono);letter-spacing:.04em;color:var(--ink-3)}
+.ledger .num{font:400 12px/1.6 var(--mono);color:var(--ink-2);font-variant-numeric:tabular-nums;white-space:nowrap}
+.ledger .st{white-space:nowrap;text-align:right;font:400 12px/1.6 var(--sans);color:var(--ink-2)}
+.ledger .st i{display:inline-block;width:6px;height:6px;border-radius:50%;margin-right:7px;vertical-align:1px}
+.i-ok{background:var(--done)}.i-go{background:var(--seal)}.i-wait{background:var(--wait)}.i-bad{background:var(--bad)}
+
+/* ── 详情：B 的首字下沉 + 两栏 + A 的细线 ── */
+.detail{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(0,1fr);margin-top:40px;border-top:1px solid var(--rule-ink)}
+.detail .l{padding:26px 40px 0 0;border-right:1px solid var(--rule)}
+.detail .r{padding:26px 0 0 34px}
+.eyebrow{font:400 11px/1 var(--mono);letter-spacing:.18em;color:var(--ink-3);margin-bottom:12px}
+.dtitle{font:600 22px/1.4 var(--serif);letter-spacing:-.3px;margin-bottom:12px}
+.drop{font:400 15px/1.95 var(--sans);color:var(--ink)}
+.drop::first-letter{float:left;font:600 44px/1 var(--serif);color:var(--seal);padding:5px 10px 0 0;margin-top:-3px}
+ol.pts{margin:18px 0 0;padding:0;list-style:none;counter-reset:p}
+ol.pts li{counter-increment:p;position:relative;padding:10px 0 10px 30px;border-top:1px dotted var(--rule);font:400 13px/1.8 var(--sans);color:var(--ink-2)}
+ol.pts li::before{content:counter(p,decimal-leading-zero);position:absolute;left:0;top:10px;font:400 11px/1.8 var(--mono);color:var(--seal);letter-spacing:.08em}
+.todo{display:flex;gap:10px;align-items:flex-start;padding:11px 0;border-top:1px dotted var(--rule);font:400 13px/1.7 var(--sans);color:var(--ink-2)}
+.todo .bx{width:14px;height:14px;border:1px solid var(--ink-2);flex:none;margin-top:4px;background:var(--leaf)}
+.kw{display:flex;flex-wrap:wrap;gap:7px}
+.kw b{font:400 11px/1 var(--mono);letter-spacing:.06em;padding:6px 9px;border:1px solid var(--rule);color:var(--ink-2);background:var(--leaf);font-weight:400}
+.facts{display:grid;grid-template-columns:1fr auto;gap:0 14px;font:400 12px/1.6 var(--sans);color:var(--ink-2)}
+.facts dt,.facts dd{padding:7px 0;border-top:1px dotted var(--rule)}
+.facts dd{font:400 12px/1.6 var(--mono);color:var(--ink);text-align:right;font-variant-numeric:tabular-nums}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{font:400 12px/1 var(--sans);padding:7px 11px;border:1px solid var(--rule);background:transparent;color:var(--ink-2);cursor:pointer;border-radius:2px;transition:.15s}
+.chip:hover{border-color:var(--ink);color:var(--ink)}
+.chip[aria-pressed="true"]{background:var(--ink);border-color:var(--ink);color:#fff}
+.chip.seal[aria-pressed="true"]{background:var(--seal);border-color:var(--seal)}
+
+/* ── 右栏：A 的索引体 ── */
+.rblock{padding-bottom:24px;margin-bottom:24px;border-bottom:1px solid var(--rule)}
+.rblock:last-child{border-bottom:0;margin-bottom:0}
+.rblock .k{font:400 11px/1 var(--mono);letter-spacing:.18em;color:var(--ink-3);margin-bottom:12px}
+.bignum{font:500 42px/1 var(--mono);letter-spacing:-2px;font-variant-numeric:tabular-nums}
+.bignum small{font:400 11px/1 var(--mono);letter-spacing:.1em;color:var(--ink-3);margin-left:8px}
+.ticks{display:flex;gap:3px;margin-top:12px}
+.ticks i{flex:1;height:9px;background:var(--rule-soft);border:1px solid var(--rule)}
+.ticks i.on{background:var(--seal);border-color:var(--seal)}
+.kv{display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-top:1px dotted var(--rule);font:400 12px/1.6 var(--sans);color:var(--ink-2)}
+.kv b{font:400 12px/1.6 var(--mono);color:var(--ink);font-variant-numeric:tabular-nums}
+
+/* ── 播放器（自绘，含竖向音量与倍速选中态） ── */
+.player{margin-top:8px;border:1px solid var(--rule);background:var(--leaf)}
+.pl-row{display:flex;align-items:center;gap:14px;padding:13px 15px}
+.pl-play{width:40px;height:40px;border:1px solid var(--ink);background:var(--ink);color:#fff;cursor:pointer;
+  display:grid;place-items:center;flex:none;transition:background .15s}
+.pl-play:hover{background:#000}
+.pl-time{font:400 12px/1 var(--mono);color:var(--ink-2);font-variant-numeric:tabular-nums;white-space:nowrap}
+.pl-bar{flex:1;height:3px;background:var(--rule);position:relative}
+.pl-bar i{position:absolute;inset:0 auto 0 0;width:38%;background:var(--seal)}
+.pl-bar::after{content:"";position:absolute;left:0;top:-5px;bottom:-5px;width:38%}
+.pl-knob{position:absolute;left:38%;top:50%;width:11px;height:11px;border-radius:50%;background:var(--seal);transform:translate(-50%,-50%)}
+.pl-btn{width:34px;height:34px;border:1px solid var(--rule);background:transparent;cursor:pointer;color:var(--ink-2);
+  display:grid;place-items:center;transition:.15s}
+.pl-btn:hover{border-color:var(--ink);color:var(--ink)}
+.pl-btn[aria-pressed="true"]{border-color:var(--ink);color:var(--ink)}
+.pl-menu{position:absolute;right:0;bottom:44px;background:var(--leaf);border:1px solid var(--rule);
+  box-shadow:0 12px 28px rgba(20,18,14,.16);padding:5px;min-width:104px;z-index:2}
+.pl-menu button{display:block;width:100%;text-align:left;padding:8px 11px;border:0;background:transparent;cursor:pointer;
+  font:400 12px/1 var(--mono);color:var(--ink-2);transition:.12s}
+.pl-menu button:hover{background:var(--paper-2);color:var(--ink)}
+.pl-menu button.on{background:var(--ink);color:#fff}
+.pl-vol{display:flex;flex-direction:column;align-items:center;gap:2px;padding:9px 8px 8px;background:var(--leaf);
+  border:1px solid var(--rule);box-shadow:0 12px 28px rgba(20,18,14,.16);position:absolute;right:0;bottom:44px;z-index:2}
+.pl-vol .tr{width:4px;height:74px;background:var(--rule);position:relative}
+.pl-vol .tr i{position:absolute;left:0;right:0;bottom:0;height:62%;background:var(--ink)}
+.pl-vol .lb{font:400 11px/1 var(--mono);color:var(--ink-3);margin-top:6px}
+.pl-wrap{position:relative}
+
+/* ── 组件谱 ── */
+.sheet{margin-top:64px;border-top:1px solid var(--rule-ink);padding-top:28px}
+.sheet .sechead{margin-bottom:0}
+.spec{display:grid;grid-template-columns:118px 1fr;gap:18px 26px;align-items:start;padding:15px 0;border-bottom:1px dotted var(--rule)}
+.spec:last-child{border-bottom:0}
+.spec .lb{font:400 11px/1.8 var(--mono);letter-spacing:.14em;color:var(--ink-3);padding-top:4px}
+.spec .demo{display:flex;flex-wrap:wrap;gap:11px;align-items:center}
+.field{display:flex;flex-direction:column;gap:7px;width:300px}
+.field label{font:400 12px/1.4 var(--sans);color:var(--ink-2)}
+.field input{height:42px;padding:0 13px;border:1px solid var(--rule);background:var(--leaf);color:var(--ink);
+  font:400 14px/1 var(--sans);border-radius:2px;width:100%}
+.field input::placeholder{color:var(--ink-3)}
+.field input:focus{outline:none;border-color:var(--ink);box-shadow:0 0 0 3px rgba(20,18,14,.08)}
+.segis{display:flex;border:1px solid var(--rule)}
+.segis button{height:36px;padding:0 13px;border:0;border-right:1px solid var(--rule);background:transparent;cursor:pointer;
+  font:400 12px/1 var(--sans);color:var(--ink-2);transition:.14s}
+.segis button:last-child{border-right:0}
+.segis button:hover{background:var(--paper-2);color:var(--ink)}
+.segis button[aria-pressed="true"]{background:var(--ink);color:#fff}
+.badge{display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 8px;border:1px solid var(--rule);
+  font:400 11px/1 var(--mono);color:var(--ink-2);background:var(--leaf);border-radius:2px}
+.badge i{width:5px;height:5px;border-radius:50%}
+.badge.ok{color:var(--done);border-color:#c3d3bf;background:#f1f6f0}
+.badge.ok i{background:var(--done)}
+.badge.bad{color:var(--bad);border-color:#e3c6c0;background:#fbf0ed}
+.badge.bad i{background:var(--bad)}
+.toast{display:inline-flex;align-items:center;gap:9px;background:var(--ink);color:#fff;padding:11px 16px;border-radius:2px;
+  font:400 12.5px/1 var(--sans);box-shadow:0 10px 24px rgba(20,18,14,.22)}
+.empty{border:1px dashed var(--rule);padding:26px;text-align:center;width:100%}
+.empty b{display:block;font:600 15px/1.5 var(--serif);margin-bottom:6px}
+.empty span{font:400 12.5px/1.7 var(--sans);color:var(--ink-3)}
+footer{display:flex;justify-content:space-between;gap:18px;margin-top:44px;padding:18px 0 36px;border-top:1px solid var(--rule-ink);
+  font:400 11px/1.7 var(--mono);letter-spacing:.08em;color:var(--ink-3)}
+
+@media (max-width:1080px){
+  .wrap{padding:0 26px}
+  .mast{grid-template-columns:1fr;gap:26px;padding:42px 0 28px}
+  .desk{grid-template-columns:1fr}
+  .col{border-right:0;padding-right:0}
+  .rail{display:grid;grid-template-columns:repeat(3,1fr);gap:0 26px;padding:30px 0 0;border-top:1px solid var(--rule-ink);margin-top:36px}
+  .rblock{border-bottom:0;margin-bottom:0;padding-bottom:0}
+  .detail{grid-template-columns:1fr}
+  .detail .l{border-right:0;padding-right:0}
+  .detail .r{padding-left:0}
+}
+@media (max-width:720px){
+  .wrap{padding:0 18px}
+  .docket{flex-wrap:wrap;gap:6px 14px}
+  .docket .r{margin-left:0;width:100%}
+  .top{flex-wrap:wrap;gap:14px 20px}
+  .nav{order:3;width:100%;gap:20px;border-top:1px solid var(--rule);padding-top:12px}
+  .mast h1{letter-spacing:-1px}
+  .inlets{grid-template-columns:1fr}
+  .inlet{padding:24px 0}
+  .inlet + .inlet{border-left:0;border-top:1px solid var(--rule)}
+  .col{padding-top:30px}
+  .rail{grid-template-columns:1fr 1fr}
+  .ledger .num,.ledger thead th.num{display:none}
+  .spec{grid-template-columns:1fr;gap:8px}
+  .field{width:100%}
+  .pl-row{gap:10px;flex-wrap:wrap}
+  .pl-row .pl-btn[data-narrow="hide"]{display:none}
+  .pl-bar{min-width:80px}
+}
+@media (prefers-reduced-motion:reduce){*{transition-duration:.01ms!important;animation-duration:.01ms!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="docket">
+    <b>REC-NOTES</b><span>自托管 · 私有部署</span>
+    <span class="r"><span>归档 299</span><span>配额 36 / 36</span><span>2026-11-18</span><span>V0.1.0</span></span>
+  </div>
+
+  <header class="top">
+    <a class="brand" href="#">录音纪要平台<em>transcript &amp; minutes</em></a>
+    <nav class="nav"><a href="#" aria-current="page">提交</a><a href="#">任务台账</a><a href="#">设置</a></nav>
+    <div class="who"><b>15360364827</b> 管理员 <a href="#">退出</a></div>
+  </header>
+
+  <section class="mast">
+    <h1>录音进来，<br>纪要归档<i>。</i></h1>
+    <dl class="meta">
+      <div><dt>今日配额</dt><dd class="big">36 / 36</dd></div>
+      <div><dt>归档总量</dt><dd>299 条</dd></div>
+      <div><dt>最近一条</dt><dd>11-18 17:16</dd></div>
+      <div><dt>运行位置</dt><dd>本机 · 数据不出机</dd></div>
+    </dl>
+  </section>
+
+  <section class="inlets" aria-label="提交方式">
+    <div class="inlet">
+      <span class="step">步骤 01 · 文件</span>
+      <h2>音视频文件</h2>
+      <p>拖入或选择文件，按文件名自动识别模板。单文件 200 MB、60 分钟以内，可一次批量 20 个。</p>
+      <div class="acts"><button class="btn">选择文件</button><button class="linkish">拖拽区</button></div>
+    </div>
+    <div class="inlet">
+      <span class="step">步骤 02 · 链接</span>
+      <h2>音视频直链</h2>
+      <p>贴入音视频直链可直接转写；平台页面链接只做预览核对，不抓取内容。</p>
+      <div class="acts"><button class="btn">粘贴链接</button><button class="linkish">先预览</button></div>
+    </div>
+    <div class="inlet">
+      <span class="step">步骤 03 · 录制</span>
+      <h2>浏览器录音</h2>
+      <p>直接在本页说话录制，停止后命名进入转写队列，流程与上传一致。</p>
+      <div class="acts"><button class="btn ghost">开始录制</button><span style="font:400 12px/1 var(--sans);color:var(--ink-3)">未开始</span></div>
+    </div>
+  </section>
+
+  <div class="desk">
+    <div class="col">
+      <div class="sechead"><h2>任务台账</h2><span class="n">最近 5 条 / 全部 299</span></div>
+      <table class="ledger">
+        <colgroup><col class="c-no"><col><col class="c-num"><col class="c-num"><col class="c-st"></colgroup>
+        <thead><tr><th class="no">编号</th><th>文件名 / 模板</th><th class="num">时长</th><th class="num">提交时间</th><th style="text-align:right">状态</th></tr></thead>
+        <tbody>
+          <tr><td class="no">#650</td><td class="name"><b>t435a-d92b4b81-7774-4685-a11c-2b600658e091.wav</b><span>会议 · AI 开发 · 需求提示词</span></td><td class="num">1 分 30 秒</td><td class="num">11-18 17:16</td><td class="st"><i class="i-ok"></i>已完成</td></tr>
+          <tr><td class="no">#646</td><td class="name"><b>batch-e2e-b.wav</b><span>会议</span></td><td class="num">1 秒</td><td class="num">11-18 17:16</td><td class="st"><i class="i-ok"></i>已完成</td></tr>
+          <tr><td class="no">#643</td><td class="name"><b>paste.txt</b><span>会议 · N14 自动化测试 · 验收覆盖</span></td><td class="num">—</td><td class="num">11-18 17:15</td><td class="st"><i class="i-ok"></i>已完成</td></tr>
+          <tr><td class="no">#631</td><td class="name"><b>t435a-d75f9931-249d-4b69-b4ca-8d376f1f4b9e.wav</b><span>AI 开发 · APP 制作 · 智能体</span></td><td class="num">1 分 30 秒</td><td class="num">11-18 16:55</td><td class="st"><i class="i-ok"></i>已完成</td></tr>
+          <tr><td class="no">#602</td><td class="name"><b>paste.txt</b><span>N14 · 自动化测试 · 真实依据</span></td><td class="num">—</td><td class="num">11-18 15:53</td><td class="st"><i class="i-ok"></i>已完成</td></tr>
+        </tbody>
+      </table>
+
+      <div class="detail">
+        <div class="l">
+          <div class="eyebrow">摘要 · #552 · 会议 · 1 分 01 秒 · 云端 AI</div>
+          <div class="dtitle">团队协作与 AI Coding 复盘</div>
+          <p class="drop">本次分享围绕公司内 AI Coding 实战与团队协作，介绍从早期单会话 Agent 使用遇到的问题，到切换 Agent 或新开会话后希望继续原需求、避免重复解释背景。并以测试阶段发现新 Bug、当前会话阻塞需新开会话为例说明痛点，最终给出替代方案与工作复盘。</p>
+          <ol class="pts">
+            <li>分享主题：在公司中使用 AI Coding 的实战经验，以及团队协作方式。</li>
+            <li>早期单会话 Agent 模式带来的重复解释成本。</li>
+            <li>跨会话承接需求：换 Agent 或新开会话时保留原需求。</li>
+          </ol>
+
+          <div class="eyebrow" style="margin-top:26px">播放 · 逐句对照</div>
+          <div class="player">
+            <div class="pl-row">
+              <button class="pl-play" aria-label="播放">▶</button>
+              <span class="pl-time">00:24 / 01:01</span>
+              <div class="pl-bar"><i></i><span class="pl-knob"></span></div>
+              <button class="pl-btn" data-narrow="hide" aria-label="后退 10 秒">−10</button>
+              <button class="pl-btn" data-narrow="hide" aria-label="前进 10 秒">+10</button>
+              <button class="pl-btn" aria-pressed="false" aria-label="倍速">1×</button>
+              <button class="pl-btn" aria-pressed="false" aria-label="音量">♪</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="r">
+          <div class="eyebrow">待办</div>
+          <div class="todo"><span class="bx"></span><span>本段内容没有待办事项</span></div>
+          <div class="eyebrow" style="margin-top:22px">关键词</div>
+          <div class="kw"><b>AI Coding</b><b>Agent</b><b>新会话</b><b>团队协作</b><b>工作复盘</b></div>
+          <div class="eyebrow" style="margin-top:22px">模板</div>
+          <div class="chips">
+            <button class="chip seal" aria-pressed="true">会议</button><button class="chip">课程</button><button class="chip">访谈</button>
+            <button class="chip">播客</button><button class="chip">短视频</button>
+          </div>
+          <div class="eyebrow" style="margin-top:22px">转写口径</div>
+          <dl class="facts">
+            <dt>片段</dt><dd>24 / 31</dd>
+            <dt>字数</dt><dd>1 842</dd>
+            <dt>模板</dt><dd>会议</dd>
+            <dt>标签</dt><dd>3</dd>
+          </dl>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:20px">
+            <button class="btn sm">导出 Markdown</button><button class="btn sm ghost">生成分享链接</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <aside class="rail">
+      <div class="rblock">
+        <div class="k">今日配额</div>
+        <div class="bignum">36<small>/ 36 次</small></div>
+        <div class="ticks"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i></div>
+      </div>
+      <div class="rblock">
+        <div class="k">本月</div>
+        <div class="kv"><span>任务</span><b>31</b></div>
+        <div class="kv"><span>音频时长</span><b>8.4 小时</b></div>
+        <div class="kv"><span>平均转写</span><b>42 秒</b></div>
+      </div>
+      <div class="rblock">
+        <div class="k">模板</div>
+        <div class="chips">
+          <button class="chip" aria-pressed="true">会议</button><button class="chip">课程</button><button class="chip">访谈</button>
+          <button class="chip">播客</button><button class="chip">短视频</button>
+        </div>
+      </div>
+      <div class="rblock">
+        <div class="k">服务</div>
+        <div class="kv"><span>数据库</span><b>正常</b></div>
+        <div class="kv"><span>队列</span><b>0</b></div>
+        <div class="kv"><span>转写引擎</span><b>本地</b></div>
+      </div>
+    </aside>
+  </div>
+
+  <section class="sheet">
+    <div class="sechead"><h2>组件与状态</h2><span class="n">本页仅为方向定稿稿，非产品实现</span></div>
+
+    <div class="spec"><div class="lb">按钮</div><div class="demo">
+      <button class="btn">上传并开始转写</button><button class="btn seal">重试</button>
+      <button class="btn ghost">取消</button><button class="btn ghost">删除任务</button><button class="linkish">查看全部</button>
+    </div></div>
+
+    <div class="spec"><div class="lb">输入</div><div class="demo">
+      <div class="field"><label for="f1">链接</label><input id="f1" placeholder="https://… 音视频直链"></div>
+      <div class="field"><label for="f2">搜索</label><input id="f2" placeholder="文件名或任务编号"></div>
+    </div></div>
+
+    <div class="spec"><div class="lb">筛选</div><div class="demo">
+      <div class="segis"><button aria-pressed="true">全部 299</button><button>进行中 0</button><button>已完成 299</button><button>失败 0</button><button>收藏 0</button></div>
+    </div></div>
+
+    <div class="spec"><div class="lb">状态</div><div class="demo">
+      <span class="badge"><i style="background:var(--wait)"></i>排队中</span>
+      <span class="badge"><i style="background:var(--seal)"></i>转写中</span>
+      <span class="badge ok"><i></i>已完成</span>
+      <span class="badge bad"><i></i>失败</span>
+    </div></div>
+
+    <div class="spec"><div class="lb">提示</div><div class="demo">
+      <span class="toast">已复制原文</span><span class="toast">链接已失效，请重新生成</span>
+    </div></div>
+
+    <div class="spec"><div class="lb">弹层</div><div class="demo">
+      <div style="display:flex;gap:26px;align-items:flex-end;flex-wrap:wrap">
+        <div><div class="eyebrow" style="margin:0 0 7px">倍速（选中 1×）</div>
+          <div class="pl-menu" style="position:static;box-shadow:none">
+            <button>0.75×</button><button class="on" aria-current="true">1×</button><button>1.25×</button><button>1.5×</button><button>2×</button>
+          </div>
+        </div>
+        <div><div class="eyebrow" style="margin:0 0 7px">音量（竖向）</div>
+          <div class="pl-vol" style="position:static;box-shadow:none"><div class="tr"><i></i></div><span class="lb">音量</span></div>
+        </div>
+        <div><div class="eyebrow" style="margin:0 0 7px">抽屉头栏</div>
+          <div style="border:1px solid var(--rule);background:var(--leaf);width:300px">
+            <div style="display:flex;align-items:center;gap:12px;padding:12px 14px;border-bottom:1px solid var(--rule)">
+              <span style="font:600 15px/1.4 var(--serif)">任务 #552</span>
+              <span class="badge ok" style="margin-left:auto"><i></i>已完成</span>
+              <button class="pl-btn" aria-label="关闭" style="width:30px;height:30px">✕</button>
+            </div>
+            <div style="padding:14px;font:400 12px/1.7 var(--sans);color:var(--ink-3)">抽屉内容复用详情视图；遮罩墨色 32%，右滑 920px，390 全屏。</div>
+          </div>
+        </div>
+      </div>
+    </div></div>
+    <div class="spec"><div class="lb">空态</div><div class="demo">
+      <div class="empty"><b>还没有任务</b><span>上传一个音视频文件，或粘贴直链开始第一次转写。</span></div>
+    </div></div>
+  </section>
+
+  <footer><span>v0.1.0 · MIT · 自托管，音频不出本机</span><span>方向定稿 / 白纸档案（A+B 混合）</span></footer>
+</div>
+</body>
+</html>
