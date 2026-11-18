@@ -407,25 +407,81 @@ dl.meta dd { margin: 0; font-variant-numeric: tabular-nums; font-weight: var(--f
 .todo-item:last-child { border-bottom: 0; }
 .todo-meta { color: var(--ink-3); font-size: var(--fs-xs); line-height: var(--lh-xs); margin-top: var(--sp-1); font-variant-numeric: tabular-nums; }
 
-/* 页内对话框（auth.js 注入，替代 window.prompt） */
-.mn-dialog-overlay {
-  position: fixed; inset: 0;
-  background: rgba(26, 26, 26, .45);
-  display: flex; align-items: center; justify-content: center;
-  padding: var(--sp-4);
-  z-index: 50;
-  animation: mn-fade-in var(--dur-move) var(--ease);
+/* 页头用户区（T4.37b：登录页 + 多用户；占位 <span data-mn-userbar> 由 auth.js 渲染） */
+.mn-userbar {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
+  color: var(--ink-2);
 }
-.mn-dialog {
-  background: var(--surface);
-  border-radius: var(--r-xl);
-  padding: var(--sp-6);
-  width: min(440px, 100%);
-  box-shadow: var(--shadow-overlay);
-  animation: mn-rise-in var(--dur-move) var(--ease);
+.mn-userbar .mn-user-name {
+  color: var(--ink);
+  font-weight: var(--fw-medium);
 }
-.mn-dialog h3 { font-size: var(--fs-lg); line-height: var(--lh-lg); font-weight: var(--fw-bold); letter-spacing: -.3px; margin: 0 0 var(--sp-3); }
-.mn-dialog input[type="password"], .mn-dialog input[type="text"] {
+.mn-role-badge {
+  display: inline-block;
+  padding: 1px var(--sp-2);
+  background: var(--accent-tint);
+  color: var(--accent-deep);
+  border-radius: var(--r-xs);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+  font-weight: var(--fw-medium);
+}
+.mn-logout-btn {
+  padding: var(--sp-1) var(--sp-3);
+  font-size: var(--fs-xs);
+  line-height: var(--lh-xs);
+  background: transparent;
+  color: var(--ink-2);
+  border-color: var(--border-strong);
+}
+.mn-logout-btn:hover { background: var(--surface-muted); color: var(--ink); }
+.mn-logout-btn:active { transform: none; }
+
+/* 登录页（T4.37b）：单卡片，登录 / 首次创建账号两模式 */
+.mn-login-card {
+  max-width: 440px;
+  margin-top: var(--sp-7);
+}
+.mn-login-modes {
+  display: flex;
+  gap: var(--sp-2);
+  margin: var(--sp-3) 0 var(--sp-4);
+  border-bottom: 1px solid var(--border);
+}
+.mn-mode-btn {
+  background: transparent;
+  color: var(--ink-3);
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  padding: var(--sp-2) var(--sp-3);
+  font-weight: var(--fw-medium);
+}
+.mn-mode-btn:hover {
+  background: transparent;
+  color: var(--ink);
+  border-bottom-color: var(--border-strong);
+}
+.mn-mode-btn.mn-mode-active {
+  color: var(--ink);
+  font-weight: var(--fw-semibold);
+  border-bottom-color: var(--accent);
+}
+.mn-mode-btn:active { transform: none; }
+.mn-login-label {
+  display: block;
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
+  color: var(--ink-2);
+  margin: var(--sp-4) 0 var(--sp-2);
+}
+.mn-login-card input[type="text"],
+.mn-login-card input[type="password"] {
   width: 100%;
   padding: var(--sp-3) var(--sp-4);
   border: 1px solid var(--border-strong);
@@ -433,13 +489,17 @@ dl.meta dd { margin: 0; font-variant-numeric: tabular-nums; font-weight: var(--f
   font-family: var(--font-stack);
   font-size: var(--fs-sm);
   line-height: var(--lh-sm);
-  margin: var(--sp-3) 0;
+  background: var(--surface);
+  color: var(--ink);
   transition: border-color var(--dur-color) var(--ease);
 }
-.mn-dialog input:focus { outline: none; border-color: var(--ink); box-shadow: 0 0 0 3px rgba(26, 26, 26, .12); }
-.mn-dialog-actions { display: flex; gap: var(--sp-3); justify-content: flex-end; margin-top: var(--sp-4); }
-@keyframes mn-fade-in { from { opacity: 0; } to { opacity: 1; } }
-@keyframes mn-rise-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+.mn-login-card input:focus {
+  outline: none;
+  border-color: var(--ink);
+  box-shadow: 0 0 0 3px rgba(26, 26, 26, .12);
+}
+.mn-login-submit { width: 100%; margin-top: var(--sp-5); }
+.mn-login-note { margin-top: var(--sp-4); }
 
 /* 降级动效（prefers-reduced-motion：动效降级为瞬时/淡入） */
 @media (prefers-reduced-motion: reduce) {

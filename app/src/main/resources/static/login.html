@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="登录录音纪要平台；首次使用可创建账号，第一个账号将成为管理员。">
+<meta name="robots" content="noindex">
+<title>登录 · 录音纪要平台</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Ctext y=%2713%27 font-size=%2713%27%3E%F0%9F%8E%99%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<nav>
+  <span class="brand">录音纪要平台</span>
+</nav>
+<main>
+  <div class="card mn-login-card">
+    <h1 id="mnLoginTitle">登录</h1>
+    <div class="mn-login-modes">
+      <button type="button" id="modeLogin" class="mn-mode-btn mn-mode-active">登录</button>
+      <button type="button" id="modeRegister" class="mn-mode-btn">首次使用 · 创建账号</button>
+    </div>
+    <form id="loginForm" novalidate>
+      <label class="mn-login-label" for="mnUsername">用户名</label>
+      <input type="text" id="mnUsername" maxlength="32" autocomplete="username" spellcheck="false" aria-label="用户名">
+      <label class="mn-login-label" for="mnPassword">密码</label>
+      <input type="password" id="mnPassword" autocomplete="current-password" aria-label="密码">
+      <div id="mnConfirmRow" hidden>
+        <label class="mn-login-label" for="mnPassword2">确认密码</label>
+        <input type="password" id="mnPassword2" autocomplete="new-password" aria-label="确认密码">
+      </div>
+      <p class="error-text" id="mnLoginError" hidden></p>
+      <button type="submit" id="mnSubmitBtn" class="mn-login-submit">登录</button>
+      <p class="hint mn-login-note">第一个创建的账号将成为管理员；如实例已关闭注册会提示联系管理员。</p>
+    </form>
+  </div>
+</main>
+<footer class="site-footer">
+  <span class="version-tag">v0.1.0</span>
+  <span>以 MIT 许可证开源发布</span>
+</footer>
+<script src="auth.js"></script>
+<script>
+(function () {
+  /* 已登录访问登录页 → 直接去 next / 首页（login.html 不展示业务 UI） */
+  if (mnGetToken()) {
+    location.replace(mnSafeNext(new URLSearchParams(location.search).get('next')) || 'index.html');
+    return;
+  }
+
+  var form = document.getElementById('loginForm');
+  var titleEl = document.getElementById('mnLoginTitle');
+  var confirmRow = document.getElementById('mnConfirmRow');
+  var errEl = document.getElementById('mnLoginError');
+  var submitBtn = document.getElementById('mnSubmitBtn');
+  var usernameEl = document.getElementById('mnUsername');
+  var passwordEl = document.getElementById('mnPassword');
+  var password2El = document.getElementById('mnPassword2');
+  var mode = 'login';
+  var submitting = false;
+
+  function setError(msg) {
+    errEl.textContent = msg || '';
+    errEl.hidden = !msg;
+  }
+
+  function setMode(m) {
+    mode = m;
+    document.getElementById('modeLogin').classList.toggle('mn-mode-active', m === 'login');
+    document.getElementById('modeRegister').classList.toggle('mn-mode-active', m === 'register');
+    titleEl.textContent = m === 'login' ? '登录' : '创建账号';
+    submitBtn.textContent = m === 'login' ? '登录' : '创建账号';
+    confirmRow.hidden = m !== 'register';
+    setError('');
+  }
+
+  document.getElementById('modeLogin').addEventListener('click', function () { setMode('login'); });
+  document.getElementById('modeRegister').addEventListener('click', function () { setMode('register'); });
+
+  function finish() {
+    submitting = false;
+    submitBtn.disabled = false;
+    passwordEl.value = '';
+    password2El.value = '';
+  }
+
+  form.addEventListener('submit', function (e) {
+    e.preventDefault();
+    if (submitting) return; /* 双击只发一次：提交中禁用按钮并直接返回 */
+    setError('');
+    var username = usernameEl.value.trim();
+    var password = passwordEl.value;
+
+    /* 注册模式前端就地校验：不合法不发请求 */
+    if (mode === 'register') {
+      if (username.length < 3 || username.length > 32) {
+        setError('用户名需 3–32 个字符');
+        passwordEl.value = '';
+        password2El.value = '';
+        return;
+      }
+      if (password.length < 8) {
+        setError('密码至少 8 个字符');
+        passwordEl.value = '';
+        password2El.value = '';
+        return;
+      }
+      if (password !== password2El.value) {
+        setError('两次输入的密码不一致');
+        passwordEl.value = '';
+        password2El.value = '';
+        return;
+      }
+    }
+
+    submitting = true;
+    submitBtn.disabled = true;
+    var url = mode === 'login' ? 'api/v1/auth/login' : 'api/v1/auth/register';
+    /* 裸 fetch：登录/注册端点豁免鉴权，绝不带 Bearer，也绝不把 API_TOKEN 写进前端 */
+    fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: username, password: password })
+    }).then(function (resp) {
+      return resp.json().catch(function () { return {}; }).then(function (data) {
+        if (resp.ok && data.token) {
+          try {
+            localStorage.setItem('mn_token', data.token);
+            localStorage.setItem('mn_user', JSON.stringify(
+              { user_id: data.user_id, username: data.username, role: data.role }));
+          } catch (err) {
+            finish();
+            setError('浏览器存储不可用，无法保存登录态');
+            return;
+          }
+          location.replace(mnSafeNext(new URLSearchParams(location.search).get('next')) || 'index.html');
+          return;
+        }
+        finish();
+        if (resp.status === 401) setError('用户名或密码错误');
+        else if (resp.status === 409) setError('用户名已被占用');
+        else if (resp.status === 403) setError('注册已关闭，请联系管理员');
+        else if (resp.status === 400) setError(data.message || '参数有误');
+        else setError(data.message || '服务暂时不可用');
+      });
+    }, function () {
+      finish();
+      setError('服务暂时不可用');
+    });
+  });
+})();
+</script>
+</body>
+</html>
