@@ -7,7 +7,6 @@
 <title>任务列表 · 录音纪要平台</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Ctext y=%2713%27 font-size=%2713%27%3E%F0%9F%8E%99%3C/text%3E%3C/svg%3E">
 <link rel="stylesheet" href="style.css">
-<link rel="stylesheet" href="theme.css">
 </head>
 <body>
 <nav>
@@ -231,13 +230,13 @@
 
   function emptyHtml() {
     return '<div class="empty-state">' + EMPTY_ICON +
-      '<h3>这里还没有任务</h3><p>换一个筛选条件，或提交第一个音/视频文件开始转写。</p>' +
+      '<h2 class="empty-title">这里还没有任务</h2><p>换一个筛选条件，或提交第一个音/视频文件开始转写。</p>' +
       '<a class="btn-secondary" href="index.html">去提交文件</a></div>';
   }
 
   function emptyOfflineHtml() {
     return '<div class="empty-state">' + EMPTY_ICON +
-      '<h3>服务暂时不可用</h3><p>请确认服务端已启动，然后刷新重试。</p>' +
+      '<h2 class="empty-title">服务暂时不可用</h2><p>请确认服务端已启动，然后刷新重试。</p>' +
       '<a class="btn-secondary" href="tasks.html">刷新重试</a></div>';
   }
 
@@ -275,7 +274,7 @@
     if (!state.items.length) {
       listEl.innerHTML = state.search
         ? '<div class="empty-state">' + EMPTY_ICON +
-          '<h3>没有匹配的结果</h3><p>换个关键词试试。</p></div>' /* 空结果空态文案不变 */
+          '<h2 class="empty-title">没有匹配的结果</h2><p>换个关键词试试。</p></div>' /* 空结果空态文案不变 */
         : emptyHtml();
     } else {
       listEl.innerHTML = state.items.map(rowHtml).join('');
@@ -522,6 +521,5 @@
   });
 })();
 </script>
-<script src="particles.js" defer></script>
 </body>
 </html>
