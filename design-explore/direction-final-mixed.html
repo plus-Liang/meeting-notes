@@ -225,7 +225,12 @@ footer{display:flex;justify-content:space-between;gap:18px;margin-top:44px;paddi
   .inlet + .inlet{border-left:0;border-top:1px solid var(--rule)}
   .col{padding-top:30px}
   .rail{grid-template-columns:1fr 1fr}
+  .ledger{table-layout:auto}
+  .ledger col.c-num{width:0}
+  .ledger col.c-no{width:52px}
   .ledger .num,.ledger thead th.num{display:none}
+  .ledger .name b,.ledger .name span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ledger .name b{max-width:52vw}
   .spec{grid-template-columns:1fr;gap:8px}
   .field{width:100%}
   .pl-row{gap:10px;flex-wrap:wrap}
@@ -240,7 +245,7 @@ footer{display:flex;justify-content:space-between;gap:18px;margin-top:44px;paddi
 
   <div class="docket">
     <b>REC-NOTES</b><span>自托管 · 私有部署</span>
-    <span class="r"><span>归档 299</span><span>配额 36 / 36</span><span>2026-11-18</span><span>V0.1.0</span></span>
+    <span class="r"><span>归档 299</span><span>今日 36 / 100</span><span>2026-11-18</span><span>V0.1.0</span></span>
   </div>
 
   <header class="top">
@@ -250,12 +255,12 @@ footer{display:flex;justify-content:space-between;gap:18px;margin-top:44px;paddi
   </header>
 
   <section class="mast">
-    <h1>录音进来，<br>纪要归档<i>。</i></h1>
+    <h1>录音进来<br>纪要归档</h1>
     <dl class="meta">
-      <div><dt>今日配额</dt><dd class="big">36 / 36</dd></div>
-      <div><dt>归档总量</dt><dd>299 条</dd></div>
+      <div><dt>归档总量</dt><dd class="big">299 条</dd></div>
+      <div><dt>音频总时长</dt><dd>8.4 小时</dd></div>
       <div><dt>最近一条</dt><dd>11-18 17:16</dd></div>
-      <div><dt>运行位置</dt><dd>本机 · 数据不出机</dd></div>
+      <div><dt>部署方式</dt><dd>私有部署</dd></div>
     </dl>
   </section>
 
@@ -347,14 +352,25 @@ footer{display:flex;justify-content:space-between;gap:18px;margin-top:44px;paddi
     <aside class="rail">
       <div class="rblock">
         <div class="k">今日配额</div>
-        <div class="bignum">36<small>/ 36 次</small></div>
-        <div class="ticks"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i></div>
+        <div class="bignum">36<small>/ 100 次</small></div>
+        <div style="height:3px;background:var(--rule-soft);margin-top:12px;border-radius:999px;overflow:hidden"><i style="display:block;height:100%;width:36%;background:var(--seal)"></i></div>
+        <div class="kv" style="border-top:0;padding-top:9px"><span>剩余</span><b>64 次</b></div>
       </div>
       <div class="rblock">
-        <div class="k">本月</div>
-        <div class="kv"><span>任务</span><b>31</b></div>
-        <div class="kv"><span>音频时长</span><b>8.4 小时</b></div>
-        <div class="kv"><span>平均转写</span><b>42 秒</b></div>
+        <div class="k">任务状态</div>
+        <div style="display:flex;height:8px;border-radius:999px;overflow:hidden;background:var(--rule-soft)">
+          <i style="width:100%;background:var(--done)"></i>
+        </div>
+        <div class="kv" style="border-top:0"><span>已完成</span><b>299</b></div>
+        <div class="kv"><span>进行中</span><b>0</b></div>
+        <div class="kv"><span>失败</span><b>0</b></div>
+      </div>
+      <div class="rblock">
+        <div class="k">处理质量</div>
+        <div class="kv" style="border-top:0"><span>成功率</span><b>100%</b></div>
+        <div class="kv"><span>平均处理</span><b>0.42×</b></div>
+        <div class="kv"><span>AI 摘要档位</span><b>云端</b></div>
+        <div class="kv"><span>ASR 引擎</span><b>本地</b></div>
       </div>
       <div class="rblock">
         <div class="k">模板</div>
@@ -362,12 +378,6 @@ footer{display:flex;justify-content:space-between;gap:18px;margin-top:44px;paddi
           <button class="chip" aria-pressed="true">会议</button><button class="chip">课程</button><button class="chip">访谈</button>
           <button class="chip">播客</button><button class="chip">短视频</button>
         </div>
-      </div>
-      <div class="rblock">
-        <div class="k">服务</div>
-        <div class="kv"><span>数据库</span><b>正常</b></div>
-        <div class="kv"><span>队列</span><b>0</b></div>
-        <div class="kv"><span>转写引擎</span><b>本地</b></div>
       </div>
     </aside>
   </div>
@@ -427,7 +437,7 @@ footer{display:flex;justify-content:space-between;gap:18px;margin-top:44px;paddi
     </div></div>
   </section>
 
-  <footer><span>v0.1.0 · MIT · 自托管，音频不出本机</span><span>方向定稿 / 白纸档案（A+B 混合）</span></footer>
+  <footer><span>v0.1.0 · MIT · 私有部署 · 数据只在你自己的服务器</span><span>方向定稿 / 白纸档案（A+B 混合）</span></footer>
 </div>
 </body>
 </html>
