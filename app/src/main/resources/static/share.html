@@ -75,7 +75,8 @@
       return;
     }
     var html = '<div class="share-mast">' +
-      '<h1>' + escapeHtml(data.original_name || ('任务 #' + data.task_id)) + '</h1>' +
+      /* T4.43：标题优先展示名（display_name，只增键），未命名回退原文件名（溯源不变） */
+      '<h1>' + escapeHtml(data.display_name || data.original_name || ('任务 #' + data.task_id)) + '</h1>' +
       '<p class="share-meta">时长 ' + fmtDuration(data.duration_sec) + ' · 创建于 ' + fmtDate(data.created_at) +
       ' · 档位 ' + escapeHtml(data.ai_tier || '—') + ' · 模板 ' + escapeHtml(data.template || '—') + '</p></div>';
     html += '<div style="margin-top:26px">';

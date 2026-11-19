@@ -207,6 +207,19 @@
       : '';
   }
 
+  /* ===== T4.43：展示名规则 = display_name || 清洗文件名 =====
+     清洗 = 去常见音视频/字幕扩展名、>60 字截断加省略号；纯 uuid/hash 名不特殊处理（由用户重命名解决）。
+     原文件名与溯源不动（display_name 是 task 表独立展示列，V9）。 */
+  var MEDIA_EXT_RE = /\.(mp3|wav|m4a|m4v|aac|ogg|oga|opus|flac|webm|mp4|mov|mkv|avi|wmv|amr|wma|3gp|srt|ass|ssa|txt|md)(\.(tmp|part|temp))?$/i;
+  function cleanFileName(raw) {
+    if (!raw) return '';
+    var n = String(raw).replace(MEDIA_EXT_RE, '');
+    return n.length > 60 ? n.slice(0, 60) + '…' : n;
+  }
+  function displayTitle(item) {
+    return item.display_name || cleanFileName(item.original_name) || localName(item.id) || ('任务 ' + item.id);
+  }
+
   function fmtClockShort(iso) {
     if (!iso) return '—';
     try {
@@ -336,7 +349,7 @@
   }
 
   function rowHtml(item) {
-    var name = item.original_name || localName(item.id) || ('任务 ' + item.id);
+    var name = displayTitle(item);
     /* T4.29：星标 + 标签 chips（favorite/labels 为列表接口只增字段） */
     var star = item.favorite ? '<span class="fav-star" title="已收藏">★</span>' : '';
     var checkbox = '<span class="row-check-cell"><input type="checkbox" class="row-check" data-id="' + item.id + '"' +
@@ -355,7 +368,9 @@
       '<span class="st"><i class="st-dot ' + stDotClass(item.status) + '"></i>' + statusText(item.status) + '</span>' +
       '<span class="task-side"><a href="task.html?id=' + item.id + '" class="task-detail-link" data-task-id="' + item.id +
       '" data-task-name="' + escapeHtml(name).replace(/"/g, '&quot;') + '" ' +
-      'aria-label="查看任务 #' + item.id + ' 详情">详情</a></span></div>';
+      'aria-label="查看任务 #' + item.id + ' 详情">详情</a>' +
+      '<button type="button" class="btn-secondary js-rename" data-rename-id="' + item.id + '"' +
+      ' aria-label="重命名任务 #' + item.id + '">重命名</button></span></div>';
   }
 
   var EMPTY_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
@@ -591,6 +606,86 @@
       }
     });
   }
+
+  /* ===== T4.43：行内重命名（PATCH /api/v1/tasks/{id}）——回车保存 / ESC 取消 / 失焦保存；
+     K-80：成功后回读详情再更新本地行；失败 toast + 还原。display_name 是独立展示列，
+     原文件名与溯源不动 ===== */
+  function startRowRename(id) {
+    var row = listEl.querySelector('.task-row[data-id="' + id + '"]');
+    if (!row || row.querySelector('.rename-input')) return;
+    var item = state.items.filter(function (i) { return i.id === id; })[0];
+    if (!item) return;
+    var title = row.querySelector('.task-title');
+    if (!title) return;
+    var current = item.display_name || '';
+    var wrap = document.createElement('span');
+    wrap.className = 'rename-wrap';
+    wrap.innerHTML = '<input type="text" class="rename-input" maxlength="120" ' +
+      'value="' + escapeAttr(current) + '" aria-label="重命名任务 #' + id + '（回车保存，ESC 取消）">' +
+      '<button type="button" class="btn-secondary js-rename-save">保存</button>' +
+      '<button type="button" class="btn-secondary js-rename-cancel">取消</button>';
+    title.innerHTML = '';
+    title.appendChild(wrap);
+    var input = wrap.querySelector('.rename-input');
+    var settled = false;
+    input.focus();
+    input.select();
+    function finish(mode) {
+      if (settled) return;
+      settled = true;
+      if (mode === 'cancel') { render(true); return; }
+      saveRename(id, input.value, current);
+    }
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); finish('save'); }
+      else if (e.key === 'Escape') { finish('cancel'); }
+    });
+    input.addEventListener('blur', function (e) {
+      /* 焦点移入保存/取消按钮时不抢跑，交给按钮 click（点取消必须真取消） */
+      if (e.relatedTarget && wrap.contains(e.relatedTarget)) return;
+      finish('save');
+    });
+    wrap.querySelector('.js-rename-save').addEventListener('click', function () { finish('save'); });
+    wrap.querySelector('.js-rename-cancel').addEventListener('click', function () { finish('cancel'); });
+  }
+
+  function saveRename(id, value, original) {
+    var v = String(value == null ? '' : value).trim();
+    if (v === original) { render(true); return; } /* 无变化 = 直接还原（不发请求） */
+    sendJson('api/v1/tasks/' + id, 'PATCH', { display_name: v }).then(function (data) {
+      if (data.__httpStatus !== 200) {
+        mnDrawerToast('重命名失败：' + (data.message || ('HTTP ' + data.__httpStatus)));
+        render(true); /* 失败还原（本地未动，行回到旧名） */
+        return;
+      }
+      /* K-80：PATCH 成功后回读详情，以服务端落库值为准更新列表行 */
+      getJson('api/v1/tasks/' + id).then(function (detail) {
+        var item = state.items.filter(function (i) { return i.id === id; })[0];
+        if (item && detail && detail.__httpStatus === 200) {
+          item.display_name = detail.display_name || null;
+        }
+        render(true);
+        mnDrawerToast('已重命名');
+      }, function () {
+        /* 回读失败用 PATCH 响应兜底（已落库，仅展示层保守） */
+        var item = state.items.filter(function (i) { return i.id === id; })[0];
+        if (item) item.display_name = v || null;
+        render(true);
+        mnDrawerToast('已重命名');
+      });
+    }, function () {
+      mnDrawerToast('重命名失败：服务暂时不可用');
+      render(true);
+    });
+  }
+
+  /* 重命名入口（事件委托：行随筛选/翻页重建，委托不重绑） */
+  listEl.addEventListener('click', function (e) {
+    var btn = e.target.closest('.js-rename');
+    if (!btn) return;
+    e.preventDefault();
+    startRowRename(Number(btn.getAttribute('data-rename-id')));
+  });
 
   /* ===== T4.42：筛选条事件（时间范围 / 状态 / 收藏 / 标签多选弹层） ===== */
   function closeLabelPop() {

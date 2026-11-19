@@ -948,3 +948,21 @@ details.example[open] summary { margin-bottom: 12px; }
 }
 .site-footer a { color: var(--ink-2); border-bottom: 1px solid var(--rule); padding-bottom: 1px; transition: border-color var(--dur-fast) var(--ease); }
 .site-footer a:hover { color: var(--ink); border-bottom-color: var(--ink); }
+
+/* ========== T4.43：行内重命名（列表行/详情刊头共用；hairline 输入 + pill 按钮，白纸档案语汇不变） ========== */
+.rename-wrap { display: inline-flex; align-items: center; gap: 8px; min-width: 0; flex-wrap: wrap; }
+.rename-input {
+  height: 34px;
+  padding: 0 14px;
+  border: 1px solid var(--rule);
+  background: var(--leaf);
+  color: var(--ink);
+  font: 400 14px/1 var(--sans);
+  border-radius: var(--r-field);
+  min-width: 180px;
+  max-width: 100%;
+  transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+}
+.rename-input:focus { outline: none; border-color: var(--ink); box-shadow: 0 0 0 3px rgba(20, 18, 14, .08); }
+.rename-wrap .btn-secondary { flex: none; height: 34px; padding: 0 14px; }
+.mn-detail-head .js-rename-btn { margin-left: 12px; vertical-align: middle; }

@@ -61,18 +61,37 @@ public class TaskExportController {
         }
         return ResponseEntity.ok()
                 .contentType(new MediaType("text", "markdown", StandardCharsets.UTF_8))
-                .header("Content-Disposition", "attachment; filename=\"task-" + id + ".md\"")
+                .header("Content-Disposition", contentDisposition(id, rendered.displayName()))
                 .body(rendered.markdown());
     }
 
-    /** 单条渲染结果：markdown 非空 = 成功（entryName 为 zip 条目名）；否则 skipReason ∈ NOT_FOUND / NO_CONTENT。 */
-    record RenderedExport(String markdown, String entryName, String skipReason) {
+    /**
+     * 单条导出 Content-Disposition（T4.43）：有展示名 → {@code filename}（纯 ASCII 时）+
+     * {@code filename*}（RFC 5987 UTF-8 百分号编码，中文文件名可落盘）；无展示名 → 维持
+     * {@code task-<id>.md} 原口径。文件名安全化见 {@link TaskZipExportController#sanitizeExportBase}。
+     */
+    static String contentDisposition(long id, String displayName) {
+        String base = TaskZipExportController.sanitizeExportBase(displayName);
+        if (base == null) {
+            return "attachment; filename=\"task-" + id + ".md\"";
+        }
+        String encoded = java.net.URLEncoder.encode(base, StandardCharsets.UTF_8)
+                .replace("+", "%20");
+        boolean asciiSafe = base.matches("[\\x20-\\x7E]+") && !base.contains("\"") && !base.contains("\\");
+        String fallback = asciiSafe ? base : "task-" + id;
+        return "attachment; filename=\"" + fallback + ".md\"; filename*=UTF-8''" + encoded + ".md";
     }
 
-    /** 导出行（T4.27 提升为类级：zip 测试可构造；source_uri 供 zip 条目名）。 */
+    /** 单条渲染结果：markdown 非空 = 成功（entryName 为 zip 条目名）；否则 skipReason ∈ NOT_FOUND / NO_CONTENT。
+     *  T4.43：displayName 随行返回（单条导出 Content-Disposition 优先用它）。 */
+    record RenderedExport(String markdown, String entryName, String skipReason, String displayName) {
+    }
+
+    /** 导出行（T4.27 提升为类级：zip 测试可构造；source_uri 供 zip 条目名；T4.43 增 display_name）。
+     *  display_name 是 task 列（用户展示名，T4.43/V9），与 source_uri 溯源无关。 */
     record ExportRow(String status, String transcript, String summary,
                      String keywords, String todos, String keypoints,
-                     String transcriptPunctuated, String sourceUri) {
+                     String transcriptPunctuated, String sourceUri, String displayName) {
     }
 
     /**
@@ -84,20 +103,22 @@ public class TaskExportController {
                 SELECT t.status,
                        CASE WHEN t.status = 'DONE' THEN r.transcript END AS transcript,
                        r.summary, r.keywords::text AS keywords, r.todos::text AS todos,
-                       r.keypoints::text AS keypoints, r.transcript_punctuated, t.source_uri
+                       r.keypoints::text AS keypoints, r.transcript_punctuated, t.source_uri,
+                       t.display_name
                 FROM task t
                 LEFT JOIN task_result r ON r.task_id = t.id
                 WHERE t.id = ? AND t.user_id = ?
                 """, (rs, i) -> new ExportRow(rs.getString("status"), rs.getString("transcript"),
                 rs.getString("summary"), rs.getString("keywords"), rs.getString("todos"),
-                rs.getString("keypoints"), rs.getString("transcript_punctuated"), rs.getString("source_uri")),
+                rs.getString("keypoints"), rs.getString("transcript_punctuated"), rs.getString("source_uri"),
+                rs.getString("display_name")),
                 id, userId);
         if (rows.isEmpty()) {
-            return new RenderedExport(null, null, "NOT_FOUND");
+            return new RenderedExport(null, null, "NOT_FOUND", null);
         }
         ExportRow row = rows.get(0);
         if (row.transcript() == null || row.transcript().isBlank()) {
-            return new RenderedExport(null, null, "NO_CONTENT");
+            return new RenderedExport(null, null, "NO_CONTENT", null);
         }
         List<String> keywords = null;
         List<TodoItemView> todos = null;
@@ -123,7 +144,9 @@ public class TaskExportController {
         }
         String markdown = TaskMarkdownExporter.export(sections, row.summary(), keywords, keypoints,
                 transcriptForExport(row.transcriptPunctuated(), row.transcript()), todos);
-        return new RenderedExport(markdown, TaskZipExportController.zipEntryName(id, row.sourceUri()), null);
+        return new RenderedExport(markdown,
+                TaskZipExportController.zipEntryName(id, row.sourceUri(), row.displayName()),
+                null, row.displayName());
     }
 
     private static ApiException exportError(long id, String skipReason) {

@@ -82,15 +82,118 @@
     if (data.ai_tier) {
       badges += ' ' + badge(TIER_TEXT[data.ai_tier] || data.ai_tier, TIER_CLS[data.ai_tier] || '');
     }
-    /* T4.41：详情刊头 = mn-detail-head（左：衬线大标题 + 状态徽章行；右：meta 表），对齐定稿稿刊头语汇 */
+  /* T4.41：详情刊头 = mn-detail-head（左：衬线大标题 + 状态徽章行；右：meta 表），对齐定稿稿刊头语汇。
+     T4.43：标题旁展示 display_name（用户展示名，null=未命名只显示编号）+「重命名」入口（药丸按钮）。 */
+    var namePart = data.display_name
+      ? '<span class="mn-task-name"> · ' + escapeHtml(data.display_name) + '</span>' : '';
     return '<div class="mn-detail-head">' +
-      '<div><h1>任务 <span class="num">#' + data.task_id + '</span></h1>' +
+      '<div><h1>任务 <span class="num">#' + data.task_id + '</span>' + namePart +
+      '<button type="button" class="btn-secondary js-rename-btn" id="renameBtn" ' +
+      'aria-label="重命名任务 #' + data.task_id + '">重命名</button></h1>' +
       '<div class="task-sub" style="margin-top:10px">' + badges + '</div></div>' +
       '<dl class="meta">' +
       '<div><dt>时长</dt><dd>' + fmtDuration(data.duration_sec) + '</dd></div>' +
       '<div><dt>大小</dt><dd>' + fmtBytes(data.size_bytes) + '</dd></div>' +
       '<div><dt>提交时间</dt><dd>' + fmtDate(data.created_at) + '</dd></div>' +
       '</dl></div>';
+  }
+
+  /* ===== T4.43：重命名（PATCH /api/v1/tasks/{id}）——回车保存 / ESC 取消 / 失焦保存；
+     K-80：成功后回读详情重绘整卡（标题/导出文案以服务端落库值为准）；失败 toast + 还原。
+     display_name 是独立展示列，原文件名与溯源不动 ===== */
+  var lastDetail = null;
+  var renameActive = false; /* 编辑中：3s 轮询不重绘防输入被吞；finish 时先清标记再 render（防自锁） */
+
+  /* 轻提示 toast（墨底 pill，复用 .mn-drawer-toast 样式；2.2s 自动消失） */
+  function mnToast(text) {
+    var old = document.querySelector('.mn-page-toast');
+    if (old && old.parentNode) old.parentNode.removeChild(old);
+    var el = document.createElement('div');
+    el.className = 'mn-drawer-toast mn-page-toast';
+    el.textContent = text;
+    document.body.appendChild(el);
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () { el.classList.add('show'); });
+    });
+    setTimeout(function () { el.classList.remove('show'); }, 2200);
+    setTimeout(function () { if (el.parentNode) el.parentNode.removeChild(el); }, 2600);
+  }
+
+  /* 导出文件名优先展示名（安全化同服务端口径：非法字符 → _，空则回退 meeting-notes-<id>） */
+  function exportDownloadName(data) {
+    var base = data.display_name
+      ? String(data.display_name).replace(/[\\/:*?"<>|\r\n\t]/g, '_').trim() : '';
+    if (!base) base = 'meeting-notes-' + data.task_id;
+    return base + '.md';
+  }
+
+  function startDetailRename(data) {
+    var h1 = card.querySelector('.mn-detail-head h1');
+    if (!h1 || h1.querySelector('.rename-input')) return;
+    renameActive = true;
+    var current = data.display_name || '';
+    var wrap = document.createElement('span');
+    wrap.className = 'rename-wrap';
+    wrap.innerHTML = '<input type="text" class="rename-input" maxlength="120" value="' +
+      escapeAttr(current) + '" aria-label="重命名任务（回车保存，ESC 取消）">' +
+      '<button type="button" class="btn-secondary js-rename-save">保存</button>' +
+      '<button type="button" class="btn-secondary js-rename-cancel">取消</button>';
+    h1.innerHTML = '任务 <span class="num">#' + data.task_id + '</span> ';
+    h1.appendChild(wrap);
+    var input = wrap.querySelector('.rename-input');
+    var settled = false;
+    input.focus();
+    input.select();
+    function finish(mode) {
+      if (settled) return;
+      settled = true;
+      renameActive = false; /* 先清编辑标记，render 才能重绘（保存/取消共用） */
+      if (mode === 'cancel') { render(lastDetail); return; }
+      saveDetailRename(data.task_id, input.value, current);
+    }
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); finish('save'); }
+      else if (e.key === 'Escape') { finish('cancel'); }
+    });
+    input.addEventListener('blur', function (e) {
+      if (e.relatedTarget && wrap.contains(e.relatedTarget)) return;
+      finish('save');
+    });
+    wrap.querySelector('.js-rename-save').addEventListener('click', function () { finish('save'); });
+    wrap.querySelector('.js-rename-cancel').addEventListener('click', function () { finish('cancel'); });
+  }
+
+  function saveDetailRename(id, value, original) {
+    var v = String(value == null ? '' : value).trim();
+    if (v === original) { render(lastDetail); return; } /* 无变化 = 直接还原（不发请求） */
+    sendJson('api/v1/tasks/' + id, 'PATCH', { display_name: v }).then(function (resp) {
+      if (resp.__httpStatus !== 200) {
+        mnToast('重命名失败：' + (resp.message || ('HTTP ' + resp.__httpStatus)));
+        render(lastDetail); /* 失败还原（K-80：以服务端为准，本地未动） */
+        return;
+      }
+      /* K-80：PATCH 成功后回读详情重绘整卡（标题/导出文案同步新名） */
+      getJson('api/v1/tasks/' + id).then(function (detail) {
+        if (detail && detail.__httpStatus === 200) {
+          render(detail);
+        } else {
+          render(lastDetail);
+        }
+        mnToast('已重命名');
+      }, function () {
+        render(lastDetail); /* 回读失败保持现值（已落库） */
+        mnToast('已重命名');
+      });
+    }, function () {
+      mnToast('重命名失败：服务暂时不可用');
+      render(lastDetail);
+    });
+  }
+
+  function bindDetailRename(data) {
+    var btn = document.getElementById('renameBtn');
+    if (!btn) return;
+    btn.addEventListener('click', function () { startDetailRename(data); });
   }
 
   /* D-072 语义：null = AI 未启用或生成失败；[] = 确实没有内容。两者文案必须区分 */
@@ -483,14 +586,15 @@
         }
         return resp.text().then(function (text) {
           var blob = new Blob([text], { type: 'text/markdown;charset=utf-8' });
+          var dlName = exportDownloadName(data); /* T4.43：优先展示名 */
           var a = document.createElement('a');
           a.href = URL.createObjectURL(blob);
-          a.download = 'meeting-notes-' + data.task_id + '.md';
+          a.download = dlName;
           document.body.appendChild(a);
           a.click();
           a.remove();
           URL.revokeObjectURL(a.href);
-          msgEl.textContent = '已开始下载 meeting-notes-' + data.task_id + '.md。';
+          msgEl.textContent = '已开始下载 ' + dlName + '。';
           btn.disabled = false;
         });
       }, function () {
@@ -505,7 +609,14 @@
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
 
+  /* T4.43：拼进 HTML 属性的值一律 escapeAttr（含引号，同 tasks.html 口径） */
+  function escapeAttr(s) {
+    return escapeHtml(s).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
   function render(data) {
+    lastDetail = data;
+    if (renameActive) return false; /* T4.43：改名编辑中轮询不重绘（finish 先清 renameActive 再 render） */
     if (data.__httpStatus === 404) {
       card.innerHTML = '<h1>任务不存在</h1>' +
         '<p class="hint">任务 #' + escapeHtml(id) + ' 不存在或不可见（404 TASK_NOT_FOUND）。' +
@@ -546,6 +657,7 @@
       body = '<p class="hint">未知状态：' + escapeHtml(status) + '</p>';
     }
     card.innerHTML = head + body;
+    bindDetailRename(data); /* T4.43：重命名入口随刊头重建 */
     if (status === 'DONE') {
       bindExport(data);
       bindDelete(data);

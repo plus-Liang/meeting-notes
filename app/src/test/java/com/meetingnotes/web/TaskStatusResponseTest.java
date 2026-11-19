@@ -16,8 +16,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * 详情契约键序：原 11 键 + template（T3.9 第 12）+ keypoints（T4.17 第 13）+ transcript_punctuated
- * （T4.18 第 14）+ segments（T4.35a 第 15）+ speaker_map（T4.36 第 16）（不多不少、键序不变、
- * 历史/未生成 null——只增不改）。
+ * （T4.18 第 14）+ segments（T4.35a 第 15）+ speaker_map（T4.36 第 16）+ display_name（T4.43 第 17）
+ * （不多不少、键序不变、历史/未生成 null——只增不改）。
  * 列表/POST/导出不在本记录，键集不受影响。
  */
 class TaskStatusResponseTest {
@@ -37,7 +37,8 @@ class TaskStatusResponseTest {
                 List.of(new KeypointView("扩容计划", "与会人员讨论了数据库扩容的时间表。")),
                 "与会人员讨论了，数据库扩容的时间表。", template,
                 java.util.List.of(new TaskStatusResponse.SegmentView(0.12, 3.45, "大家好，我们开始。")),
-                java.util.Map.of("0", "说话人 1"));
+                java.util.Map.of("0", "说话人 1"),
+                "第三章 讲座");
     }
 
     @Test
@@ -52,8 +53,9 @@ class TaskStatusResponseTest {
         }
         assertEquals(List.of("task_id", "status", "duration_sec", "size_bytes", "created_at",
                         "transcript", "error_code", "summary", "keywords", "ai_tier", "todos",
-                        "keypoints", "transcript_punctuated", "template", "segments", "speaker_map"),
-                keys, "键集 = 15 键 + speaker_map（T4.36 第 16，只增不改），不许插在中间或改名");
+                        "keypoints", "transcript_punctuated", "template", "segments", "speaker_map",
+                        "display_name"),
+                keys, "键集 = 16 键 + display_name（T4.43 第 17，只增在末尾），不许插在中间或改名");
         assertEquals("course", node.get("template").asText(), "新任务 template 恒非空");
         JsonNode segments = node.get("segments");
         assertTrue(segments.isArray() && segments.size() == 1, "segments 数组元素序列化为 start/end/text");
@@ -93,6 +95,22 @@ class TaskStatusResponseTest {
         ObjectMapper mapper = productionMapper();
         JsonNode node = mapper.readTree(mapper.writeValueAsString(sample(null)));
         assertTrue(node.get("template").isNull(), "T3.9 之前的旧任务 template 必须是 null");
-        assertEquals(16, node.size(), "T4.36 起 = 16 键（speaker_map 只增在第 16）");
+        assertEquals(17, node.size(), "T4.43 起 = 17 键（display_name 只增在第 17）");
+    }
+
+    /** T4.43：display_name 第 17 键——未命名/清除为 null（不是空串）；命名后为展示名。 */
+    @Test
+    void displayNameSeventeenthKeyNullOrValue() throws Exception {
+        ObjectMapper mapper = productionMapper();
+        JsonNode named = mapper.readTree(mapper.writeValueAsString(sample("course")));
+        assertEquals("第三章 讲座", named.get("display_name").asText(), "命名任务返回展示名");
+        // 末尾键序（键名断言已覆盖），这里补 null 场景：用 null displayName 构造
+        TaskStatusResponse unnamed = new TaskStatusResponse(124L, "DONE", 12L, 148L,
+                OffsetDateTime.parse("2026-11-14T20:00:00+08:00"), "文本内容", null,
+                "摘要", List.of("关键词"), "CLOUD", List.of(), List.of(),
+                null, "meeting", List.of(), java.util.Map.of(), null);
+        JsonNode node = mapper.readTree(mapper.writeValueAsString(unnamed));
+        assertTrue(node.get("display_name").isNull(), "未命名/旧任务 display_name = null（不是空串）");
+        assertEquals(17, node.size(), "null 也保留键（契约键不省略）");
     }
 }

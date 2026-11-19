@@ -37,9 +37,14 @@ class TaskZipExportControllerTest {
     private JdbcTemplate jdbc;
 
     private TaskExportController.ExportRow exportableRow(long id, String sourceUri) {
+        return exportableRow(id, sourceUri, null);
+    }
+
+    /** T4.43：带展示名的行构造（displayName null = 未命名，回退 source_uri 口径）。 */
+    private TaskExportController.ExportRow exportableRow(long id, String sourceUri, String displayName) {
         return new TaskExportController.ExportRow("DONE",
                 "由张三负责整理材料，下周三截止。", "会议讨论了材料整理",
-                "[\"材料整理\"]", "[]", null, null, sourceUri);
+                "[\"材料整理\"]", "[]", null, null, sourceUri, displayName);
     }
 
     /* ===== parseIds 400 矩阵 ===== */
@@ -126,6 +131,53 @@ class TaskZipExportControllerTest {
         assertTrue(entry.length() <= 10 + 1 + 80 + 3, "超长文件名截断到上限内：" + entry.length());
     }
 
+    /* ===== T4.43：展示名优先 + 安全化（去非法字符、限长 80、空则回退） ===== */
+
+    @Test
+    void zipEntryNamePrefersDisplayNameAndSanitizesIllegalChars() {
+        // 展示名优先，非法字符（:）替换为下划线
+        assertEquals("12-周会_纪要.md",
+                TaskZipExportController.zipEntryName(12L, "s3://x/t435a-uuid.wav", "周会:纪要"),
+                "有展示名时优先展示名（卡口径），非法字符替换为 _");
+        // 超长保留**头部** 80
+        String entry = TaskZipExportController.zipEntryName(13L, "s3://x/uuid.wav", "名".repeat(100));
+        assertTrue(entry.length() <= 3 + 80 + 3, "展示名超长保留头部截断到 80：" + entry.length());
+        assertTrue(entry.startsWith("13-名"), "保留头部（与 source_uri 保留尾部口径区分）");
+        // 空白/无展示名 → 回退 source_uri 原口径
+        assertEquals("14-uuid.md", TaskZipExportController.zipEntryName(14L, "s3://x/uuid.wav", "   "));
+        assertEquals("15-uuid.md", TaskZipExportController.zipEntryName(15L, "s3://x/uuid.wav", null));
+    }
+
+    @Test
+    void sanitizeExportBaseStripsIllegalCharsCapsHead80AndBlankToNull() {
+        assertEquals("a_b_c", TaskZipExportController.sanitizeExportBase("a/b\\c"), "斜杠替换为 _");
+        assertEquals("x_______y", TaskZipExportController.sanitizeExportBase("x:*?\"<>|y"),
+                "九个非法字符逐个替换为 _");
+        assertEquals("会议纪要（周一）", TaskZipExportController.sanitizeExportBase(" 会议纪要（周一） "),
+                "合法中文名与全角括号保留、trim");
+        String capped = TaskZipExportController.sanitizeExportBase("长".repeat(90));
+        assertEquals(80, capped.length(), "限长 80");
+        assertEquals("长".repeat(80), capped, "保留头部");
+        assertNull(TaskZipExportController.sanitizeExportBase("   "), "全空白 → null（调用方回退）");
+        assertNull(TaskZipExportController.sanitizeExportBase(null), "null → null（调用方回退）");
+    }
+
+    @Test
+    void renderEntryNameAndDisplayNameFollowRename() {
+        when(jdbc.query(contains("FROM task t"), ArgumentMatchers.<RowMapper<TaskExportController.ExportRow>>any(),
+                eq(21L), eq(1L)))
+                .thenReturn(List.of(exportableRow(21L, "s3://meetingnotes/tasks/21/uuid.wav", "第三章 讲座")));
+
+        TaskExportController.RenderedExport r =
+                TaskExportController.render(21L, 1L, jdbc, new com.fasterxml.jackson.databind.ObjectMapper(),
+                        TaskExportController.parseInclude(null));
+
+        assertEquals("21-第三章 讲座.md", r.entryName(), "zip 条目名优先展示名");
+        assertEquals("第三章 讲座", r.displayName(), "displayName 随渲染结果回传（单条 Content-Disposition 用）");
+        assertNotNull(r.markdown());
+        assertNull(r.skipReason());
+    }
+
     /* ===== render 跳过语义（单条/zip 共用实现） ===== */
 
     @Test
@@ -147,7 +199,7 @@ class TaskZipExportControllerTest {
         when(jdbc.query(contains("FROM task t"), ArgumentMatchers.<RowMapper<TaskExportController.ExportRow>>any(),
                 eq(9L), eq(1L)))
                 .thenReturn(List.of(new TaskExportController.ExportRow("DONE", "   ", "s", "[]", "[]",
-                        null, null, "s3://meetingnotes/tasks/9/a.mp3")));
+                        null, null, "s3://meetingnotes/tasks/9/a.mp3", null)));
 
         TaskExportController.RenderedExport r =
                 TaskExportController.render(9L, 1L, jdbc, new com.fasterxml.jackson.databind.ObjectMapper(),

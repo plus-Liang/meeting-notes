@@ -153,7 +153,8 @@ public class TaskController {
                        CASE WHEN t.status = 'DONE' THEN r.transcript_punctuated END AS transcript_punctuated,
                        r.template,
                        CASE WHEN t.status = 'DONE' THEN r.segments::text END AS segments,
-                       r.speaker_map::text AS speaker_map
+                       r.speaker_map::text AS speaker_map,
+                       t.display_name
                 FROM task t
                 LEFT JOIN task_result r ON r.task_id = t.id
                 WHERE t.id = ? AND t.user_id = ?
@@ -242,7 +243,7 @@ public class TaskController {
                             rs.getString("error_code"), rs.getString("summary"), keywords,
                             rs.getString("ai_tier"), todos, keypoints,
                             rs.getString("transcript_punctuated"), rs.getString("template"), segments,
-                            speakerMap);
+                            speakerMap, rs.getString("display_name"));
                 },
                 id, UserContext.current());
         if (resp == null) {

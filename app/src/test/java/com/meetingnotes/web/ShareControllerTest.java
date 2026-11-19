@@ -43,7 +43,7 @@ class ShareControllerTest {
                 .thenReturn(List.of(new ShareController.SharedRow(taskId,
                         "s3://meetingnotes/tasks/" + taskId + "/lead.mp3", 90L,
                         java.time.OffsetDateTime.now(), "会议讨论了材料整理", "[\"材料整理\"]", "[]", null,
-                        "由张三负责整理材料，下周三截止。", null, "CLOUD", "meeting")));
+                        "由张三负责整理材料，下周三截止。", null, "CLOUD", "meeting", null)));
     }
 
     @Test
@@ -71,11 +71,12 @@ class ShareControllerTest {
 
         ShareController.SharedTaskView view = newController().view("deadbeefhash");
 
-        // 12 键（record 组件名即 JSON 键，snake_case）
+        // 12 键 + T4.43 只增末尾 display_name（13 键；record 组件名即 JSON 键，snake_case）
         List<String> keys = List.of(java.util.Arrays.stream(ShareController.SharedTaskView.class.getRecordComponents())
                 .map(java.lang.reflect.RecordComponent::getName).toArray(String[]::new));
         assertEquals(List.of("task_id", "original_name", "duration_sec", "created_at", "summary",
-                "keywords", "keypoints", "todos", "transcript", "transcript_punctuated", "ai_tier", "template"), keys);
+                "keywords", "keypoints", "todos", "transcript", "transcript_punctuated", "ai_tier", "template",
+                "display_name"), keys);
         assertEquals(7L, view.task_id());
         assertEquals("lead.mp3", view.original_name());
         assertEquals("CLOUD", view.ai_tier());

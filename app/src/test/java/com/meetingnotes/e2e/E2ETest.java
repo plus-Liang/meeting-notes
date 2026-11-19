@@ -48,7 +48,7 @@ class E2ETest {
     private static final List<String> DETAIL_KEYS = List.of(
             "task_id", "status", "duration_sec", "size_bytes", "created_at", "transcript",
             "error_code", "summary", "keywords", "ai_tier", "todos", "keypoints",
-            "transcript_punctuated", "template", "segments", "speaker_map");
+            "transcript_punctuated", "template", "segments", "speaker_map", "display_name");
 
     private static String textA;
     private static long taskId;
@@ -676,15 +676,17 @@ class E2ETest {
         assertTrue(created.get("url").asText().startsWith("/share.html?token="), "url 指向只读页");
         assertEquals(43, shareToken.length(), "32B base64url 无填充 = 43 字符");
 
-        // 匿名读（无 Authorization）→ 200，12 键只读子集
+        // 匿名读（无 Authorization）→ 200，12 键只读子集 + T4.43 只增末尾 display_name（13 键）
         HttpResponse<String> anon = sendWithoutToken("GET", "/api/v1/share/" + shareToken, null, null);
         assertEquals(200, anon.statusCode(), "匿名必须可读：" + abbreviate(anon.body()));
         JsonNode view = M.readTree(anon.body());
         List<String> viewKeys = new ArrayList<>();
         view.fieldNames().forEachRemaining(viewKeys::add);
         assertEquals(List.of("task_id", "original_name", "duration_sec", "created_at", "summary",
-                "keywords", "keypoints", "todos", "transcript", "transcript_punctuated", "ai_tier", "template"),
-                viewKeys, "匿名视图键集固定 12 键（不多不少）");
+                "keywords", "keypoints", "todos", "transcript", "transcript_punctuated", "ai_tier", "template",
+                "display_name"),
+                viewKeys, "匿名视图键集 = 12 键 + display_name（T4.43 第 13，只增在末尾）");
+        assertTrue(view.get("display_name").isNull(), "未命名任务 display_name = null（键不省略）");
         assertEquals(taskId, view.get("task_id").asLong());
 
         // 分享 token 不是 API token：拿它访问列表 → 401（认证面未放大）

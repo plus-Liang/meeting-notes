@@ -156,9 +156,16 @@ public class TaskZipExportController {
         }
     }
 
-    /** zip 条目名：{@code <id>-<安全文件名>.md}——文件名取 source_uri 尾段，去扩展名、替换非法字符、
-     *  超长保留尾部；无 source_uri → task。 */
-    static String zipEntryName(long id, String sourceUri) {
+    /**
+     * zip 条目名：{@code <id>-<安全文件名>.md}——T4.43 起优先用户展示名（安全化后，超长保留头部，
+     * 起头比尾部更有辨识度）；无展示名回退 source_uri 尾段（去扩展名、替换非法字符、**保留尾部**——
+     * 原口径不变）；两者都无 → task。
+     */
+    static String zipEntryName(long id, String sourceUri, String displayName) {
+        String fromDisplay = sanitizeExportBase(displayName);
+        if (fromDisplay != null) {
+            return id + "-" + fromDisplay + ".md";
+        }
         String name = "task";
         if (sourceUri != null && !sourceUri.isBlank()) {
             int slash = sourceUri.lastIndexOf('/');
@@ -176,5 +183,25 @@ public class TaskZipExportController {
             name = name.substring(name.length() - MAX_ENTRY_BASE_LEN);
         }
         return id + "-" + name + ".md";
+    }
+
+    /** 兼容旧签名（T4.27 口径）：无展示名，直接走 source_uri 回退。 */
+    static String zipEntryName(long id, String sourceUri) {
+        return zipEntryName(id, sourceUri, null);
+    }
+
+    /**
+     * 展示名导出安全化（T4.43）：去 {@code / \ : * ? " < > |}（与 CR/LF/TAB）→ 替换为 {@code _}，
+     * trim 后限长 {@value #MAX_ENTRY_BASE_LEN}（**保留头部**）；空/全空白 → null（调用方回退原口径）。
+     */
+    static String sanitizeExportBase(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        String name = raw.replaceAll("[\\\\/:*?\"<>|\r\n\t]", "_").trim();
+        if (name.isBlank()) {
+            return null;
+        }
+        return name.length() > MAX_ENTRY_BASE_LEN ? name.substring(0, MAX_ENTRY_BASE_LEN) : name;
     }
 }

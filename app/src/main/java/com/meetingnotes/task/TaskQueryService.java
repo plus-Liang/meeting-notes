@@ -60,7 +60,7 @@ public class TaskQueryService {
         return trimmed;
     }
 
-    /** 列表项：对外契约 snake_case（D-041，T2.10 六键 + T4.21 三键 + T4.29 两键，只增不改）。 */
+    /** 列表项：对外契约 snake_case（D-041，T2.10 六键 + T4.21 三键 + T4.29 两键 + T4.43 一键，只增不改）。 */
     public record TaskListItem(
             long id,
             String status,
@@ -72,7 +72,8 @@ public class TaskQueryService {
             String summaryHead,
             String template,
             List<String> labels,
-            boolean favorite) {
+            boolean favorite,
+            String displayName) {
     }
 
     /** 列表响应：items + next_before_id（还有下一页时为最后一项的 id，否则 null）+
@@ -102,7 +103,8 @@ public class TaskQueryService {
      * @param beforeId 可空；keyset 游标（不进 total 的 COUNT）
      * @param q        可空；非空时 source_uri ILIKE 参数化匹配（%/_/\ 转义），纯数字 OR id 精确匹配；
      *                 已由 controller 去空格、校验长度（≤{@value #Q_MAX_CHARS}）
-     * @param labels   可空；T4.42 多标签筛选——jsonb {@code @>} 包含**全部**选中标签（单标签行为不变），
+     * @param labels   可空；T4.42 多标签筛选——每个标签一个 jsonb {@code @>} 条件、OR 括号组 =
+     *                 **OR 并集**（同维度并集/跨维度交集，D-162；单标签行为不变），
      *                 经 mapper 序列化参数化绑定（注入面同 q）；空列表视为未给
      * @param favorite 可空；T4.29 收藏筛选（true/false）
      * @param window   可空；T4.42 created_at 半开区间过滤
@@ -168,7 +170,8 @@ public class TaskQueryService {
         /* 注意：文本块会剥掉行尾空格，WHERE 后必须显式补空格再拼 where 片段（T4.42 首跑踩过 WHEREt） */
         StringBuilder sql = new StringBuilder("""
                 SELECT t.id, t.status, t.source_uri, t.duration_sec, t.created_at, t.error_code,
-                       r.keywords, r.summary, r.template, t.labels::text AS labels, t.favorite
+                       r.keywords, r.summary, r.template, t.labels::text AS labels, t.favorite,
+                       t.display_name
                 FROM task t
                 LEFT JOIN task_result r ON r.task_id = t.id
                 WHERE """).append(' ').append(where);
@@ -195,7 +198,8 @@ public class TaskQueryService {
                         summaryHeadOf(rs.getString("summary")),
                         rs.getString("template"),
                         labelsOf(rs.getString("labels")),
-                        rs.getBoolean("favorite")));
+                        rs.getBoolean("favorite"),
+                        rs.getString("display_name")));
             } else {
                 hasMore[0] = true; // 第 limit+1 行存在 = 还有下一页
             }

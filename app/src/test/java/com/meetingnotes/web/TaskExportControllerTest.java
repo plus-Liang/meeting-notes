@@ -79,4 +79,30 @@ class TaskExportControllerTest {
                 TaskExportController.transcriptForExport("", "原始无标点文本"));
         assertEquals("", TaskExportController.transcriptForExport(null, "  "));
     }
+
+    /* ===== T4.43：单条导出 Content-Disposition 优先展示名 ===== */
+
+    @Test
+    void contentDispositionPrefersDisplayNameWithRfc5987ForNonAscii() {
+        String header = TaskExportController.contentDisposition(7L, "第三章 讲座");
+        assertTrue(header.startsWith("attachment;"), "仍是附件下载：" + header);
+        assertTrue(header.contains("filename=\"task-7.md\""), "非 ASCII 时 filename 用 id 兜底：" + header);
+        assertTrue(header.contains("filename*=UTF-8''"), "RFC 5987 filename* 承载中文名：" + header);
+        assertTrue(header.contains("%E7%AC%AC%E4%B8%89%E7%AB%A0"), "中文名百分号编码：" + header);
+        assertTrue(header.endsWith(".md"), header);
+    }
+
+    @Test
+    void contentDispositionAsciiNameAndFallback() {
+        assertEquals("attachment; filename=\"weekly note.md\"; filename*=UTF-8''weekly%20note.md",
+                TaskExportController.contentDisposition(9L, "weekly note"),
+                "ASCII 展示名（含空格）直接作为 filename 兜底 + filename* 双写（空格编码 %20）");
+        assertEquals("attachment; filename=\"task-9.md\"",
+                TaskExportController.contentDisposition(9L, null), "无展示名 → 原 task-<id>.md 口径");
+        assertEquals("attachment; filename=\"task-9.md\"",
+                TaskExportController.contentDisposition(9L, "   "), "全空白展示名 → 原口径");
+        // 非法字符经安全化后进入 header（: → _），不破坏 header 结构
+        String sanitized = TaskExportController.contentDisposition(11L, "a:b");
+        assertTrue(sanitized.contains("filename=\"a_b.md\""), sanitized);
+    }
 }

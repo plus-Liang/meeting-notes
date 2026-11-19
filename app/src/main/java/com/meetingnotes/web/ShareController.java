@@ -47,17 +47,19 @@ public class ShareController {
     public record ShareRevokedResponse(int revoked) {
     }
 
-    /** 匿名只读视图：12 键固定子集（详情 14 键不动，这是独立新契约）。 */
+    /** 匿名只读视图：12 键固定子集（详情 14 键不动，这是独立新契约）+
+     *  T4.43 只增末尾 {@code display_name}（用户展示名，未命名/旧任务 null；share.html 优先展示，回退 original_name）。 */
     public record SharedTaskView(long task_id, String original_name, Long duration_sec, OffsetDateTime created_at,
                                  String summary, List<String> keywords, List<KeypointView> keypoints,
                                  List<TodoItemView> todos, String transcript, String transcript_punctuated,
-                                 String ai_tier, String template) {
+                                 String ai_tier, String template, String display_name) {
     }
 
     /** 匿名查询行（T4.28 提升为类级：测试可构造）。 */
     record SharedRow(long taskId, String sourceUri, Long durationSec, OffsetDateTime createdAt,
                      String summary, String keywords, String todos, String keypoints,
-                     String transcript, String transcriptPunctuated, String aiTier, String template) {
+                     String transcript, String transcriptPunctuated, String aiTier, String template,
+                     String displayName) {
     }
 
     public ShareController(ShareService shareService, JdbcTemplate jdbc, ObjectMapper mapper) {
@@ -88,7 +90,7 @@ public class ShareController {
                 SELECT t.id AS task_id, t.source_uri, t.duration_sec, t.created_at,
                        r.summary, r.keywords::text AS keywords, r.todos::text AS todos,
                        r.keypoints::text AS keypoints, r.transcript, r.transcript_punctuated,
-                       r.ai_tier, r.template
+                       r.ai_tier, r.template, t.display_name
                 FROM share_link s
                 JOIN task t ON t.id = s.task_id
                 LEFT JOIN task_result r ON r.task_id = t.id
@@ -98,7 +100,7 @@ public class ShareController {
                 rs.getObject("created_at", OffsetDateTime.class), rs.getString("summary"),
                 rs.getString("keywords"), rs.getString("todos"), rs.getString("keypoints"),
                 rs.getString("transcript"), rs.getString("transcript_punctuated"),
-                rs.getString("ai_tier"), rs.getString("template")), hash);
+                rs.getString("ai_tier"), rs.getString("template"), rs.getString("display_name")), hash);
         if (rows.isEmpty()) {
             throw new ApiException(404, "SHARE_NOT_FOUND", "分享链接无效或已过期");
         }
@@ -134,6 +136,6 @@ public class ShareController {
         }
         return new SharedTaskView(row.taskId(), originalName, row.durationSec(), row.createdAt(),
                 row.summary(), keywords, keypoints, todos, row.transcript(), row.transcriptPunctuated(),
-                row.aiTier(), row.template());
+                row.aiTier(), row.template(), row.displayName());
     }
 }

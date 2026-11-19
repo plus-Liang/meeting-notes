@@ -114,6 +114,20 @@ class TaskQueryServiceTest {
         assertNull(second.template(), "旧任务 template → null");
     }
 
+    /** T4.43：列表项末尾只增 display_name——命名任务透传、旧任务 null（键不省略由序列化层保证）。 */
+    @Test
+    void listItemsCarryDisplayNameOrNull() throws Exception {
+        stubRows(2, 9L);
+        // 第 1 行有展示名、第 2 行未命名（Mockito 连续打桩）；labels 同步打桩防严格桩参数错配
+        when(rs.getString("labels")).thenReturn(null);
+        when(rs.getString("display_name")).thenReturn("第三章 讲座", (String) null);
+
+        TaskQueryService.TaskListResponse resp = newService().list(1L, null, 5, null, null, List.of(), null, null);
+
+        assertEquals("第三章 讲座", resp.items().get(0).displayName(), "display_name 原样透传");
+        assertNull(resp.items().get(1).displayName(), "未命名任务 display_name = null（不是空串）");
+    }
+
     @Test
     void keysetPaginationFetchesLimitPlusOneAndComputesNextBeforeId() throws Exception {
         // limit=2 但库里有 3 行 → 返回 2 项，next_before_id=4（本页最后一项 id）

@@ -15,7 +15,7 @@ import org.springframework.web.bind.annotation.RestController;
  * {@code GET /api/v1/tasks}——keyset 分页（before_id 游标禁 OFFSET）、user_id 服务端过滤（D-040）、
  * limit 1..50、status 白名单、T4.24 可选 q（去空格/超长 400/溢出按关键词）、
  * T4.29 可选 label（jsonb 包含匹配）/favorite（true|false），参数化并与 status/q 可组合，分页语义不变。
- * T4.42：label 支持多值（重复参数 → 包含全部）、增可选 created_after/created_before
+ * T4.42：label 支持多值（重复参数 → OR 并集，同维度并集/跨维度交集，D-162）、增可选 created_after/created_before
  * （{@code YYYY-MM-DD}，非法/颠倒 → 400，解析见 {@link TaskDateWindow#resolve}），
  * 响应末尾增 total（同筛选 COUNT）。
  */
@@ -81,7 +81,7 @@ public class TaskListController {
             }
             favoriteFilter = Boolean.parseBoolean(value);
         }
-        /* T4.42：多标签——重复 label 参数收集为列表（trim 去空去 null；全部包含语义，单值行为不变） */
+        /* T4.42：多标签——重复 label 参数收集为列表（trim 去空去 null；OR 并集语义，D-162，单值行为不变） */
         java.util.List<String> labelFilters = label == null ? java.util.List.of()
                 : label.stream().filter(java.util.Objects::nonNull).map(String::trim)
                         .filter(s -> !s.isEmpty()).toList();
