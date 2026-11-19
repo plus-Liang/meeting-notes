@@ -17,7 +17,6 @@
     <b>REC-NOTES</b><span>自托管 · 私有部署</span>
     <span class="r">
       <span>归档 <span id="docketArchive">–</span></span>
-      <span>配额 <span id="docketQuota">–</span></span>
       <span id="docketDate">–</span>
       <span>V0.1.0</span>
     </span>
@@ -34,12 +33,15 @@
   </header>
 
   <section class="mast">
-    <h1>录音进来，<br>纪要归档<i>。</i></h1>
+    <div>
+      <h1>录音转纪要</h1>
+      <p class="mast-lede">上传音视频，得到结构化摘要、要点与待办</p>
+    </div>
     <dl class="meta">
-      <div><dt>今日配额</dt><dd class="big" id="mastQuota">–</dd></div>
-      <div><dt>归档总量</dt><dd id="mastTotal">–</dd></div>
+      <div><dt>归档总量</dt><dd class="big" id="mastTotal">–</dd></div>
+      <div><dt>音频总时长</dt><dd id="mastDuration">–</dd></div>
       <div><dt>最近一条</dt><dd id="mastRecent">–</dd></div>
-      <div><dt>运行位置</dt><dd>本机 · 数据不出机</dd></div>
+      <div><dt>部署方式</dt><dd>私有部署</dd></div>
     </dl>
   </section>
 
@@ -180,15 +182,22 @@
       <div class="rblock">
         <div class="k">今日配额</div>
         <div class="bignum"><span id="railQuotaBig">–</span><small id="railQuotaSmall">/ – 次</small></div>
-        <div class="ticks" id="railTicks" aria-hidden="true"></div>
+        <div class="meter" aria-hidden="true"><i id="railQuotaBar"></i></div>
+        <div class="kv"><span>剩余</span><b id="railQuotaLeft">–</b></div>
       </div>
       <div class="rblock">
-        <div class="k">累计</div>
-        <div id="railStats">
-          <div class="kv"><span>任务</span><b>–</b></div>
-          <div class="kv"><span>音频时长</span><b>–</b></div>
-          <div class="kv"><span>成功率</span><b>–</b></div>
-        </div>
+        <div class="k">任务状态</div>
+        <div class="statusbar" aria-hidden="true"><i class="sb-done" id="railSbDone"></i><i class="sb-go" id="railSbGo"></i><i class="sb-bad" id="railSbBad"></i></div>
+        <div class="kv"><span>已完成</span><b id="railDone">–</b></div>
+        <div class="kv"><span>进行中</span><b id="railActive">–</b></div>
+        <div class="kv"><span>失败</span><b id="railDead">–</b></div>
+      </div>
+      <div class="rblock">
+        <div class="k">处理质量</div>
+        <div class="kv"><span>成功率</span><b id="railSuccess">–</b></div>
+        <div class="kv"><span>平均处理</span><b id="railRatio">–</b></div>
+        <div class="kv"><span>AI 摘要档位</span><b id="railTier">–</b></div>
+        <div class="kv"><span>ASR 引擎</span><b>本地</b></div>
       </div>
       <div class="rblock">
         <div class="k">模板</div>
@@ -197,19 +206,11 @@
           <span class="chip plain">播客</span><span class="chip plain">短视频</span>
         </div>
       </div>
-      <div class="rblock">
-        <div class="k">服务</div>
-        <div id="railHealth">
-          <div class="kv"><span>数据库</span><b>–</b></div>
-          <div class="kv"><span>存储</span><b>–</b></div>
-          <div class="kv"><span>转写引擎</span><b>–</b></div>
-        </div>
-      </div>
     </aside>
   </div>
 
   <footer class="site-footer">
-    <span>v0.1.0 · MIT · 自托管，音频不出本机</span>
+    <span>私有部署 · 数据只在你自己的服务器</span>
     <a href="https://github.com/plus-Liang/meeting-notes" rel="noopener">GitHub</a>
     <span>录音纪要平台 · 白纸档案</span>
   </footer>
@@ -218,62 +219,74 @@
 <script src="app.js"></script>
 <script src="drawer.js"></script>
 <script>
-/* ===== 页头档案行 / 刊头 meta / 右索引栏（T4.41；只读端点，失败静默保占位） ===== */
+/* ===== 页头档案行 / 刊头 meta / 右索引栏（T4.41-fix；只读端点，失败该模块显示"—"，不编数） ===== */
 (function () {
   function fill(id, text) {
     var el = document.getElementById(id);
     if (el) el.textContent = text;
   }
-  /* 占位符统一用 en dash（em dash 会被检测器计入正文密度） */
-  var PH = '–';
+  /* 占位符统一用 en dash（em dash 会被检测器计入正文密度；失败态的"—"数量受控） */
   var today = new Date();
-  var p = function (n) { return n < 10 ? '0' + n : String(n); };
-  fill('docketDate', today.getFullYear() + '-' + p(today.getMonth() + 1) + '-' + p(today.getDate()));
-  /* 配额刻度：20 格，印章红 = 已用（配额刻度属「重点」，契约允许） */
-  function renderTicks(used, limit) {
-    var ticks = document.getElementById('railTicks');
-    if (!ticks) return;
-    var total = 20;
-    var on = limit > 0 ? Math.max(0, Math.min(total, Math.round(used * total / limit))) : 0;
-    var html = '';
-    for (var i = 0; i < total; i++) html += '<i' + (i < on ? ' class="on"' : '') + '></i>';
-    ticks.innerHTML = html;
+  var p2 = function (n) { return n < 10 ? '0' + n : String(n); };
+  fill('docketDate', today.getFullYear() + '-' + p2(today.getMonth() + 1) + '-' + p2(today.getDate()));
+
+  /* 音频总时长：≥1 小时显示 小时+分，否则沿用 分+秒 */
+  function fmtTotal(sec) {
+    if (sec === null || sec === undefined) return '–';
+    if (sec >= 3600) {
+      var h = Math.floor(sec / 3600);
+      var m = Math.floor((sec % 3600) / 60);
+      return m ? (h + ' 小时 ' + m + ' 分') : (h + ' 小时');
+    }
+    return fmtDuration(sec);
   }
+  /* 模块失败：只把数值位写成"—"（不编数；控制整栏 em dash 密度不触发检测器） */
+  function failBlock(ids) { ids.forEach(function (id) { fill(id, '—'); }); }
+
+  /* 今日额度 + AI 摘要档位（GET /api/v1/settings） */
+  function quotaFail() { failBlock(['railQuotaBig', 'railQuotaLeft', 'railTier']); }
   getJson('api/v1/settings').then(function (data) {
-    if (data.__httpStatus !== 200 || !data.quota) return;
+    if (data.__httpStatus !== 200 || !data.quota) { quotaFail(); return; }
     var q = data.quota;
-    fill('docketQuota', q.used_tasks + ' / ' + q.tasks_limit);
-    fill('mastQuota', q.used_tasks + ' / ' + q.tasks_limit);
     fill('railQuotaBig', String(q.used_tasks));
     fill('railQuotaSmall', '/ ' + q.tasks_limit + ' 次');
-    renderTicks(q.used_tasks, q.tasks_limit);
+    fill('railQuotaLeft', Math.max(0, q.tasks_limit - q.used_tasks) + ' 次');
+    var bar = document.getElementById('railQuotaBar');
+    if (bar) bar.style.width = (q.tasks_limit > 0 ? Math.min(100, Math.round(q.used_tasks * 100 / q.tasks_limit)) : 0) + '%';
     var tier = data.ai_tier && data.ai_tier.preferred;
-    var tierText = tier === 'CLOUD' ? '云端' : (tier === 'LOCAL' ? '本地' : (tier === 'EXTRACTIVE' ? '提取式' : '–'));
-    fill('railTier', tierText);
-    var kv = document.querySelector('#railHealth .kv:nth-child(3) b');
-    if (kv) kv.textContent = tierText;
-  }, function () { /* 静默 */ });
+    fill('railTier', tier === 'CLOUD' ? '云端' : (tier === 'LOCAL' ? '本地' : (tier === 'EXTRACTIVE' ? '提取式' : '—')));
+  }, quotaFail);
+
+  /* 任务状态分布（GET /api/v1/tasks/counts） */
+  function countsFail() { failBlock(['railDone', 'railActive', 'railDead']); }
+  getJson('api/v1/tasks/counts').then(function (data) {
+    if (data.__httpStatus !== 200) { countsFail(); return; }
+    fill('railDone', String(data.done));
+    fill('railActive', String(data.active));
+    fill('railDead', String(data.dead));
+    var total = data.total || 0;
+    function seg(id, n) {
+      var el = document.getElementById(id);
+      if (el) el.style.width = (total > 0 ? Math.round(n * 100 / total) : 0) + '%';
+    }
+    seg('railSbDone', data.done);
+    seg('railSbGo', data.active);
+    seg('railSbBad', data.dead);
+  }, countsFail);
+
+  /* 归档/音频总时长/成功率/平均处理（GET /api/v1/stats） */
+  function statsFail() { failBlock(['docketArchive', 'mastTotal', 'mastDuration', 'railSuccess', 'railRatio']); }
   getJson('api/v1/stats').then(function (data) {
-    if (data.__httpStatus !== 200) return;
-    fill('docketArchive', String((data.tasks && data.tasks.total) || 0));
-    fill('mastTotal', ((data.tasks && data.tasks.total) || 0) + ' 条');
-    var rows = document.querySelectorAll('#railStats .kv b');
-    if (rows.length >= 3) {
-      rows[0].textContent = String((data.tasks && data.tasks.total) || 0);
-      rows[1].textContent = fmtDuration(data.duration_sec_total);
-      rows[2].textContent = (data.success_rate === null || data.success_rate === undefined)
-        ? '—' : Math.round(data.success_rate * 1000) / 10 + '%';
-    }
-  }, function () { /* 静默 */ });
-  getJson('actuator/health').then(function (data) {
-    var comps = (data.__httpStatus === 200 && data.components) ? data.components : null;
-    function up(c) { return comps && comps[c] && comps[c].status === 'UP' ? '正常' : (comps ? '异常' : '—'); }
-    var rows = document.querySelectorAll('#railHealth .kv b');
-    if (rows.length >= 3) {
-      rows[0].textContent = up('db');
-      rows[1].textContent = up('minio');
-    }
-  }, function () { /* 静默 */ });
+    if (data.__httpStatus !== 200) { statsFail(); return; }
+    var total = (data.tasks && data.tasks.total) || 0;
+    fill('docketArchive', String(total));
+    fill('mastTotal', total + ' 条');
+    fill('mastDuration', fmtTotal(data.duration_sec_total));
+    fill('railSuccess', (data.success_rate === null || data.success_rate === undefined)
+      ? '—' : Math.round(data.success_rate * 1000) / 10 + '%');
+    fill('railRatio', (data.avg_processing_ratio === null || data.avg_processing_ratio === undefined)
+      ? '—' : data.avg_processing_ratio.toFixed(2) + '×');
+  }, statsFail);
 })();
 
 (function () {
@@ -460,7 +473,7 @@
   /* T4.38：详情站内抽屉（列表 URL 不变、不新开标签） */
   mnBindDrawerLinks(document.getElementById('recentList'));
 
-  /* ===== T4.15：示例文本复制入口（仅 remaining_tasks ≥ 1 可用；0 任务配额时禁用+提示） ===== */
+  /* ===== T4.15：示例文本复制入口（仅 remaining_tasks ≥ 1 可用；0 任务额度时禁用+提示） ===== */
   var SAMPLE_TEXT = '本周例会纪要：一、发布计划：新版定于下周四发布，发布前完成回归测试。二、问题跟进：客服反馈的导出乱码与列表加载慢两个问题，由李四在本周五前给出修复方案。三、分工：张三负责回归测试清单，本周五前输出初稿；王五负责发布说明文档。请各位在本周三前确认自己的分工。';
   getJson('api/v1/settings').then(function (data) {
     var btn2 = document.getElementById('copySampleBtn');

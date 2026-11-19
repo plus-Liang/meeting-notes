@@ -26,7 +26,7 @@
   <main>
     <div class="mn-login-card">
       <section class="mast" style="grid-template-columns:1fr;padding-top:64px">
-        <h1 id="mnLoginTitle">登录<i>。</i></h1>
+        <h1 id="mnLoginTitle">登录</h1>
         <p class="mn-sub hint" style="margin-top:12px">账号密码换本浏览器令牌；第一个创建的账号将成为管理员。</p>
       </section>
       <form id="loginForm" novalidate style="margin-top:26px">
@@ -56,7 +56,7 @@
   </main>
 
   <footer class="site-footer">
-    <span>v0.1.0 · MIT · 自托管，音频不出本机</span>
+    <span>私有部署 · 数据只在你自己的服务器</span>
     <span>以 MIT 许可证开源发布</span>
   </footer>
 </div>
@@ -89,8 +89,8 @@
     mode = m;
     document.getElementById('modeLogin').classList.toggle('mn-mode-active', m === 'login');
     document.getElementById('modeRegister').classList.toggle('mn-mode-active', m === 'register');
-    /* T4.41：刊头标题只换正文词，句号点强调保留 */
-    titleEl.innerHTML = (m === 'login' ? '登录' : '创建账号') + '<i>。</i>';
+    /* T4.41-fix：刊头标题只换正文词，不带标点 */
+    titleEl.textContent = m === 'login' ? '登录' : '创建账号';
     submitBtn.textContent = m === 'login' ? '登录' : '创建账号';
     confirmRow.hidden = m !== 'register';
     setError('');

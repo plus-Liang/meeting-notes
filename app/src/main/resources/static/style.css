@@ -83,6 +83,8 @@ main.wrap, .wrap main { display: block; }
   white-space: nowrap;
 }
 a.task-detail-link { min-width: 44px; min-height: 32px; display: inline-flex; align-items: center; }
+/* 台账文件名锚点：inline（不设 flex），否则 min-content 会撑爆 1fr 名称列、省略号失效（390 竖排根因）；纵向 padding 扩触控区 */
+.task-title a.task-detail-link { display: inline; min-width: 0; min-height: 0; padding: 10px 0; }
 .task-row:hover .task-title a, .task-row:hover a.task-detail-link { color: var(--seal); }
 .task-row .task-title a { transition: color var(--dur-fast) var(--ease); }
 .task-row .task-title a:hover { color: var(--seal); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
@@ -169,6 +171,10 @@ a.task-detail-link { min-width: 44px; min-height: 32px; display: inline-flex; al
   .recent-ledger .task-row { grid-template-columns: 52px minmax(0, 1fr) 74px 44px; }
   .task-row-lite { grid-template-columns: 52px minmax(0, 1fr) 44px; }
   .task-row .cell-dur, .task-row .cell-time { display: none; }
+  /* 文件名单行省略（v8：table-layout:auto 等效）；模板/标签胶囊单行裁切，杜绝竖排/竖堆 */
+  .task-row .task-sub { flex-wrap: nowrap; overflow: hidden; max-width: 100%; }
+  .task-row .task-sub > * { flex: none; }
+  .task-row .task-summary { display: none; }
   .task-row .task-side { text-align: left; }
   .pl-row-keep { min-width: 0; }
   img { max-width: 100%; height: auto; }
