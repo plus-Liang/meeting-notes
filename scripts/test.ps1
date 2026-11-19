@@ -66,7 +66,7 @@ if (-not $UnitOnly) {
     }
     if (-not $env:ASR_SMOKE_AUDIO) {
         Write-Host '[test.ps1] 未设置 ASR_SMOKE_AUDIO：冒烟用例需要一个本地真实音频（绝对路径）'
-        Write-Host '[test.ps1] 用法示例：  $env:ASR_SMOKE_AUDIO = "D:\datasets\meeting-notes-samples\probe.wav"; scripts\test.ps1'
+        Write-Host '[test.ps1] 用法示例：  $env:ASR_SMOKE_AUDIO = "<仓库外某个真实音频的绝对路径>"; scripts\test.ps1'
         Write-Host '[test.ps1] 或跳过冒烟：  scripts\test.ps1 -UnitOnly'
         exit 3
     }

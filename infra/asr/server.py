@@ -16,6 +16,7 @@ Pinned versions matter (see Dockerfile / README):
 """
 
 import os
+import sys
 import tempfile
 import time
 
@@ -38,7 +39,19 @@ model = None
 def load_model() -> None:
     global model
     started = time.time()
-    model = WhisperModel(MODEL_NAME, device="cpu", compute_type=COMPUTE_TYPE, local_files_only=True)
+    try:
+        model = WhisperModel(MODEL_NAME, device="cpu", compute_type=COMPUTE_TYPE, local_files_only=True)
+    except Exception as exc:
+        # 快速失败（T4.9）：模型缺失时给出明确中文提示后退出码 2，绝不静默循环 unhealthy
+        print(
+            f"模型未找到或加载失败（ASR_MODEL_NAME={MODEL_NAME}，模型目录=/models）。"
+            "请先运行 scripts/download-model.ps1 下载模型；"
+            "国内网络可设 HF_ENDPOINT=https://hf-mirror.com 后重试。",
+            flush=True,
+        )
+        print(f"[startup] 原始错误：{exc}", flush=True)
+        sys.stdout.flush()
+        os._exit(2)
     print(f"[startup] model={MODEL_NAME} compute={COMPUTE_TYPE} loaded in {time.time() - started:.1f}s", flush=True)
 
 

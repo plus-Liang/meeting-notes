@@ -41,3 +41,6 @@ uploads/
 *.mov
 .playwright-cli/
 backups/
+
+# ---- ASR 模型（首次运行 download-model 下载，大文件不进 git）----
+models/
