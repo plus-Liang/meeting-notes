@@ -60,10 +60,11 @@ main.wrap, .wrap main { display: block; }
 .section > h2, .detail-side-block > .eyebrow { margin-top: 0; }
 .section > h2 { padding-bottom: 10px; border-bottom: 1px solid var(--rule-ink); margin-bottom: 12px; font: 600 17px/1.4 var(--serif); letter-spacing: -.2px; }
 
-/* ========== 台账行（tasks 页 JS 生成；编号/文件名/时长/时间/状态/详情） ========== */
+/* ========== 台账行（tasks 页 JS 生成；编号/文件名/时长/时间/状态/操作） ========== */
 .task-row {
   display: grid;
-  grid-template-columns: 26px 64px minmax(0, 1fr) 96px 96px 86px 64px;
+  /* 末列 132px（T4.43-fix）：详情 + 重命名 两个文本动作水平排布，防按钮文字折行成竖圈 */
+  grid-template-columns: 26px 64px minmax(0, 1fr) 96px 96px 86px 132px;
   gap: 0 12px;
   align-items: start;
   padding: 13px 0;
@@ -97,7 +98,9 @@ a.task-detail-link { min-width: 44px; min-height: 32px; display: inline-flex; al
 .dot-go { background: var(--seal); }
 .dot-wait { background: var(--wait); }
 .dot-bad { background: var(--bad); }
-.task-row .task-side { text-align: right; }
+/* T4.43-fix：操作列水平排布（基线对齐、不折行），「重命名」降级为 linkish 文本动作（行内 pill 太重且是换行根因） */
+.task-row .task-side { display: flex; gap: 10px; justify-content: flex-end; align-items: baseline; white-space: nowrap; }
+.task-row .task-side .linkish { height: auto; font-size: var(--fs-sm); }
 .task-row .task-side .badge { margin-right: 6px; }
 .fav-star { font-size: var(--fs-sm); }
 
@@ -210,7 +213,9 @@ a.task-detail-link { min-width: 44px; min-height: 32px; display: inline-flex; al
   .task-row .task-sub { flex-wrap: nowrap; overflow: hidden; max-width: 100%; }
   .task-row .task-sub > * { flex: none; }
   .task-row .task-summary { display: none; }
-  .task-row .task-side { text-align: left; }
+  /* 窄屏操作列只留「详情」（44px 放不下两个文本动作，卡口径允许），重命名入口走详情页 */
+  .task-row .task-side { justify-content: flex-start; }
+  .task-row .task-side .js-rename { display: none; }
   .pl-row-keep { min-width: 0; }
   img { max-width: 100%; height: auto; }
 }
