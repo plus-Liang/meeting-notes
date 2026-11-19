@@ -101,6 +101,41 @@ a.task-detail-link { min-width: 44px; min-height: 32px; display: inline-flex; al
 .task-row .task-side .badge { margin-right: 6px; }
 .fav-star { font-size: var(--fs-sm); }
 
+/* ========== T4.42 台账检索增强（分组头 / 计数行 / 已选胶囊 / 标签多选弹层） ========== */
+.group-head {
+  display: flex; align-items: center; gap: 12px;
+  margin: 20px 0 4px;
+  font: 600 12px/1.8 var(--sans); letter-spacing: .08em;
+  color: var(--ink-2);
+}
+.group-head::after { content: ''; flex: 1; border-top: 1px solid var(--rule); } /* hairline 延伸到行右缘，与台账行对齐 */
+.result-count { color: var(--ink-3); font: 400 var(--fs-label)/1.6 var(--mono); font-variant-numeric: tabular-nums; margin: 12px 0 0; }
+.active-chips { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0 0; }
+.active-chips:empty { display: none; }
+.active-chips .chip { display: inline-flex; align-items: center; gap: 2px; }
+.active-chips .chip-x { font-size: 13px; padding: 0 2px 0 4px; cursor: pointer; }
+.active-chips .clear-all {
+  font: 400 12px/1.9 var(--sans); color: var(--ink-2); background: none;
+  border: 1px solid var(--rule); border-radius: 999px; padding: 1px 13px; cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease), color var(--dur-fast) var(--ease);
+}
+.active-chips .clear-all:hover { border-color: var(--seal); color: var(--seal); }
+.label-multi { position: relative; display: inline-block; }
+.label-pop {
+  position: absolute; top: calc(100% + 6px); left: 0; z-index: 30;
+  min-width: 180px; max-width: 280px; max-height: 240px; overflow: auto;
+  background: var(--paper); border: 1px solid var(--rule); border-radius: 12px;
+  box-shadow: var(--shadow-toast); padding: 6px;
+}
+.label-pop .label-opt {
+  display: flex; align-items: center; gap: 9px; padding: 7px 10px; border-radius: 8px;
+  font: 400 13px/1.6 var(--sans); color: var(--ink); cursor: pointer;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.label-pop .label-opt:hover { background: var(--paper-2); }
+.label-pop .label-opt input { accent-color: var(--ink); }
+.label-pop .label-hint { display: block; padding: 9px 11px; font: 400 12px/1.6 var(--sans); color: var(--ink-3); }
+
 /* ========== task 详情页 ========== */
 .detail-grid.mn-two-col {
   display: grid;

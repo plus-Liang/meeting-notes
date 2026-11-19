@@ -26,6 +26,14 @@ import java.util.Map;
  * <p>T4.24：列表**只增**可选参数 {@code q}（服务端搜索）——source_uri ILIKE 参数化匹配
  * （%/_/\ 转义，ESCAPE '\'），纯数字时 OR id 精确匹配；与 status/before_id 可组合，
  * 分页语义不变。新增 {@link #counts(long)}：当前用户 GROUP BY 真计数（无上限）。
+ *
+ * <p>T4.42（D-160）：列表**只增**可选参数 {@code created_after}/{@code created_before}
+ * （{@code YYYY-MM-DD}，服务端时区解释为半开区间 [当日 00:00, 次日 00:00)；格式非法或
+ * after 日期晚于 before → 400 INVALID_PARAM，见 {@link TaskDateWindow#resolve}）；响应**只增**
+ * {@code total}（同筛选条件 COUNT，不含 before_id 游标、键不省略）；{@code label} 支持多值
+ * （重复 label 参数 → 各自 {@code @>} 后 OR 并集，**同维度并集/跨维度交集**（D-162），
+ * 单值行为不变）。
+ * keyset 分页/排序固定 created 相关的 {@code id DESC} 不变，**不做**自定义排序。
  */
 @Service
 public class TaskQueryService {
@@ -67,8 +75,9 @@ public class TaskQueryService {
             boolean favorite) {
     }
 
-    /** 列表响应：items + next_before_id（还有下一页时为最后一项的 id，否则 null）。 */
-    public record TaskListResponse(List<TaskListItem> items, Long nextBeforeId) {
+    /** 列表响应：items + next_before_id（还有下一页时为最后一项的 id，否则 null）+
+     *  T4.42 total（同筛选条件 COUNT，键不省略；契约要求放响应末尾，record 声明序即 JSON 序）。 */
+    public record TaskListResponse(List<TaskListItem> items, Long nextBeforeId, long total) {
     }
 
     /** T4.24：状态计数响应（真计数无上限；active = PENDING+RUNNING+RETRYING 合计）。 */
@@ -89,58 +98,87 @@ public class TaskQueryService {
     }
 
     /**
-     * @param status   可空；给定时精确过滤（非法值自然匹配 0 行，不抛错）
-     * @param beforeId 可空；keyset 游标
+     * @param status   可空；给定时精确过滤
+     * @param beforeId 可空；keyset 游标（不进 total 的 COUNT）
      * @param q        可空；非空时 source_uri ILIKE 参数化匹配（%/_/\ 转义），纯数字 OR id 精确匹配；
      *                 已由 controller 去空格、校验长度（≤{@value #Q_MAX_CHARS}）
-     * @param label    可空；T4.29 单标签筛选——labels jsonb 包含匹配（@> ?::jsonb，参数化为
-     *                 {@code mapper.writeValueAsString(List.of(label))}，注入面同 q）
+     * @param labels   可空；T4.42 多标签筛选——jsonb {@code @>} 包含**全部**选中标签（单标签行为不变），
+     *                 经 mapper 序列化参数化绑定（注入面同 q）；空列表视为未给
      * @param favorite 可空；T4.29 收藏筛选（true/false）
+     * @param window   可空；T4.42 created_at 半开区间过滤
      * @param limit    已由 controller 校验（1..MAX_LIMIT）
      */
     public TaskListResponse list(long userId, String status, int limit, Long beforeId, String q,
-                                 String label, Boolean favorite) {
+                                 List<String> labels, Boolean favorite, TaskDateWindow window) {
+        /* WHERE 片段与参数：列表与 total 的 COUNT 共用（COUNT 不含 before_id 游标——
+           total 口径 = 该筛选组合下的总条数，与分页无关） */
+        StringBuilder where = new StringBuilder("t.user_id = ?");
+        List<Object> args = new ArrayList<>();
+        args.add(userId);
+        if (status != null && !status.isBlank()) {
+            where.append(" AND t.status = ?");
+            args.add(status.trim());
+        }
+        if (q != null && !q.isBlank()) {
+            /* T4.24：参数化模糊匹配，%/_/\ 按字面（ESCAPE '\'），绝不拼字符串进 SQL */
+            String like = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
+            where.append(" AND (t.source_uri ILIKE ? ESCAPE '\\'");
+            args.add("%" + like + "%");
+            if (q.matches("\\d+") && parseableAsId(q)) {
+                /* T4.24b：仅当能装进 long 才加 id 精确匹配；超 64 位范围（如 20 位数字）
+                   按普通关键词只走 ILIKE，保持 200（不再抛 NumberFormatException 打 500） */
+                where.append(" OR t.id = ?");
+                args.add(Long.parseLong(q));
+            }
+            where.append(")");
+        }
+        if (labels != null && !labels.isEmpty()) {
+            /* T4.42/D-162：多标签 = **OR 并集**（同维度多值取并集、跨维度 AND；D-162 裁决）——
+               每个标签一个 t.labels @> ?::jsonb，OR 串成一个括号组；全程参数化（标签值绝不拼进 SQL）。
+               单标签行为不变（单条件括号组）。 */
+            where.append(" AND (");
+            for (int i = 0; i < labels.size(); i++) {
+                if (i > 0) {
+                    where.append(" OR ");
+                }
+                where.append("t.labels @> ?::jsonb");
+                args.add(labelsJson(List.of(labels.get(i))));
+            }
+            where.append(")");
+        }
+        if (favorite != null) {
+            where.append(" AND t.favorite = ?");
+            args.add(favorite);
+        }
+        if (window != null) {
+            if (window.after() != null) {
+                where.append(" AND t.created_at >= ?");
+                args.add(window.after());
+            }
+            if (window.before() != null) {
+                where.append(" AND t.created_at < ?");
+                args.add(window.before());
+            }
+        }
+
+        /* T4.42：total = 同筛选条件 COUNT（键不省略；查询失败不炸列表——queryForObject 对空表回 0 不回 null） */
+        Long total = jdbc.queryForObject(
+                "SELECT count(*) FROM task t WHERE " + where, Long.class, args.toArray());
+
+        /* 注意：文本块会剥掉行尾空格，WHERE 后必须显式补空格再拼 where 片段（T4.42 首跑踩过 WHEREt） */
         StringBuilder sql = new StringBuilder("""
                 SELECT t.id, t.status, t.source_uri, t.duration_sec, t.created_at, t.error_code,
                        r.keywords, r.summary, r.template, t.labels::text AS labels, t.favorite
                 FROM task t
                 LEFT JOIN task_result r ON r.task_id = t.id
-                WHERE t.user_id = ?
-                """);
-        List<Object> args = new ArrayList<>();
-        args.add(userId);
-        if (status != null && !status.isBlank()) {
-            sql.append(" AND t.status = ?");
-            args.add(status.trim());
-        }
+                WHERE """).append(' ').append(where);
+        List<Object> listArgs = new ArrayList<>(args);
         if (beforeId != null) {
             sql.append(" AND t.id < ?");
-            args.add(beforeId);
-        }
-        if (q != null && !q.isBlank()) {
-            /* T4.24：参数化模糊匹配，%/_/\ 按字面（ESCAPE '\'），绝不拼字符串进 SQL */
-            String like = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_");
-            sql.append(" AND (t.source_uri ILIKE ? ESCAPE '\\'");
-            args.add("%" + like + "%");
-            if (q.matches("\\d+") && parseableAsId(q)) {
-                /* T4.24b：仅当能装进 long 才加 id 精确匹配；超 64 位范围（如 20 位数字）
-                   按普通关键词只走 ILIKE，保持 200（不再抛 NumberFormatException 打 500） */
-                sql.append(" OR t.id = ?");
-                args.add(Long.parseLong(q));
-            }
-            sql.append(")");
-        }
-        if (label != null && !label.isBlank()) {
-            /* T4.29：jsonb 包含匹配——label 经 mapper 序列化成 jsonb 字面量参数化绑定（不拼字符串） */
-            sql.append(" AND t.labels @> ?::jsonb");
-            args.add(labelsJson(List.of(label)));
-        }
-        if (favorite != null) {
-            sql.append(" AND t.favorite = ?");
-            args.add(favorite);
+            listArgs.add(beforeId);
         }
         sql.append(" ORDER BY t.id DESC LIMIT ?");
-        args.add(limit + 1); // 多取 1 行判断是否还有下一页
+        listArgs.add(limit + 1); // 多取 1 行判断是否还有下一页
 
         List<TaskListItem> items = new ArrayList<>();
         boolean[] hasMore = {false};
@@ -161,10 +199,10 @@ public class TaskQueryService {
             } else {
                 hasMore[0] = true; // 第 limit+1 行存在 = 还有下一页
             }
-        }, args.toArray());
+        }, listArgs.toArray());
 
         Long nextBeforeId = hasMore[0] && !items.isEmpty() ? items.get(items.size() - 1).id() : null;
-        return new TaskListResponse(items, nextBeforeId);
+        return new TaskListResponse(items, nextBeforeId, total == null ? 0L : total);
     }
 
     /** labels jsonb 文本 → List<String>（T4.29，坏 JSON/空 → []，口径同 keywords）。 */

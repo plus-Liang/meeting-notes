@@ -2,6 +2,7 @@ package com.meetingnotes.web;
 
 import com.meetingnotes.common.ApiException;
 import com.meetingnotes.common.UserContext;
+import com.meetingnotes.task.TaskDateWindow;
 import com.meetingnotes.task.TaskQueryService;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -14,6 +15,9 @@ import org.springframework.web.bind.annotation.RestController;
  * {@code GET /api/v1/tasks}——keyset 分页（before_id 游标禁 OFFSET）、user_id 服务端过滤（D-040）、
  * limit 1..50、status 白名单、T4.24 可选 q（去空格/超长 400/溢出按关键词）、
  * T4.29 可选 label（jsonb 包含匹配）/favorite（true|false），参数化并与 status/q 可组合，分页语义不变。
+ * T4.42：label 支持多值（重复参数 → 包含全部）、增可选 created_after/created_before
+ * （{@code YYYY-MM-DD}，非法/颠倒 → 400，解析见 {@link TaskDateWindow#resolve}），
+ * 响应末尾增 total（同筛选 COUNT）。
  */
 @RestController
 @RequestMapping("/api/v1")
@@ -27,15 +31,19 @@ public class TaskListController {
     }
 
     /** 服务端任务列表（T2.10 / D-053）：keyset 分页（before_id 游标禁 OFFSET）、user_id 服务端过滤（D-040）；
-     *  limit 1..50、status 白名单、T4.24 只增可选 q（去空格/超长 400，见 TaskQueryService.normalizeQ）；非法 → 400。 */
+     *  limit 1..50、status 白名单、T4.24 只增可选 q（去空格/超长 400，见 TaskQueryService.normalizeQ）；非法 → 400。
+     *  T4.42：label 多值（重复参数，trim 后去空）；created_after/created_before 校验在
+     *  TaskDateWindow.resolve（格式/顺序 → 400 INVALID_PARAM）。 */
     @GetMapping("/tasks")
     public TaskQueryService.TaskListResponse list(
             @org.springframework.web.bind.annotation.RequestParam(required = false) String status,
             @org.springframework.web.bind.annotation.RequestParam(required = false) String limit,
             @org.springframework.web.bind.annotation.RequestParam(name = "before_id", required = false) String beforeId,
             @org.springframework.web.bind.annotation.RequestParam(required = false) String q,
-            @org.springframework.web.bind.annotation.RequestParam(required = false) String label,
-            @org.springframework.web.bind.annotation.RequestParam(required = false) String favorite) {
+            @org.springframework.web.bind.annotation.RequestParam(required = false) java.util.List<String> label,
+            @org.springframework.web.bind.annotation.RequestParam(required = false) String favorite,
+            @org.springframework.web.bind.annotation.RequestParam(name = "created_after", required = false) String createdAfter,
+            @org.springframework.web.bind.annotation.RequestParam(name = "created_before", required = false) String createdBefore) {
         int lim = TaskQueryService.DEFAULT_LIMIT;
         if (limit != null) {
             try {
@@ -73,8 +81,12 @@ public class TaskListController {
             }
             favoriteFilter = Boolean.parseBoolean(value);
         }
-        String labelFilter = label == null || label.isBlank() ? null : label.trim();
+        /* T4.42：多标签——重复 label 参数收集为列表（trim 去空去 null；全部包含语义，单值行为不变） */
+        java.util.List<String> labelFilters = label == null ? java.util.List.of()
+                : label.stream().filter(java.util.Objects::nonNull).map(String::trim)
+                        .filter(s -> !s.isEmpty()).toList();
         return taskQueryService.list(UserContext.current(), statusFilter, lim, before,
-                TaskQueryService.normalizeQ(q), labelFilter, favoriteFilter);
+                TaskQueryService.normalizeQ(q), labelFilters, favoriteFilter,
+                TaskDateWindow.resolve(createdAfter, createdBefore));
     }
 }

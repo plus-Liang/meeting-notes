@@ -11,11 +11,14 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowCallbackHandler;
 
 import java.sql.ResultSet;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.time.OffsetDateTime;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -98,7 +101,7 @@ class TaskQueryServiceTest {
                 new String[]{"会议讨论了AI对就业市场的影响，覆盖基础开发岗位缩减与初级程序员入口收窄两大议题，并给出行动建议。", null},
                 new String[]{"meeting", null});
 
-        TaskQueryService.TaskListResponse resp = newService().list(1L, null, 5, null, null, null, null);
+        TaskQueryService.TaskListResponse resp = newService().list(1L, null, 5, null, null, List.of(), null, null);
 
         var first = resp.items().get(0);
         assertEquals(List.of("AI", "简历", "招聘", "扩容"), first.keywords(), "合法 JSON → 数组原样");
@@ -116,7 +119,7 @@ class TaskQueryServiceTest {
         // limit=2 但库里有 3 行 → 返回 2 项，next_before_id=4（本页最后一项 id）
         stubRows(3, 5L);
 
-        TaskQueryService.TaskListResponse resp = newService().list(1L, null, 2, null, null, null, null);
+        TaskQueryService.TaskListResponse resp = newService().list(1L, null, 2, null, null, List.of(), null, null);
 
         assertEquals(2, resp.items().size());
         assertEquals(5L, resp.items().get(0).id());
@@ -130,7 +133,7 @@ class TaskQueryServiceTest {
         // 只有 2 行、limit=3 → 没有下一页，next_before_id 必须为 null
         stubRows(2, 9L);
 
-        TaskQueryService.TaskListResponse resp = newService().list(1L, null, 3, null, null, null, null);
+        TaskQueryService.TaskListResponse resp = newService().list(1L, null, 3, null, null, List.of(), null, null);
 
         assertEquals(2, resp.items().size());
         assertNull(resp.nextBeforeId(), "总数未超过 limit 时不得给出翻页游标");
@@ -139,7 +142,7 @@ class TaskQueryServiceTest {
     @Test
     void statusAndBeforeIdFiltersLandInSqlAndArgs() {
         // 只验证 SQL 形状与参数（不喂行数据；jdbc.query 返回值在此模式下不被使用）
-        newService().list(1L, "DEAD", 20, 42L, null, null, null);
+        newService().list(1L, "DEAD", 20, 42L, null, List.of(), null, null);
 
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
@@ -156,10 +159,10 @@ class TaskQueryServiceTest {
     void controllerRejectsBadParamsWith400InvalidParam() {
         com.meetingnotes.web.TaskListController controller = newListController();
 
-        assertEquals("INVALID_PARAM", assertThrows(ApiException.class, () -> controller.list(null, "51", null, null, null, null)).getCode());
-        assertEquals(400, assertThrows(ApiException.class, () -> controller.list(null, "0", null, null, null, null)).getStatus());
-        assertEquals("INVALID_PARAM", assertThrows(ApiException.class, () -> controller.list(null, "abc", null, null, null, null)).getCode());
-        assertEquals("INVALID_PARAM", assertThrows(ApiException.class, () -> controller.list(null, null, "not-a-number", null, null, null)).getCode());
+        assertEquals("INVALID_PARAM", assertThrows(ApiException.class, () -> controller.list(null, "51", null, null, null, null, null, null)).getCode());
+        assertEquals(400, assertThrows(ApiException.class, () -> controller.list(null, "0", null, null, null, null, null, null)).getStatus());
+        assertEquals("INVALID_PARAM", assertThrows(ApiException.class, () -> controller.list(null, "abc", null, null, null, null, null, null)).getCode());
+        assertEquals("INVALID_PARAM", assertThrows(ApiException.class, () -> controller.list(null, null, "not-a-number", null, null, null, null, null)).getCode());
     }
 
     /** T4.1 起构造器多了 retry/glossary 两个依赖，T4.7 再加 batch，这里统一补齐 mock。 */
@@ -185,13 +188,13 @@ class TaskQueryServiceTest {
         com.meetingnotes.web.TaskListController controller = newListController();
 
         // 非法 status → 400 INVALID_PARAM，不再静默空列表（T2.12）
-        ApiException e = assertThrows(ApiException.class, () -> controller.list("BOGUS", null, null, null, null, null));
+        ApiException e = assertThrows(ApiException.class, () -> controller.list("BOGUS", null, null, null, null, null, null, null));
         assertEquals(400, e.getStatus());
         assertEquals("INVALID_PARAM", e.getCode());
 
         // 合法 status 原样透传（ 不触发 400）
         stubRows(1, 3L);
-        com.meetingnotes.task.TaskQueryService.TaskListResponse resp = controller.list("DONE", null, null, null, null, null);
+        com.meetingnotes.task.TaskQueryService.TaskListResponse resp = controller.list("DONE", null, null, null, null, null, null, null);
         assertEquals(1, resp.items().size());
     }
 
@@ -211,7 +214,7 @@ class TaskQueryServiceTest {
     @Test
     void qLandsInSqlParameterizedWithLikeEscaping() {
         // %/_/\ 全部转义成字面量，且关键词只出现在参数里、绝不拼进 SQL 字符串
-        newService().list(1L, null, 20, null, "ab%_\\c", null, null);
+        newService().list(1L, null, 20, null, "ab%_\\c", List.of(), null, null);
 
         CapturedSql c = captureLastQuery();
         assertTrue(c.sql().contains("ILIKE ? ESCAPE '\\'"), "必须声明 ESCAPE '\\'（反斜杠为转义符）");
@@ -222,8 +225,8 @@ class TaskQueryServiceTest {
 
     @Test
     void blankOrNullQAddsNoCondition() {
-        newService().list(1L, null, 20, null, null, null, null);
-        newService().list(1L, null, 20, null, "   ", null, null);
+        newService().list(1L, null, 20, null, null, List.of(), null, null);
+        newService().list(1L, null, 20, null, "   ", List.of(), null, null);
 
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
@@ -238,7 +241,7 @@ class TaskQueryServiceTest {
 
     @Test
     void pureNumericQAlsoMatchesIdExactly() {
-        newService().list(1L, null, 20, null, "42", null, null);
+        newService().list(1L, null, 20, null, "42", List.of(), null, null);
 
         CapturedSql c = captureLastQuery();
         assertTrue(c.sql().contains("OR t.id = ?"), "纯数字 q 额外精确匹配任务 id");
@@ -248,13 +251,14 @@ class TaskQueryServiceTest {
 
     @Test
     void qCombinesWithStatusAndBeforeId() {
-        newService().list(1L, "DEAD", 20, 42L, "abc", null, null);
+        newService().list(1L, "DEAD", 20, 42L, "abc", List.of(), null, null);
 
         CapturedSql c = captureLastQuery();
         assertTrue(c.sql().contains("AND t.status = ?"), "与 status 可组合");
         assertTrue(c.sql().contains("AND t.id < ?"), "与 before_id 可组合");
         assertTrue(c.sql().contains("ORDER BY t.id DESC LIMIT ?"), "分页语义不变");
-        assertEquals(List.of(1L, "DEAD", 42L, "%abc%", 21), List.of(c.args()));
+        /* T4.42：before_id 只进列表查询（COUNT 不含游标），参数顺序变为 user/status/q/before_id/limit+1 */
+        assertEquals(List.of(1L, "DEAD", "%abc%", 42L, 21), List.of(c.args()));
     }
 
     @Test
@@ -263,13 +267,13 @@ class TaskQueryServiceTest {
 
         // q 超过 100 字符 → 400 INVALID_PARAM
         ApiException e = assertThrows(ApiException.class,
-                () -> controller.list(null, null, null, "x".repeat(101), null, null));
+                () -> controller.list(null, null, null, "x".repeat(101), null, null, null, null));
         assertEquals(400, e.getStatus());
         assertEquals("INVALID_PARAM", e.getCode());
 
         // q 去空格 + 纯数字 → 透传到 SQL（id 精确匹配）
         stubRows(1, 3L);
-        controller.list(null, null, null, "  42  ", null, null);
+        controller.list(null, null, null, "  42  ", null, null, null, null);
         CapturedSql c = captureLastQuery();
         assertTrue(c.sql().contains("OR t.id = ?"), "q 去空格后纯数字仍精确匹配 id");
         assertEquals(List.of(1L, "%42%", 42L, 21), List.of(c.args()));
@@ -281,7 +285,7 @@ class TaskQueryServiceTest {
     void overLongNumericQOnlyGoesIlikeWithoutIdMatch() {
         // 20 位数字 > Long.MAX → 不加 OR t.id（防 NumberFormatException 打 500），只走 ILIKE，保持 200
         String q20 = "9".repeat(20);
-        newService().list(1L, null, 20, null, q20, null, null);
+        newService().list(1L, null, 20, null, q20, List.of(), null, null);
 
         CapturedSql c = captureLastQuery();
         assertFalse(c.sql().contains("OR t.id = ?"), "超出 64 位范围的数字不得加 id 精确匹配");
@@ -292,7 +296,7 @@ class TaskQueryServiceTest {
     void longMaxValueQStillMatchesIdExactly() {
         // Long.MAX_VALUE（9223372036854775807）恰好能装进 long → 精确匹配保留，参数 = MAX
         String max = Long.toString(Long.MAX_VALUE);
-        newService().list(1L, null, 20, null, max, null, null);
+        newService().list(1L, null, 20, null, max, List.of(), null, null);
 
         CapturedSql c = captureLastQuery();
         assertTrue(c.sql().contains("OR t.id = ?"), "Long.MAX 边界值仍走 id 精确匹配");
@@ -325,7 +329,7 @@ class TaskQueryServiceTest {
 
     @Test
     void labelFilterUsesJsonbContainmentParameterized() {
-        newService().list(1L, null, 20, null, null, "课程", null);
+        newService().list(1L, null, 20, null, null, List.of("课程"), null, null);
 
         CapturedSql c = captureLastQuery();
         assertTrue(c.sql().contains("t.labels @> ?::jsonb"), "label 筛选走 jsonb 包含匹配");
@@ -336,10 +340,152 @@ class TaskQueryServiceTest {
 
     @Test
     void favoriteFilterBindsBooleanParameterized() {
-        newService().list(1L, null, 20, null, null, null, true);
+        newService().list(1L, null, 20, null, null, List.of(), true, null);
 
         CapturedSql c = captureLastQuery();
         assertTrue(c.sql().contains("t.favorite = ?"), "favorite 筛选参数化");
         assertEquals(List.of(1L, true, 21), List.of(c.args()));
+    }
+
+    /* ===== T4.42：日期区间 / 多标签 / total ===== */
+
+    @Test
+    void dateWindowBlankOrNullSidesReturnNull() {
+        assertNull(TaskDateWindow.resolve(null, null), "两侧都未给 → 不过滤");
+        assertNull(TaskDateWindow.resolve("", "   "), "空白串按未给");
+    }
+
+    @Test
+    void dateWindowParsesHalfOpenRangeInServerZone() {
+        TaskDateWindow w = TaskDateWindow.resolve("2026-01-01", "2026-01-02");
+        ZoneId zone = ZoneId.systemDefault();
+        assertNotNull(w);
+        assertEquals(LocalDate.of(2026, 1, 1).atStartOfDay(zone).toOffsetDateTime(), w.after(),
+                "after = 当日 00:00（服务端时区）");
+        assertEquals(LocalDate.of(2026, 1, 3).atStartOfDay(zone).toOffsetDateTime(), w.before(),
+                "before = 次日 00:00（半开区间，含 before 当日全天）");
+    }
+
+    @Test
+    void dateWindowSameDayIsNonEmptyInterval() {
+        TaskDateWindow w = TaskDateWindow.resolve("2026-01-01", "2026-01-01");
+        assertNotNull(w);
+        assertTrue(w.before().isAfter(w.after()), "同一天 = [当日00:00, 次日00:00) 非空区间");
+    }
+
+    @Test
+    void dateWindowSingleEndAllowed() {
+        assertNotNull(TaskDateWindow.resolve("2026-01-01", null), "只给 after 合法");
+        assertNotNull(TaskDateWindow.resolve(null, "2026-01-31"), "只给 before 合法");
+    }
+
+    @Test
+    void dateWindowCrossMonthBeforeRollsToNextMonth() {
+        TaskDateWindow w = TaskDateWindow.resolve("2026-01-31", "2026-01-31");
+        ZoneId zone = ZoneId.systemDefault();
+        assertEquals(LocalDate.of(2026, 2, 1).atStartOfDay(zone).toOffsetDateTime(), w.before(),
+                "跨月边界：01-31 的次日 = 02-01 00:00");
+    }
+
+    @Test
+    void dateWindowReversedDatesAndBadFormatsAre400() {
+        ApiException reversed = assertThrows(ApiException.class,
+                () -> TaskDateWindow.resolve("2026-01-02", "2026-01-01"));
+        assertEquals(400, reversed.getStatus(), "after 晚于 before → 400");
+        assertEquals("INVALID_PARAM", reversed.getCode());
+        for (String bad : new String[]{"2026-1-1", "abc", "2026/01/01", "2026-01-01T00:00", "20260101"}) {
+            ApiException e = assertThrows(ApiException.class,
+                    () -> TaskDateWindow.resolve(bad, null), "宽松/非法格式必须拒绝：" + bad);
+            assertEquals(400, e.getStatus());
+            assertEquals("INVALID_PARAM", e.getCode());
+        }
+    }
+
+    @Test
+    void dateWindowLandsInListSqlParameterized() {
+        TaskDateWindow w = TaskDateWindow.resolve("2026-01-01", "2026-01-02");
+        newService().list(1L, null, 20, null, null, List.of(), null, w);
+
+        CapturedSql c = captureLastQuery();
+        assertTrue(c.sql().contains("t.created_at >= ?"), "after 必须进 SQL");
+        assertTrue(c.sql().contains("t.created_at < ?"), "before（半开）必须进 SQL");
+        assertEquals(List.of(1L, w.after(), w.before(), 21), List.of(c.args()), "日期参数化绑定");
+    }
+
+    @Test
+    void multiLabelUsesOrUnionParameterizedPerLabel() {
+        /* D-162 判别用例（先红后绿）：OR 并集——两标签各自一个 @> 参数，绝不合并成一个数组（那是 AND 语义） */
+        newService().list(1L, null, 20, null, null, List.of("课程", "不存在"), null, null);
+
+        CapturedSql c = captureLastQuery();
+        assertTrue(c.sql().contains("t.labels @> ?::jsonb OR t.labels @> ?::jsonb"),
+                "多标签必须 OR 并集（同维度并集/跨维度交集，D-162）");
+        assertFalse(c.sql().contains("课程"), "标签值绝不拼进 SQL 字符串");
+        assertEquals(List.of(1L, "[\"课程\"]", "[\"不存在\"]", 21), List.of(c.args()),
+                "每标签一个 jsonb 参数（合 并成一个数组 = AND 语义，必须拒绝）");
+    }
+
+
+    @Test
+    void totalComesFromCountQueryWithoutCursorOrLimit() throws Exception {
+        when(jdbc.queryForObject(contains("count(*)"), eq(Long.class),
+                ArgumentMatchers.any(Object[].class))).thenReturn(7L);
+        stubRows(3, 9L); // limit=2 → 列表 2 项 + 有下一页
+
+        TaskQueryService.TaskListResponse resp = newService().list(1L, "DONE", 2, 8L, null, List.of(), null, null);
+
+        assertEquals(7, resp.total(), "total 来自 COUNT（与分页无关）");
+        assertEquals(2, resp.items().size());
+        ArgumentCaptor<String> countSql = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Object[]> countArgs = ArgumentCaptor.forClass(Object[].class);
+        verify(jdbc).queryForObject(countSql.capture(), eq(Long.class), countArgs.capture());
+        assertFalse(countSql.getValue().contains("LIMIT"), "COUNT 不带 LIMIT");
+        assertFalse(countSql.getValue().contains("t.id < ?"), "COUNT 不含 before_id 游标");
+        assertTrue(countSql.getValue().contains("t.status = ?"), "COUNT 与筛选条件一致");
+        assertEquals(List.of(1L, "DONE"), List.of(countArgs.getValue()), "COUNT 参数不含游标与 limit");
+    }
+
+    @Test
+    void allNewFiltersCombineWithStatusQAndKeysetStaysListOnly() {
+        TaskDateWindow w = TaskDateWindow.resolve("2026-01-01", "2026-01-02");
+        newService().list(1L, "DONE", 20, 42L, "abc", List.of("会议"), true, w);
+
+        CapturedSql c = captureLastQuery();
+        assertTrue(c.sql().contains("AND t.status = ?"), "与 status 可组合");
+        assertTrue(c.sql().contains("AND (t.source_uri ILIKE"), "与 q 可组合");
+        assertTrue(c.sql().contains("t.labels @> ?::jsonb"), "与 label 可组合");
+        assertTrue(c.sql().contains("t.favorite = ?"), "与 favorite 可组合");
+        assertTrue(c.sql().contains("t.created_at >= ?"), "与日期区间可组合");
+        assertTrue(c.sql().contains("AND t.id < ?"), "keyset 游标仍在列表查询");
+        assertEquals(List.of(1L, "DONE", "%abc%", "[\"会议\"]", true, w.after(), w.before(), 42L, 21),
+                List.of(c.args()), "参数顺序：user/status/q/labels/favorite/after/before/before_id/limit+1");
+    }
+
+    @Test
+    void controllerRejectsBadDateParamsWith400InvalidParam() {
+        com.meetingnotes.web.TaskListController controller = newListController();
+
+        ApiException badFormat = assertThrows(ApiException.class,
+                () -> controller.list(null, null, null, null, null, null, "2026/01/01", null));
+        assertEquals(400, badFormat.getStatus());
+        assertEquals("INVALID_PARAM", badFormat.getCode());
+
+        ApiException reversed = assertThrows(ApiException.class,
+                () -> controller.list(null, null, null, null, null, null, "2026-01-02", "2026-01-01"));
+        assertEquals(400, reversed.getStatus());
+        assertEquals("INVALID_PARAM", reversed.getCode());
+    }
+
+    @Test
+    void controllerTrimsMultiLabelAndPassesDateWindowThrough() throws Exception {
+        com.meetingnotes.web.TaskListController controller = newListController();
+        stubRows(1, 3L);
+        TaskDateWindow w = TaskDateWindow.resolve("2026-01-01", null);
+
+        controller.list(null, null, null, null, java.util.Arrays.asList(" 会议 ", "", null), null, "2026-01-01", null);
+
+        CapturedSql c = captureLastQuery();
+        assertEquals(List.of(1L, "[\"会议\"]", w.after(), 21), List.of(c.args()),
+                "多标签 trim 去空；日期窗口透传服务层");
     }
 }

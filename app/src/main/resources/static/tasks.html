@@ -48,6 +48,7 @@
       <p class="search-note" id="searchNote"></p>
     </div>
     <div class="filter-bar" id="filterBar"></div>
+    <div class="active-chips" id="activeChips"></div> <!-- T4.42：已选条件胶囊（可单个移除）+ 清除筛选 -->
     <div class="retry-bar" id="retryBar" style="display:none;">
       <label><input type="checkbox" id="checkAll"> 全选</label>
       <span class="batch-actions">
@@ -58,6 +59,7 @@
       </span>
       <span id="retryResult" class="hint"></span>
     </div>
+    <p class="result-count" id="resultCount" style="display:none;"></p> <!-- T4.42：共 N 条 · 已加载 M 条 -->
     <div id="list" aria-live="polite">
       <div class="skeleton-row"><div class="skeleton skeleton-line" style="width:45%"></div><div class="skeleton skeleton-line" style="width:88px"></div></div>
       <div class="skeleton-row"><div class="skeleton skeleton-line" style="width:60%"></div><div class="skeleton skeleton-line" style="width:88px"></div></div>
@@ -93,7 +95,7 @@
   var timer = null;
   var lastRenderKey = null;
   var state = { filter: '', cursor: null, items: [], checked: {}, checkedCount: 0, search: '',
-    filterFavorite: false, filterLabel: '' }; /* T4.29：收藏/标签筛选 */
+    filterFavorite: false, filterLabels: [], range: '', total: null }; /* T4.42：标签多选/时间范围/total */
   /* T4.24：状态计数改调 GET /tasks/counts（服务端真计数无上限；页面可见时 30s 刷新保留） */
   var countState = { total: null, active: 0, done: 0, dead: 0 };
 
@@ -104,6 +106,63 @@
     { key: 'DONE', label: '已完成' },
     { key: 'DEAD', label: '失败' }
   ];
+
+  /* ===== T4.42：时间范围（后端 created_after/created_before，服务端时区半开区间） ===== */
+  var RANGES = [
+    { key: '', label: '全部' },
+    { key: 'today', label: '今天' },
+    { key: '7d', label: '近 7 天' },
+    { key: '30d', label: '近 30 天' }
+  ];
+
+  function pad2(n) { return n < 10 ? '0' + n : String(n); }
+  function dateStr(d) { return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()); }
+
+  /* range → API 参数：今天 = [today, today]（before 解释为次日 00:00 半开）；
+     近 7/30 天 = 含今天倒推 N-1 天，只设 after（未来侧不设界） */
+  function rangeDates(key) {
+    var now = new Date();
+    if (key === 'today') return { after: dateStr(now), before: dateStr(now) };
+    if (key === '7d' || key === '30d') {
+      var d = new Date(now);
+      d.setDate(d.getDate() - (key === '7d' ? 6 : 29));
+      return { after: dateStr(d), before: '' };
+    }
+    return { after: '', before: '' };
+  }
+
+  /* T4.42：筛选状态 ⇄ URL（range/status/label×N/favorite/q；before_id 游标不写 URL）。
+     非法值（未知 range/status）回退默认并标记 invalid → 开场 toast，不白屏 */
+  function parseUrlFilters() {
+    var sp = new URLSearchParams(location.search);
+    var invalid = false;
+    var range = sp.get('range') || '';
+    if (range && !RANGES.some(function (r) { return r.key === range; })) { invalid = true; range = ''; }
+    var status = sp.get('status') || '';
+    if (status && !FILTERS.some(function (f) { return f.key === status; })) { invalid = true; status = ''; }
+    var labels = [], labelsInvalid = false;
+    sp.getAll('label').map(function (s) { return String(s).trim(); }).forEach(function (s) {
+      if (!s) return;
+      if (s.length > 20) { labelsInvalid = true; return; } /* T4.42 缺陷修复④：超长不静默丢，走 invalid toast */
+      labels.push(s);
+    });
+    var favorite = sp.get('favorite') === 'true';
+    var q = (sp.get('q') || '').trim();
+    if (q.length > 100) q = q.slice(0, 100);
+    return { range: range, status: status, labels: labels, favorite: favorite, q: q,
+      invalid: invalid || labelsInvalid };
+  }
+
+  function syncUrl() {
+    var sp = new URLSearchParams();
+    if (state.range) sp.set('range', state.range);
+    if (state.filter) sp.set('status', state.filter);
+    state.filterLabels.forEach(function (l) { sp.append('label', l); });
+    if (state.filterFavorite) sp.set('favorite', 'true');
+    if (state.search) sp.set('q', state.search);
+    var qs = sp.toString();
+    history.replaceState(null, '', location.pathname + (qs ? '?' + qs : ''));
+  }
 
   /* localStorage：仅作"上次提交"的名称缓存与服务不可用时的兜底展示 */
   function localName(id) {
@@ -159,36 +218,49 @@
   }
 
   function renderFilterBar() {
-    /* T4.29：追加收藏按钮 + 标签下拉（选项 = 当前已加载行的 labels 并集；值由 state 保持防重建丢失） */
+    /* T4.42：状态 segs + 时间范围 segs + 收藏 + 标签多选（下拉复选，值由 state 保持防重建丢失） */
+    var rangeBtns = RANGES.map(function (r) {
+      return '<button class="filter-btn' + (state.range === r.key ? ' active' : '') +
+        '" data-range="' + r.key + '" aria-pressed="' + (state.range === r.key) + '">' + r.label + '</button>';
+    }).join('');
     var fav = '<button class="filter-btn' + (state.filterFavorite ? ' active' : '') +
       '" id="favoriteFilterBtn" type="button" aria-pressed="' + state.filterFavorite + '">★ 收藏</button>';
-    var labelSel = '<select id="labelFilterSel" aria-label="按标签筛选"></select>'; /* 选项由 refreshLabelOptions() 填充 */
-    filterBar.innerHTML = FILTERS.map(function (f) {
+    var picked = state.filterLabels.length;
+    var labelBtn = '<span class="label-multi"><button class="filter-btn' + (picked ? ' active' : '') +
+      '" id="labelMultiBtn" type="button" aria-expanded="false" aria-haspopup="true">标签' +
+      (picked ? ' · ' + picked : '') + '▾</button><span class="label-pop" id="labelPop" hidden></span></span>';
+    var statusBtns = FILTERS.map(function (f) {
       var n = countFor(f.key);
       return '<button class="filter-btn' + (state.filter === f.key ? ' active' : '') +
         '" data-status="' + f.key + '" aria-pressed="' + (state.filter === f.key) + '">' + f.label +
         (n === null ? '' : '<span class="count-chip">' + n + '</span>') + '</button>';
-    }).join('') + fav + labelSel;
+    }).join('');
+    filterBar.innerHTML = rangeBtns + statusBtns + fav + labelBtn;
     refreshLabelOptions();
   }
 
-  /* T4.29b（K-81）：标签下拉选项独立刷新——render() 数据加载后即调（不再等 renderFilterBar/30s）；
-     筛选中的标签不在当前页时保留占位 option，防「下拉显示全部标签但筛选仍生效」的卡死 */
+  /* T4.29b→T4.42（K-81）：标签选项 = 当前已加载行的 labels 并集；筛选中的标签不在当前页时保留占位，
+     防「下拉显示全部标签但筛选仍生效」的卡死。多选复选框不重建弹层，选中态即时同步 */
   function refreshLabelOptions() {
-    var sel = document.getElementById('labelFilterSel');
-    if (!sel) return;
+    var pop = document.getElementById('labelPop');
+    if (!pop) return;
     var seen = {}, labels = [];
     state.items.forEach(function (i) {
       (i.labels || []).forEach(function (l) {
         if (!seen[l]) { seen[l] = true; labels.push(l); }
       });
     });
-    if (state.filterLabel && labels.indexOf(state.filterLabel) < 0) {
-      labels.unshift(state.filterLabel);
+    state.filterLabels.forEach(function (l) {
+      if (labels.indexOf(l) < 0) labels.unshift(l);
+    });
+    if (!labels.length) {
+      pop.innerHTML = '<span class="label-hint">暂无标签（在详情页可给任务添加）</span>';
+      return;
     }
-    sel.innerHTML = '<option value="">全部标签</option>' + labels.map(function (l) {
-      return '<option value="' + escapeHtml(l) + '"' +
-        (state.filterLabel === l ? ' selected' : '') + '>' + escapeHtml(l) + '</option>';
+    pop.innerHTML = labels.map(function (l) {
+      var on = state.filterLabels.indexOf(l) >= 0;
+      return '<label class="label-opt"><input type="checkbox" class="label-opt-box" value="' +
+        escapeAttr(l) + '"' + (on ? ' checked' : '') + '>' + escapeHtml(l) + '</label>';
     }).join('');
   }
 
@@ -227,24 +299,34 @@
   }, 30000);
 
   /* 拉一页：ACTIVE 合并三个状态（各自 limit=50 第一页，前端去重排序）；其余走单状态 + 游标。
-     T4.24：搜索关键词带 q 参数走服务端（不再本地过滤已加载行） */
+     T4.24：搜索关键词带 q 参数走服务端（不再本地过滤已加载行）
+     T4.42：favorite/多标签/时间范围参数化透传（与 status/q 可组合），total 聚合回传 */
+  function filterParams() {
+    var p = state.filterFavorite ? '&favorite=true' : '';
+    state.filterLabels.forEach(function (l) { p += '&label=' + encodeURIComponent(l); });
+    var d = rangeDates(state.range);
+    if (d.after) p += '&created_after=' + d.after;
+    if (d.before) p += '&created_before=' + d.before;
+    return p;
+  }
+
   function fetchPage(cursor) {
     var q = state.search ? '&q=' + encodeURIComponent(state.search) : '';
-    /* T4.29：收藏/标签筛选参数化透传（与 status/q 可组合） */
-    var meta = (state.filterFavorite ? '&favorite=true' : '') +
-      (state.filterLabel ? '&label=' + encodeURIComponent(state.filterLabel) : '');
+    var meta = filterParams();
     if (state.filter === 'ACTIVE') {
       return Promise.all(['PENDING', 'RUNNING', 'RETRYING'].map(function (s) {
         return getJson('api/v1/tasks?status=' + s + '&limit=50' + q + meta);
       })).then(function (results) {
-        var seen = {}, merged = [];
+        var seen = {}, merged = [], total = 0;
         results.forEach(function (r) {
+          if (typeof r.total === 'number') total += r.total;
           (r.items || []).forEach(function (item) {
             if (!seen[item.id]) { seen[item.id] = true; merged.push(item); }
           });
         });
         merged.sort(function (a, b) { return b.id - a.id; });
-        return { items: merged, next_before_id: null };
+        /* __httpStatus: 200 必须带上——loadFirst 以它判定成功（T4.42 首跑踩过：缺了会误走失败态） */
+        return { items: merged, next_before_id: null, total: total, __httpStatus: 200 };
       });
     }
     var url = 'api/v1/tasks?limit=20' +
@@ -285,6 +367,13 @@
       '<a class="btn-secondary" href="index.html">去提交文件</a></div>';
   }
 
+  /* T4.42：有筛选但 0 条 → 无结果态（可就地清除筛选）；与「还没有任务」空态区分 */
+  function noResultHtml() {
+    return '<div class="empty-state">' + EMPTY_ICON +
+      '<h2 class="empty-title">没有匹配的结果</h2><p>当前筛选组合下没有任务，试着放宽条件。</p>' +
+      '<button type="button" class="btn-secondary js-clear-filters">清除筛选</button></div>';
+  }
+
   function emptyOfflineHtml() {
     return '<div class="empty-state">' + EMPTY_ICON +
       '<h2 class="empty-title">服务暂时不可用</h2><p>请确认服务端已启动，然后刷新重试。</p>' +
@@ -296,17 +385,99 @@
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
 
+  /* T4.42 缺陷修复②：拼进 HTML **属性**的值一律走 escapeAttr（在 escapeHtml 上再转引号），
+     防 `?label=x" onfocus=alert(1)` 这类合法标签（后端 1–20 字任意字符）击穿属性 */
+  function escapeAttr(s) {
+    return escapeHtml(s).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  /* ===== T4.42：日期分组（今天 / 昨天 / 本周 / 更早；周一起算；未来时间归入今天） ===== */
+  function dayStart(d) { return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
+
+  function dateGroupOf(iso) {
+    if (!iso) return '更早';
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return '更早';
+    var today = dayStart(new Date()), that = dayStart(d);
+    var diff = Math.round((today - that) / 86400000);
+    if (diff <= 0) return '今天';
+    if (diff === 1) return '昨天';
+    var weekStart = new Date(today);
+    weekStart.setDate(weekStart.getDate() - ((today.getDay() + 6) % 7)); /* 周一为一周起点 */
+    return that >= weekStart ? '本周' : '更早';
+  }
+
+  function groupedRowsHtml() {
+    var html = '', last = null;
+    state.items.forEach(function (item) {
+      var g = dateGroupOf(item.created_at);
+      if (g !== last) { html += '<div class="group-head">' + g + '</div>'; last = g; }
+      html += rowHtml(item);
+    });
+    return html;
+  }
+
   /* 无变化不重绘（避免 3s 轮询整块闪烁）；勾选/重试等本地状态变化仍走 render() */
   function renderKey() {
-    return state.filter + '|' + state.filterFavorite + '|' + state.filterLabel + '|' +
+    return state.filter + '|' + state.filterFavorite + '|' + state.filterLabels.join(',') + '|' +
+      state.range + '|' + state.total + '|' + state.search + '|' +
       state.items.map(function (i) { return i.id + ':' + i.status; }).join(',');
   }
 
-  /* T4.24：搜索改服务端（列表接口 q 参数），不再本地过滤已加载条目（matchSearch 已删） */
+  /* T4.42：是否有生效筛选（决定空态/无结果两种呈现） */
+  function hasActiveFilters() {
+    return !!(state.search || state.filter || state.filterLabels.length || state.range || state.filterFavorite);
+  }
+
+  /* ===== T4.42：已选条件胶囊（可单个移除）+ 清除筛选 =====
+     缺陷修复③：值走 data-clear-value（escapeAttr），JS 用 dataset 读取——不再用分隔符切割，
+     标签含 `:`（如「会议:复盘」）也能正确移除 */
+  function chipHtml(kind, arg, text) {
+    return '<span class="chip"><span class="chip-text">' + escapeHtml(text) + '</span>' +
+      '<button type="button" class="chip-x" data-clear-kind="' + kind + '"' +
+      (arg !== null ? ' data-clear-value="' + escapeAttr(arg) + '"' : '') +
+      ' aria-label="移除筛选：' + escapeAttr(text) + '">×</button></span>';
+  }
+
+  function renderActiveChips() {
+    var chips = '';
+    if (state.range) {
+      var r = RANGES.filter(function (x) { return x.key === state.range; })[0];
+      chips += chipHtml('range', null, '时间 · ' + (r ? r.label : state.range));
+    }
+    if (state.filter) {
+      var f = FILTERS.filter(function (x) { return x.key === state.filter; })[0];
+      chips += chipHtml('status', null, '状态 · ' + (f ? f.label : state.filter));
+    }
+    state.filterLabels.forEach(function (l) { chips += chipHtml('label', l, '标签 · ' + l); });
+    if (state.filterFavorite) chips += chipHtml('favorite', null, '收藏');
+    if (state.search) chips += chipHtml('q', null, '搜索 · ' + state.search);
+    var any = !!(state.range || state.filter || state.filterLabels.length || state.filterFavorite || state.search);
+    document.getElementById('activeChips').innerHTML =
+      chips + (any ? '<button type="button" class="clear-all js-clear-filters">清除筛选</button>' : '');
+  }
+
+  function clearAllFilters() {
+    state.filter = ''; state.range = ''; state.filterLabels = [];
+    state.filterFavorite = false; state.search = '';
+    searchInput.value = '';
+    state.checked = {}; state.checkedCount = 0;
+    retryResult.textContent = '';
+    applyFilters();
+  }
+
+  /* 筛选变化统一入口：重建筛选条/胶囊 → 写 URL → 重拉第一页 */
+  function applyFilters() {
+    renderFilterBar();
+    renderActiveChips();
+    syncUrl();
+    lastRenderKey = null;
+    loadFirst(false);
+  }
 
   function render(force) {
     var count = state.checkedCount;
-    var key = renderKey() + '|' + state.search;
+    var key = renderKey();
     if (!force && key === lastRenderKey) { scheduleRefresh(); return; }
     lastRenderKey = key;
     /* 操作条：DEAD 筛选（重试场景）或存在失败任务（清空场景）或有勾选（导出/删除场景）时出现 */
@@ -318,17 +489,21 @@
     retryBtn.disabled = count === 0;
     exportBtn.disabled = count === 0;
     deleteBtn.disabled = count === 0;
-    /* T4.24：搜索提示改为服务端口径（有下一页时如实标 +） */
+    /* T4.42：计数行「共 N 条 · 已加载 M 条」（N = 当前筛选组合 total；未拿到不显示） */
+    var rc = document.getElementById('resultCount');
+    if (state.total !== null) {
+      rc.textContent = '共 ' + state.total + ' 条 · 已加载 ' + state.items.length + ' 条';
+      rc.style.display = '';
+    } else {
+      rc.style.display = 'none';
+    }
     document.getElementById('searchNote').textContent = state.search
       ? '服务端搜索 · 匹配 ' + state.items.length + (state.cursor ? '+' : '') + ' 条。'
       : '';
     if (!state.items.length) {
-      listEl.innerHTML = state.search
-        ? '<div class="empty-state">' + EMPTY_ICON +
-          '<h2 class="empty-title">没有匹配的结果</h2><p>换个关键词试试。</p></div>' /* 空结果空态文案不变 */
-        : emptyHtml();
+      listEl.innerHTML = hasActiveFilters() ? noResultHtml() : emptyHtml();
     } else {
-      listEl.innerHTML = state.items.map(rowHtml).join('');
+      listEl.innerHTML = groupedRowsHtml();
     }
     moreBtn.style.display = state.cursor ? 'inline-flex' : 'none';
     listEl.querySelectorAll('.row-check').forEach(function (box) {
@@ -338,6 +513,9 @@
         else { delete state.checked[id]; state.checkedCount--; }
         render(true); /* 勾选影响操作条状态，强制重绘 */
       });
+    });
+    listEl.querySelectorAll('.js-clear-filters').forEach(function (btn) {
+      btn.addEventListener('click', clearAllFilters);
     });
     refreshLabelOptions(); /* T4.29b：数据到位即刷新标签下拉（不等 30s 计数刷新） */
     scheduleRefresh();
@@ -349,6 +527,7 @@
       if (data.__httpStatus !== 200) { renderFallback(); return; }
       state.items = data.items || [];
       state.cursor = data.next_before_id || null;
+      state.total = typeof data.total === 'number' ? data.total : null;
       render(isRefresh !== true);
       scheduleRefresh();
     });
@@ -362,6 +541,7 @@
       if (data.__httpStatus !== 200) return;
       state.items = state.items.concat(data.items || []);
       state.cursor = data.next_before_id || null;
+      if (typeof data.total === 'number') state.total = data.total;
       render(true);
     });
   }
@@ -412,32 +592,92 @@
     });
   }
 
+  /* ===== T4.42：筛选条事件（时间范围 / 状态 / 收藏 / 标签多选弹层） ===== */
+  function closeLabelPop() {
+    var pop = document.getElementById('labelPop');
+    var btn = document.getElementById('labelMultiBtn');
+    if (pop && !pop.hidden) { pop.hidden = true; }
+    if (btn) btn.setAttribute('aria-expanded', 'false');
+  }
+
   filterBar.addEventListener('click', function (e) {
     var btn = e.target.closest('.filter-btn');
     if (!btn) return;
+    if (btn.id === 'labelMultiBtn') { /* 标签多选弹层开关（点外面/ESC 关闭） */
+      var pop = document.getElementById('labelPop');
+      var opening = pop.hidden;
+      pop.hidden = !opening;
+      btn.setAttribute('aria-expanded', String(opening));
+      return;
+    }
     if (btn.id === 'favoriteFilterBtn') { /* T4.29：收藏开关（独立于状态筛选） */
       state.filterFavorite = !state.filterFavorite;
       state.checked = {}; state.checkedCount = 0;
       retryResult.textContent = '';
-      renderFilterBar();
-      lastRenderKey = null;
-      loadFirst(false);
+      applyFilters();
+      return;
+    }
+    var range = btn.getAttribute('data-range');
+    if (range !== null) {
+      state.range = range;
+      state.checked = {}; state.checkedCount = 0;
+      retryResult.textContent = '';
+      applyFilters();
       return;
     }
     state.filter = btn.getAttribute('data-status');
     state.checked = {}; state.checkedCount = 0;
     retryResult.textContent = '';
-    renderFilterBar();
+    applyFilters();
+  });
+
+  /* 标签多选：复选切换走轻路径（不重建弹层，可连续多选） */
+  filterBar.addEventListener('change', function (e) {
+    if (!e.target.classList.contains('label-opt-box')) return;
+    var v = e.target.value;
+    var i = state.filterLabels.indexOf(v);
+    if (e.target.checked && i < 0) state.filterLabels.push(v);
+    if (!e.target.checked && i >= 0) state.filterLabels.splice(i, 1);
+    state.checked = {}; state.checkedCount = 0;
+    var btn = document.getElementById('labelMultiBtn');
+    if (btn) {
+      var picked = state.filterLabels.length;
+      btn.innerHTML = '标签' + (picked ? ' · ' + picked : '') + '▾';
+      btn.classList.toggle('active', picked > 0);
+      btn.setAttribute('aria-pressed', String(picked > 0));
+    }
+    syncUrl();
+    renderActiveChips();
     lastRenderKey = null;
     loadFirst(false);
   });
-  /* T4.29：标签下拉切换（change 事件，值由 select 保持） */
-  filterBar.addEventListener('change', function (e) {
-    if (e.target.id !== 'labelFilterSel') return;
-    state.filterLabel = e.target.value;
-    state.checked = {}; state.checkedCount = 0;
-    lastRenderKey = null;
-    loadFirst(false);
+
+  /* 点弹层外关闭 */
+  document.addEventListener('click', function (e) {
+    if (!e.target.closest || !e.target.closest('.label-multi')) closeLabelPop();
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') closeLabelPop();
+  });
+
+  /* 已选胶囊：单个移除（dataset 读 kind/value，无分隔符歧义）/ 清除筛选（事件委托，胶囊随筛选重建） */
+  document.getElementById('activeChips').addEventListener('click', function (e) {
+    var clearBtn = e.target.closest('[data-clear-kind]');
+    if (clearBtn) {
+      var kind = clearBtn.dataset.clearKind, arg = clearBtn.dataset.clearValue;
+      if (kind === 'range') state.range = '';
+      else if (kind === 'status') state.filter = '';
+      else if (kind === 'label') {
+        var i = state.filterLabels.indexOf(arg);
+        if (i >= 0) state.filterLabels.splice(i, 1);
+      } else if (kind === 'favorite') state.filterFavorite = false;
+      else if (kind === 'q') { state.search = ''; searchInput.value = ''; }
+      state.checked = {}; state.checkedCount = 0;
+      retryResult.textContent = '';
+      applyFilters();
+      return;
+    }
+    if (e.target.closest('.js-clear-filters')) clearAllFilters();
   });
   checkAllEl.addEventListener('change', function () {
     state.checked = {}; state.checkedCount = 0;
@@ -509,7 +749,7 @@
   deleteBtn.addEventListener('click', deleteSelected);
   deleteFailedBtn.addEventListener('click', deleteFailedAll);
 
-  /* T4.24：300ms 防抖 → 带 q 重拉第一页（服务端搜索）；无变化不重复拉 */
+  /* T4.24：300ms 防抖 → 带 q 重拉第一页（服务端搜索）；无变化不重复拉。T4.42：q 同步写 URL */
   var searchTimer = null;
   searchInput.addEventListener('input', function () {
     clearTimeout(searchTimer);
@@ -517,8 +757,7 @@
       var next = searchInput.value.trim();
       if (next === state.search) return;
       state.search = next;
-      lastRenderKey = null;
-      loadFirst(false);
+      applyFilters();
     }, 300);
   });
 
@@ -573,7 +812,17 @@
     el.textContent = d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
   })();
 
+  /* ===== 启动（T4.42：先还原 URL 筛选，非法参数回退默认 + toast 不白屏） ===== */
+  var boot = parseUrlFilters();
+  state.range = boot.range;
+  state.filter = boot.status;
+  state.filterLabels = boot.labels;
+  state.filterFavorite = boot.favorite;
+  state.search = boot.q;
+  searchInput.value = boot.q;
   renderFilterBar();
+  renderActiveChips();
+  if (boot.invalid) mnDrawerToast('筛选参数无效，已回退默认视图');
   /* T4.38：详情站内抽屉（列表 URL 不变、不新开标签；ESC/遮罩关闭） */
   mnBindDrawerLinks(listEl);
   fetchCounts(); /* T4.24：状态计数改调 /tasks/counts（真计数无上限，页面可见时 30s 自动刷新保留） */
