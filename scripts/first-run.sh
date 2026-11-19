@@ -20,8 +20,12 @@ if [ ! -d "$SNAP_DIR" ] || [ -z "$(ls -A "$SNAP_DIR" 2>/dev/null)" ]; then
   echo "[first-run] 模型 faster-whisper-${MODEL_NAME} 不存在，先下载…"
   PY="from huggingface_hub import snapshot_download; snapshot_download('Systran/faster-whisper-${MODEL_NAME}', cache_dir='/dl/hub')"
   MODELS_ABS="$(pwd)/models"
-  # /models 在 compose 里是 :ro（运行态安全）——下载挂独立可写点 /dl（宿主同一 models 目录），不与 ro 冲突
-  docker compose run --rm -e HF_HUB_OFFLINE=0 -e HF_HUB_DISABLE_XET=1 -e HF_HOME=/dl -e HF_ENDPOINT="${HF_ENDPOINT:-}" \
+  # compose run 不会自动构建——全新克隆时先显式构建 asr 镜像（已构建则秒过）
+  docker compose build asr || { echo '[first-run] asr 镜像构建失败。'; exit 1; }
+  # /models 在 compose 里是 :ro（运行态安全）——下载挂独立可写点 /dl（宿主同一 models 目录），不与 ro 冲突；
+  # HF_ENDPOINT 只在非空时注入（空串会让 huggingface_hub 的 ENDPOINT 变空 → UnsupportedProtocol），不设走官方默认
+  docker compose run --rm -e HF_HUB_OFFLINE=0 -e HF_HUB_DISABLE_XET=1 -e HF_HOME=/dl \
+    ${HF_ENDPOINT:+-e HF_ENDPOINT=$HF_ENDPOINT} \
     -v "${MODELS_ABS}:/dl" asr python -c "$PY" \
     || { echo '[first-run] 模型下载失败。国内网络可先执行：  export HF_ENDPOINT=https://hf-mirror.com  后重试。'; exit 1; }
 else

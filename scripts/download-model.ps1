@@ -32,13 +32,21 @@ if ($env:HF_ENDPOINT) { Write-Host "[download-model] 使用镜像源：$env:HF_E
 $py = "from huggingface_hub import snapshot_download; snapshot_download('Systran/faster-whisper-$Model', cache_dir='/dl/hub')"
 # /models 在 compose 里是 :ro（运行态安全）——下载挂到独立可写点 /dl（宿主同一目录），不与 ro 挂载冲突
 $modelsAbs = (Join-Path $repo 'models') -replace '\\', '/'
-docker compose run --rm `
-    -e HF_HUB_OFFLINE=0 `
-    -e HF_HUB_DISABLE_XET=1 `
-    -e HF_HOME=/dl `
-    -e HF_ENDPOINT=$env:HF_ENDPOINT `
-    -v "${modelsAbs}:/dl" `
-    asr python -c $py
+# HF_ENDPOINT 只在非空时注入（空串会让 huggingface_hub 的 ENDPOINT 变空 → 拼出相对 URL → UnsupportedProtocol）；
+# 不设时走 huggingface.co 官方默认，容器可直连
+# compose run 不会自动构建——全新克隆时 asr 镜像尚不存在，先显式构建（已构建则秒过）
+Write-Host '[download-model] 确认 asr 镜像（不存在则构建，首次约几分钟）…'
+docker compose build asr
+if ($LASTEXITCODE -ne 0) { Write-Host '[download-model] asr 镜像构建失败。'; exit $LASTEXITCODE }
+
+$dockerArgs = @('compose', 'run', '--rm',
+    '-e', 'HF_HUB_OFFLINE=0',
+    '-e', 'HF_HUB_DISABLE_XET=1',
+    '-e', 'HF_HOME=/dl',
+    '-v', "${modelsAbs}:/dl")
+if ($env:HF_ENDPOINT -and $env:HF_ENDPOINT.Trim()) { $dockerArgs += @('-e', "HF_ENDPOINT=$($env:HF_ENDPOINT.Trim())") }
+$dockerArgs += @('asr', 'python', '-c', $py)
+docker @dockerArgs
 if ($LASTEXITCODE -ne 0) {
     Write-Host "[download-model] 下载失败（exit $LASTEXITCODE）。国内网络可先执行：  `$env:HF_ENDPOINT = 'https://hf-mirror.com'  后重试。"
     exit $LASTEXITCODE
