@@ -49,7 +49,7 @@ if ($Force) {
     if (Test-Path $hubDir) {
         Write-Host "[download-model] -Force：清除 $hubDir 后重新下载…"
         $hubItem = Get-Item $hubDir -Force
-        if ($hubItem.LinkType) { Remove-Item $hubDir -Force } else { Remove-Item $hubDir -Recurse -Force }
+        if ($hubItem.LinkType) { [System.IO.Directory]::Delete($hubDir) } else { Remove-Item $hubDir -Recurse -Force }
     }
 } elseif ($missing.Count -eq 0) {
     Write-Host "[download-model] 模型 $Model 已存在（$snapDir），跳过下载。"
