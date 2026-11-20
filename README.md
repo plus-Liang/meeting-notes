@@ -1,5 +1,7 @@
 # MeetingNotes · 录音 / 网课 / 短视频 → 结构化纪要 + 待办
 
+[![CI](https://github.com/plus-Liang/meeting-notes/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/plus-Liang/meeting-notes/actions/workflows/ci.yml)
+
 > **自托管**：跑在你自己的机器上，音频、转写、纪要全在本地；不注册账号、不上传云端、不依赖任何第三方服务也能跑通。
 > 一个 Docker Compose 起 5 个容器，浏览器打开就能用。
 
@@ -66,6 +68,19 @@ cp .env.example .env                                    # Windows: Copy-Item .en
 pwsh -NoProfile -File scripts/download-model.ps1        # 下载模型到 ./models（small 约 461MB）
 docker compose up -d --build                            # 之后日常启动约 20 秒
 ```
+
+### 方式 B：用预构建镜像（可选，跳过本地构建）
+
+不想在本机构建两个镜像（约 10 分钟）时，直接拉 GHCR 上的预构建镜像起栈：
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.ghcr.yml pull
+docker compose -f docker-compose.yml -f docker-compose.ghcr.yml up -d
+# 打开浏览器访问 http://localhost:8080
+```
+
+> ⚠️ **镜像不含 ASR 模型**（461 MB）：首次启动仍需跑 `scripts/download-model.ps1` 下载到 `./models`。
+> 要固定版本：设环境变量 `MEETING_NOTES_TAG=v0.1.0`（默认 `latest`）。
 
 ### 打开
 
@@ -222,6 +237,7 @@ LOG_JSON=false docker compose up -d app   # 想回到人类可读文本
 | 磁盘满 | 音频在 MinIO 卷里；先备份再清旧任务（删除任务会删对象） |
 | 所有接口 401 | 浏览器登录态过期 → 回登录页；API 调用需 `Authorization: Bearer <API_TOKEN 或账号令牌>` |
 | 首次启动很慢 | 首次要拉镜像 + 加载模型，属正常；之后启动约 20 秒 |
+| GHCR 镜像是私有的吗？ | 首次发布后镜像默认私有：维护者到 GitHub 仓库的 **Packages** 页把 `meeting-notes-app` / `meeting-notes-asr` 两个包改成 **Public** 即可匿名拉取；私有仓库或未改 Public 前，先 `docker login ghcr.io` 再 pull |
 
 更多排障细节：`docs/项目/录音纪要平台/环境搭建说明.md`。
 
