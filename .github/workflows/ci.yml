@@ -1,16 +1,18 @@
-# CI 骨架
+# CI：push / PR 自动触发（T4.11b）
 #
-# ⚠️ 默认只在手动触发（workflow_dispatch），因为项目 v0.1 之前代码还不完整，
-#    挂上 push 触发会让仓库首页一直红。
-#    等 v0.1.0 能 `docker compose up` 跑通后，把 `on:` 改成 push/pull_request 即可。
+# runner 上没有 Docker 基础栈（无数据库/Redis/MinIO），E2E 用例依赖真实栈，
+# 所以这里只跑单元层（排除 E2ETest）+ Compose 配置校验；全量 511 用例在本地/发布机上跑。
 
 name: CI
 
 on:
+  push:
+    branches: [main]
+  pull_request:
   workflow_dispatch:
 
 jobs:
-  build:
+  unit:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -22,6 +24,14 @@ jobs:
           java-version: '21'
           cache: maven
 
-      - name: Build & test
+      - name: Unit tests (exclude E2E/冒烟 — 需要真实栈，与 scripts/test.ps1 -UnitOnly 口径一致)
         working-directory: app
-        run: mvn -B -q test
+        run: mvn -B -q test -Dtest='!E2ETest,!AsrSmokeTest,!LlmSmokeTest'
+
+  compose-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate compose file
+        run: docker compose -f docker-compose.yml config -q
