@@ -184,8 +184,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\backup.ps1
 # Linux/macOS: crontab -e
 0 3 * * * cd /opt/meeting-notes && pwsh -NoProfile -File scripts/backup.ps1
 
-# Windows: 任务计划程序 → 每天 03:00
-schtasks /Create /TN "MeetingNotes-Backup" /SC DAILY /ST 03:00 /TR "powershell -NoProfile -ExecutionPolicy Bypass -File C:\path\to\meeting-notes\scripts\backup.ps1" /F
+# Windows: 任务计划程序 → 每天 03:00（把 <仓库绝对路径> 换成你 clone 下来的目录）
+schtasks /Create /TN "MeetingNotes-Backup" /SC DAILY /ST 03:00 /TR "powershell -NoProfile -ExecutionPolicy Bypass -File <仓库绝对路径>\scripts\backup.ps1" /F
 ```
 
 > 备份必须落在**宿主目录**（默认 `./backups`）。放进 Docker 卷会被 `docker compose down -v` 一起删掉。
