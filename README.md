@@ -38,30 +38,49 @@
 - 要**秒级出稿**：一份 56 分钟的音频在这台机器上约 **5.6 分钟**出转写（见实测表）；
 - 完全不熟悉 Docker，且不打算学（安装需要命令行）。
 
-## 快速开始（约 5 分钟，含拉镜像）
+## 快速开始（约 10 分钟：首次要下载 461 MB 模型 + 构建镜像）
 
-前置：装好 [Docker Desktop](https://www.docker.com/products/docker-desktop/)，分配 ≥4 GB 内存（首次启动会下载/加载模型）。
+前置：装好 [Docker Desktop](https://www.docker.com/products/docker-desktop/)（或 Linux 上的 Docker + Compose v2），分配 ≥4 GB 内存，能访问 Hugging Face（国内强烈建议设镜像，见下）。
+
+### 一键启动（推荐）
 
 ```bash
 git clone https://github.com/plus-Liang/meeting-notes.git
 cd meeting-notes
-cp .env.example .env        # Windows PowerShell: Copy-Item .env.example .env
-docker compose up -d        # 首次构建较慢（含 ASR 镜像），之后启动约 20 秒
+
+# Linux / macOS（国内建议先设镜像，会快一个数量级）
+export HF_ENDPOINT=https://hf-mirror.com
+bash scripts/first-run.sh
+
+# Windows PowerShell（国内建议先设镜像）
+$env:HF_ENDPOINT = "https://hf-mirror.com"
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\first-run.ps1
 ```
 
-等 5 个容器都 healthy（`docker compose ps`），浏览器打开：
+`first-run` 会依次做四件事：没有 `.env` 就从 `.env.example` 生成 → 下载 ASR 模型到 `./models`（已存在则跳过）→ `docker compose up -d --build` → 轮询到 5 个容器 healthy 并打印访问地址。**模型没下全时 ASR 会明确提示并退出，不会静默卡住。**
+
+### 手动启动（想自己控制每一步）
+
+```bash
+cp .env.example .env                                    # Windows: Copy-Item .env.example .env
+pwsh -NoProfile -File scripts/download-model.ps1        # 下载模型到 ./models（small 约 461MB）
+docker compose up -d --build                            # 之后日常启动约 20 秒
+```
+
+### 打开
 
 - **Web 界面**：<http://localhost:8080>
-- 首次进入会引导你**创建管理员账号**（也可直接用 `.env` 里的 `API_TOKEN` 走 API）
+- 首次进入会引导你**创建管理员账号**（第一个注册的账号即管理员）；也可直接用 `.env` 里的 `API_TOKEN` 走 API
 - API 文档：<http://localhost:8080/swagger-ui.html>
 
-**不填任何 API key 也能完整跑通**：默认走本地 ASR + 抽取式摘要。想要好一点的摘要再配云 LLM（见"三档 AI"）。
+**不填任何 API key 也能完整跑通**：默认走本地 ASR + 抽取式摘要（模型需联网下载一次，之后可离线运行）。想要好一点的摘要再配云 LLM（见"三档 AI"）。
 
-> ⚠️ 首次启动 ASR 会加载模型（small 约 461 MB），`docker compose ps` 看到 `asr` healthy 再提交任务；否则第一次任务可能因冷启动超时。
+> ⚠️ 首次启动 ASR 要加载模型（small 约 461 MB / 常驻约 700 MB），`docker compose ps` 看到 `asr` healthy 再提交任务，否则第一个任务可能因冷启动超时。
+> 💡 国内下载模型：默认直连 `huggingface.co` 实测约 3.5 MB/min（461 MB ≈ 2 小时）；设 `HF_ENDPOINT=https://hf-mirror.com` 实测快一个数量级。
 
 ## 核心流程
 
-1. **提交**：把文件拖进首页上传区（支持批量，最多 20 个），或粘贴文本 / srt / vtt，或贴一个 http(s) 直链，或直接在浏览器里录一段网页/标签页声音；
+1. **提交**：把文件拖进首页上传区（支持批量，最多 20 个）、贴一个 http(s) 直链、或直接在浏览器里录一段网页/标签页声音；纯文本 / srt / vtt 字幕走 REST API（`POST /api/v1/tasks`，见 Swagger UI）；
 2. **等**：任务异步处理，列表里能看到进度与失败原因，失败的可以单独重试；
 3. **校对**：全文分句带时间戳、可点句跳转播放；改错词会进**术语表**（下次转写生效）；可标**说话人**；
 4. **整理**：摘要/要点/待办/关键词，按模板产出；可**重命名**、打**标签**、收藏；
@@ -192,6 +211,11 @@ LOG_JSON=false docker compose up -d app   # 想回到人类可读文本
 | 现象 | 原因与解法 |
 |---|---|
 | 8080 端口被占用 | 改 `.env` 的 `APP_PORT`，或关掉占用程序；Windows 上 `wslrelay` 偶尔抢端口，重启 Docker Desktop |
+| 模型下载极慢 / 下载失败 | 默认直连 `huggingface.co`，国内约 3.5 MB/min；先设 `HF_ENDPOINT=https://hf-mirror.com`（PowerShell：`$env:HF_ENDPOINT="https://hf-mirror.com"`）再重跑 `scripts/download-model.ps1`，已下载部分会复用 |
+| asr 容器报「模型未找到或加载失败」 | 模型没下或目录不对：跑 `scripts/download-model.ps1`；确认 `.env` 的 `ASR_MODEL_HOST_DIR`（默认 `./models`）指向模型缓存根目录 |
+| minio 镜像拉不下来 | 国内加速源对非 library 镜像常拒绝：在 `.env` 设 `MINIO_IMAGE=<镜像源>/minio/minio:latest`（`.env.example` 顶部有注释示例），再 `docker compose up -d` |
+| 拉镜像 / 构建超时（registry EOF、i/o timeout） | 国内网络到 docker.io 不稳：在 `.env` 设 `REGISTRY_PREFIX=docker.m.daocloud.io/` 后再 `docker compose up -d --build`（把 library 基础镜像换到加速源） |
+| 改了 `APP_PORT` 后打不开 | 已处理：`APP_PORT` 只改宿主映射，容器内固定 8080。若还是不对，`docker compose up -d` 重建容器再试 |
 | 提交后一直 PENDING / 首次任务超时 | ASR 冷启动还没加载完模型：`docker compose restart asr` 等 healthy 再试；或调大 `ASR_TIMEOUT_SEC` |
 | 云摘要失败但任务成功 | 云 LLM 配错会自动降级到 LOCAL/EXTRACTIVE；查结果里的 `ai_tier` 与 `docker compose logs app` |
 | 上传被拒 | 单文件 >200 MB 或 >60 分钟或格式不在白名单；错误信息会说明原因 |

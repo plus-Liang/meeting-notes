@@ -13,7 +13,7 @@
 **输入**
 
 - 文件上传：mp3 / wav / m4a / flac / ogg / opus / amr / mp4 / mov / mkv / webm 等；批量最多 20 个，逐个独立转写、失败互不影响
-- 粘贴文本、srt / vtt 字幕、http(s) 直链（L2 直链探测 + SSRF 防护）、浏览器内录音（标签页 / 屏幕音频）
+- 粘贴文本、srt / vtt 字幕（REST API `POST /api/v1/tasks`，JSON 或 multipart）、http(s) 直链（L2 直链探测 + SSRF 防护）、浏览器内录音（标签页 / 屏幕音频）
 - 链接导入的边界处理：平台页面链接只读公开元信息做预览，不下载视频、不绕技术措施、不存 cookie；预留 `FETCHER_CMD`（BYOF）
 
 **转写**
@@ -48,6 +48,7 @@
 **运维与账号**
 
 - 健康检查、备份 / 恢复脚本（DB + MinIO 音频 + sha256 清单，默认保留 7 份，备份包不含 `.env`）
+- 一键启动脚本：`scripts/first-run.ps1`（Windows）/ `scripts/first-run.sh`（Linux/macOS）——没有 `.env` 就生成、下载 ASR 模型到 `./models`、`docker compose up -d --build`、轮询到 5 个容器 healthy；也可单独用 `scripts/download-model.ps1` 下载模型
 - Flyway 迁移 V1–V9，升级自动迁移；设置页展示系统状态、今日配额与"我的使用"统计
 - 首次创建管理员、登录 / 注册开关、单实例多账号数据隔离；全局 `API_TOKEN` 等价于 1 号管理员，便于脚本接入
 
