@@ -2,8 +2,10 @@
 
 [![CI](https://github.com/plus-Liang/meeting-notes/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/plus-Liang/meeting-notes/actions/workflows/ci.yml)
 
-> **自托管**：跑在你自己的机器上，音频、转写、纪要全在本地；不注册账号、不上传云端、不依赖任何第三方服务也能跑通。
+> **自托管**：跑在你自己的机器上，音频、转写、纪要全在本地；不需要注册任何第三方账号、不上传云端、不依赖任何第三方服务也能跑通。
 > 一个 Docker Compose 起 5 个容器，浏览器打开就能用。
+
+> **当前版本 `v0.1.0`**（[Release 说明](https://github.com/plus-Liang/meeting-notes/releases/tag/v0.1.0)）｜预构建镜像 `ghcr.io/plus-liang/meeting-notes-app` / `-asr` **公开可匿名拉取**，见「方式 B」。
 
 ![任务台账](docs/screenshots/02-tasks.png)
 
@@ -40,15 +42,17 @@
 - 要**秒级出稿**：一份 56 分钟的音频在这台机器上约 **5.6 分钟**出转写（见实测表）；
 - 完全不熟悉 Docker，且不打算学（安装需要命令行）。
 
-## 快速开始（约 10 分钟：首次要下载 461 MB 模型 + 构建镜像）
+## 快速开始（约 10 分钟：首次要下载 461 MB 模型 + 构建镜像；用「方式 B」可省掉构建）
 
-前置：装好 [Docker Desktop](https://www.docker.com/products/docker-desktop/)（或 Linux 上的 Docker + Compose v2），分配 ≥4 GB 内存，能访问 Hugging Face（国内强烈建议设镜像，见下）。
+前置：装好 [Docker Desktop](https://www.docker.com/products/docker-desktop/)（或 Linux 上的 Docker + Compose v2），建议 **4 GB 以上内存**、**5 GB 以上空闲磁盘**（镜像约 2 GB + 模型 0.5 GB + 你自己的音频），能访问 Hugging Face（国内强烈建议设镜像，见下）。
+Linux/macOS 上若要用 `scripts/*.ps1`（备份/恢复/测试），需另装 [PowerShell 7](https://learn.microsoft.com/powershell/scripting/install/installing-powershell)；**起栈与日常使用不需要**。
 
 ### 一键启动（推荐）
 
 ```bash
 git clone https://github.com/plus-Liang/meeting-notes.git
 cd meeting-notes
+git checkout v0.1.0        # 可选：锁定已发布版本（不 checkout 则跟 main 最新）
 
 # Linux / macOS（国内建议先设镜像，会快一个数量级）
 export HF_ENDPOINT=https://hf-mirror.com
@@ -65,7 +69,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\first-run.ps1
 
 ```bash
 cp .env.example .env                                    # Windows: Copy-Item .env.example .env
-pwsh -NoProfile -File scripts/download-model.ps1        # 下载模型到 ./models（small 约 461MB）
+# 下载模型到 ./models（small 约 461MB）；Windows 用 powershell，装了 PowerShell 7 可换 pwsh
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\download-model.ps1
 docker compose up -d --build                            # 之后日常启动约 20 秒
 ```
 
@@ -74,7 +79,7 @@ docker compose up -d --build                            # 之后日常启动约 
 不想在本机构建两个镜像（约 10 分钟）时，直接拉 GHCR 上的预构建镜像起栈：
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.ghcr.yml pull
+docker compose -f docker-compose.yml -f docker-compose.ghcr.yml pull   # 首次约 2 GB，视网络 3–10 分钟
 docker compose -f docker-compose.yml -f docker-compose.ghcr.yml up -d
 # 打开浏览器访问 http://localhost:8080
 ```
@@ -186,11 +191,11 @@ docker compose -f docker-compose.yml -f docker-compose.ghcr.yml up -d
 **备份**（DB + MinIO 音频 + 带 sha256 清单，默认保留 7 份）：
 
 ```bash
-# Linux/macOS
-pwd  # 先装 pwsh: https://learn.microsoft.com/powershell/scripting/install/installing-powershell
-pwsh -NoProfile -File scripts/backup.ps1
 # Windows PowerShell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\backup.ps1
+
+# Linux / macOS（需先装 PowerShell 7：https://learn.microsoft.com/powershell/scripting/install/installing-powershell）
+pwsh -NoProfile -File scripts/backup.ps1
 ```
 
 **每天自动备份**（用宿主定时任务调上面的命令，容器内不带调度器）：
@@ -209,6 +214,9 @@ schtasks /Create /TN "MeetingNotes-Backup" /SC DAILY /ST 03:00 /TR "powershell -
 
 ```bash
 docker compose up -d
+# Windows PowerShell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\restore.ps1 -BackupDir backups\<时间戳> -Force
+# Linux / macOS
 pwsh -NoProfile -File scripts/restore.ps1 -BackupDir backups/<时间戳> -Force
 ```
 
@@ -216,8 +224,9 @@ pwsh -NoProfile -File scripts/restore.ps1 -BackupDir backups/<时间戳> -Force
 
 ```bash
 docker compose logs app | grep '"taskId":"123"'
-LOG_JSON=false docker compose up -d app   # 想回到人类可读文本
 ```
+
+想回到人类可读文本：在 `.env` 里加 `LOG_JSON=false`，再 `docker compose up -d app`（环境变量要在 `.env` 里改，命令前内联 `LOG_JSON=false docker compose …` 对 app 不生效）。
 
 **升级**：`git pull && docker compose up -d --build`（Flyway 自动迁移，先备份）。**回滚**：`git checkout <上一个 tag> && docker compose up -d --build`。
 
@@ -225,7 +234,8 @@ LOG_JSON=false docker compose up -d app   # 想回到人类可读文本
 
 | 现象 | 原因与解法 |
 |---|---|
-| 8080 端口被占用 | 改 `.env` 的 `APP_PORT`，或关掉占用程序；Windows 上 `wslrelay` 偶尔抢端口，重启 Docker Desktop |
+| 8080 端口被占用 | 改 `.env` 的 `APP_PORT`；同理 `9000`/`9001`（MinIO）、`8000`（ASR）、`11434`（Ollama）分别对应 `MINIO_PORT` / `MINIO_CONSOLE_PORT` / `ASR_PORT` / `OLLAMA_PORT`——这四个键 `.env.example` 里没列，**直接在 `.env` 里追加一行即可生效**（如 `MINIO_PORT=9100`）。Windows 上 `wslrelay` 偶尔抢端口，重启 Docker Desktop |
+| `git clone` 报 TLS 错误（`schannel: failed to receive handshake` / `unexpected eof`） | 网络抖动或本机 git 的 TLS 后端问题：重试一次；仍失败可 `git config --global http.sslBackend openssl` 后重试，或改用 SSH 克隆 |
 | 模型下载极慢 / 下载失败 | 默认直连 `huggingface.co`，国内约 3.5 MB/min；先设 `HF_ENDPOINT=https://hf-mirror.com`（PowerShell：`$env:HF_ENDPOINT="https://hf-mirror.com"`）再重跑 `scripts/download-model.ps1`，已下载部分会复用 |
 | asr 容器报「模型未找到或加载失败」 | 模型没下或目录不对：跑 `scripts/download-model.ps1`；确认 `.env` 的 `ASR_MODEL_HOST_DIR`（默认 `./models`）指向模型缓存根目录 |
 | minio 镜像拉不下来 | 国内加速源对非 library 镜像常拒绝：在 `.env` 设 `MINIO_IMAGE=<镜像源>/minio/minio:latest`（`.env.example` 顶部有注释示例），再 `docker compose up -d` |
@@ -237,7 +247,7 @@ LOG_JSON=false docker compose up -d app   # 想回到人类可读文本
 | 磁盘满 | 音频在 MinIO 卷里；先备份再清旧任务（删除任务会删对象） |
 | 所有接口 401 | 浏览器登录态过期 → 回登录页；API 调用需 `Authorization: Bearer <API_TOKEN 或账号令牌>` |
 | 首次启动很慢 | 首次要拉镜像 + 加载模型，属正常；之后启动约 20 秒 |
-| GHCR 镜像是私有的吗？ | 首次发布后镜像默认私有：维护者到 GitHub 仓库的 **Packages** 页把 `meeting-notes-app` / `meeting-notes-asr` 两个包改成 **Public** 即可匿名拉取；私有仓库或未改 Public 前，先 `docker login ghcr.io` 再 pull |
+| GHCR 镜像拉不下来（`denied` / `unauthorized`） | `v0.1.0` 起两个包已设为 **Public**，可匿名拉取（无需 `docker login`）。若仍被拒：确认网络能访问 `ghcr.io`；必要时 `docker login ghcr.io`（PAT 勾 `read:packages`）；国内可把镜像名换成自己的加速源 |
 
 更多排障细节：`docs/项目/录音纪要平台/环境搭建说明.md`。
 
@@ -271,21 +281,21 @@ Spring Boot 3.5 (Java 21) ── PostgreSQL 16（任务/结果/术语/账号，F
 Redis 7（队列/幂等辅助）· FFmpeg（容器内抽音轨，宿主不装）
 ```
 
-设计取舍、失败模型、权限与副作用分级见 `docs/项目/录音纪要平台/架构一页纸.md` 与 `决策记录.md`（164 条）。
+设计取舍、失败模型、权限与副作用分级见 `docs/项目/录音纪要平台/架构一页纸.md` 与 `决策记录.md`（170+ 条）。
 
 ## 开发与贡献
 
 ```bash
-# 单元测试（跳过冒烟与 E2E）
-pwsh -NoProfile -File scripts/test.ps1 -UnitOnly
+# 单元测试（跳过冒烟与 E2E）—— Windows 用 powershell，Linux/macOS 需装 PowerShell 7 后用 pwsh
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\test.ps1 -UnitOnly
 # 全量（需要栈已启动；ASR 冒烟需要本地音频）
-pwsh -NoProfile -File scripts/test.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\test.ps1
 # 可维护性自检
-pwsh -NoProfile -File tools/check-maintainability.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\check-maintainability.ps1
 ```
 
 - 给 AI/协作者的入口是仓库根 **`AGENT.md`**（一次只做一张任务卡、必须给证据）；
-- 需求/决策/验收记录在 `docs/项目/录音纪要平台/`（含 **70 份验收报告**，每份都有可复现命令）；
+- 需求/决策/验收记录在 `docs/项目/录音纪要平台/`（含 **70+ 份验收报告**，每份都有可复现命令）；
 - Issue/PR 模板在 `.github/`；提交信息前缀 `feat/fix/docs/test/chore`。
 
 ## 限制与已知问题
