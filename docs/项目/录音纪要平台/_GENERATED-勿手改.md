@@ -4,4 +4,4 @@
 
 重新同步：`powershell -NoProfile -ExecutionPolicy Bypass -File tools\sync-docs-to-code.ps1`
 
-最后同步：2026-11-19 19:48
+最后同步：2026-11-20 12:27
