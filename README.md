@@ -234,7 +234,7 @@ docker compose logs app | grep '"taskId":"123"'
 
 | 现象 | 原因与解法 |
 |---|---|
-| 8080 端口被占用 | 改 `.env` 的 `APP_PORT`；同理 `9000`/`9001`（MinIO）、`8000`（ASR）、`11434`（Ollama）分别对应 `MINIO_PORT` / `MINIO_CONSOLE_PORT` / `ASR_PORT` / `OLLAMA_PORT`——这四个键 `.env.example` 里没列，**直接在 `.env` 里追加一行即可生效**（如 `MINIO_PORT=9100`）。Windows 上 `wslrelay` 偶尔抢端口，重启 Docker Desktop |
+| 8080 端口被占用 | 改 `.env` 的 `APP_PORT`；同理 `9000`/`9001`（MinIO）、`8000`（ASR）、`11434`（Ollama）分别对应 `MINIO_PORT` / `MINIO_CONSOLE_PORT` / `ASR_PORT` / `OLLAMA_PORT`——这四个键 `.env.example` 里都已列出（前三个在「应用」段、`ASR_PORT` 在 ASR 段），改值即生效。Windows 上 `wslrelay` 偶尔抢端口，重启 Docker Desktop |
 | `git clone` 报 TLS 错误（`schannel: failed to receive handshake` / `unexpected eof`） | 网络抖动或本机 git 的 TLS 后端问题：重试一次；仍失败可 `git config --global http.sslBackend openssl` 后重试，或改用 SSH 克隆 |
 | 模型下载极慢 / 下载失败 | 默认直连 `huggingface.co`，国内约 3.5 MB/min；先设 `HF_ENDPOINT=https://hf-mirror.com`（PowerShell：`$env:HF_ENDPOINT="https://hf-mirror.com"`）再重跑 `scripts/download-model.ps1`，已下载部分会复用 |
 | asr 容器报「模型未找到或加载失败」 | 模型没下或目录不对：跑 `scripts/download-model.ps1`；确认 `.env` 的 `ASR_MODEL_HOST_DIR`（默认 `./models`）指向模型缓存根目录 |
