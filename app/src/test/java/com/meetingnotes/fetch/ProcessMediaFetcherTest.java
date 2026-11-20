@@ -94,11 +94,20 @@ class ProcessMediaFetcherTest {
     }
 
     @Test
-    void nonZeroExitReportsFetchFailedWithStderrTail() {
+    void nonZeroExitReportsFetchFailedWithStderrTail() throws Exception {
         Path out = tmpDir.resolve("out.bin");
-        String cmd = isWindows()
-                ? "cmd.exe /c echo this-tool-failed-badly {url} 1>&2 & exit 3"
-                : "ls {url}";
+        String cmd;
+        if (isWindows()) {
+            cmd = "cmd.exe /c echo this-tool-failed-badly {url} 1>&2 & exit 3";
+        } else {
+            // 生产代码按空格拆 argv、不过 shell——写脚本文件保证确定性 stderr marker（不依赖 ls 的本地化文案）
+            Path script = tmpDir.resolve("fail.sh");
+            Files.write(script, "#!/bin/sh\nprintf 'this-tool-failed-badly\\n' >&2\nexit 3\n"
+                    .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            Files.setPosixFilePermissions(script,
+                    java.nio.file.attribute.PosixFilePermissions.fromString("rwxr-xr-x"));
+            cmd = "sh " + script + " {url}";
+        }
         ApiException e = assertThrows(ApiException.class,
                 () -> fetcher(cmd, 30000, 1024 * 1024).fetch("/nonexistent-t432b/nothing", out));
         assertEquals(502, e.getStatus());
