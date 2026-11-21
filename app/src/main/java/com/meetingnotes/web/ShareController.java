@@ -7,7 +7,6 @@ import com.meetingnotes.common.ApiException;
 import com.meetingnotes.common.UserContext;
 import com.meetingnotes.common.ShareTokens;
 import com.meetingnotes.task.ShareService;
-import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;

@@ -1,7 +1,6 @@
 package com.meetingnotes.task;
 
 import com.meetingnotes.common.ApiException;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
