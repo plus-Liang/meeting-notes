@@ -27,12 +27,17 @@ function Get-MissingModelFiles {
     $missing = @()
     foreach ($f in @('model.bin', 'config.json', 'tokenizer.json')) {
         $item = Get-Item (Join-Path $rev.FullName $f) -Force -ErrorAction SilentlyContinue
-        if (-not $item -or $item.Length -le 0) { $missing += $f }
+        if (-not $item) { $missing += $f; continue }
+        if ($item.Length -gt 0) { continue }
+        # 下载在 Linux 容器内跑，HF 建的是符号链接；Windows 侧读不到目标，Length 恒为 0。
+        # 带 ReparsePoint 属性的条目按「已下载」处理，否则 461MB 真下载会被误判不完整（T4.15 实测）。
+        if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { continue }
+        $missing += $f
     }
     $vocabOk = $false
     foreach ($v in @('vocabulary.txt', 'vocabulary.json')) {
         $item = Get-Item (Join-Path $rev.FullName $v) -Force -ErrorAction SilentlyContinue
-        if ($item -and $item.Length -gt 0) { $vocabOk = $true; break }
+        if ($item -and ($item.Length -gt 0 -or ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint))) { $vocabOk = $true; break }
     }
     if (-not $vocabOk) { $missing += 'vocabulary.txt' }
     return $missing
