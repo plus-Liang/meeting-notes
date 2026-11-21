@@ -60,7 +60,11 @@ if ($Force) {
     Write-Host "[download-model] 模型 $Model 已存在（$snapDir），跳过下载。"
     exit 0
 } else {
-    Write-Host "[download-model] 检测到模型 $Model 下载不完整（缺 $($missing -join '、')），重新下载…"
+    if (Test-Path $snapDir) {
+        Write-Host "[download-model] 检测到模型 $Model 下载不完整（缺 $($missing -join '、')），重新下载…"
+    } else {
+        Write-Host "[download-model] 模型 $Model 不存在，开始下载…"
+    }
 }
 
 Write-Host "[download-model] 开始下载 faster-whisper-$Model 到 $repo\models\hub（small 约 461MB，请耐心等待）…"
