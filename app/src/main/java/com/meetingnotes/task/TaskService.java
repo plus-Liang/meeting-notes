@@ -48,6 +48,7 @@ public class TaskService {
     private final AudioDurationProbe probe;
     private final QuotaService quotaService;
     private final QueuePublisher queuePublisher;
+    private final TaskRequeueSupport taskRequeueSupport;
     private final TransactionTemplate transactionTemplate;
     private final long maxSizeBytes;
     private final long maxDurationSec;
@@ -58,6 +59,7 @@ public class TaskService {
                        AudioDurationProbe probe,
                        QuotaService quotaService,
                        QueuePublisher queuePublisher,
+                       TaskRequeueSupport taskRequeueSupport,
                        TransactionTemplate transactionTemplate,
                        @Value("${app.task.max-size-bytes}") long maxSizeBytes,
                        @Value("${app.task.max-duration-sec}") long maxDurationSec,
@@ -67,6 +69,7 @@ public class TaskService {
         this.probe = probe;
         this.quotaService = quotaService;
         this.queuePublisher = queuePublisher;
+        this.taskRequeueSupport = taskRequeueSupport;
         this.transactionTemplate = transactionTemplate;
         this.maxSizeBytes = maxSizeBytes;
         this.maxDurationSec = maxDurationSec;
@@ -164,21 +167,17 @@ public class TaskService {
                     throw new ApiException(500, "INTERNAL_ERROR", "幂等冲突回查未找到已有任务，请联系管理员");
                 }
                 if ("DEAD".equals(existing.status())) {
-                    jdbc.update("""
-                            UPDATE task SET attempts = 0, status = 'PENDING', error_code = NULL, updated_at = now()
-                            WHERE id = ?
-                            """, existing.id());
-                    // T2.11 F-1：复活即清死信，否则死信列表出现"已 DONE 的任务"，再失败还会写第二条
-                    jdbc.update("DELETE FROM dead_letter WHERE task_id = ?", existing.id());
-                    queuePublisher.publish(existing.id());
+                    // T2.11 F-1：复活即清死信，否则死信列表出现"已 DONE 的任务"，再失败还会写第二条。
+                    // T4.60 B2：复活两连 + 重投收敛到 TaskRequeueSupport（四套重复 SQL 单一实现）
+                    taskRequeueSupport.reviveDeadThenPublish(existing.id());
                     log.info("任务 {} 已 DEAD，重传触发复活重投（D-049）", existing.id());
                     return new TaskCreatedResponse(existing.id(), "PENDING", sha256, durationSec, size, true);
                 }
                 if ("PENDING".equals(existing.status())) {
                     // T4.50 自愈：Redis 故障期间留下的 PENDING（行已提交、队列未投）——重传即重新入队，
                     // 不再把"客户端重试"堵死在幂等命中上
-                    queuePublisher.publish(existing.id());
-                    log.info("任务 {} 重传命中 PENDING，重新入队（T4.50 自愈）", existing.id());
+                    taskRequeueSupport.publishPending(existing.id(),
+                            String.format("任务 %d 重传命中 PENDING，重新入队（T4.50 自愈）", existing.id()));
                 }
                 return new TaskCreatedResponse(existing.id(), existing.status(), sha256, durationSec, size, true);
             }

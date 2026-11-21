@@ -259,7 +259,7 @@ public class TranscriptionWorker implements SmartLifecycle {
             } else {
                 jdbc.update("UPDATE task SET status = 'RETRYING', error_code = ?, updated_at = now() WHERE id = ?",
                         code, taskId);
-                if (queuePublisher.tryPublish(taskId)) {
+                if (queuePublisher.tryPublishToTail(taskId)) { /* T4.60 B1：失败重投走队尾（rightPush），让出队头给其他任务 */
                     log.warn("任务 {} 失败（{}/{} 次，{}），已置 RETRYING 并重新入队：{}", taskId, attempts, maxRetries, code, reason);
                 } else {
                     // T4.52 S6：重投失败不能停在 RETRYING（无人回收）——退回 PENDING，由启动恢复/幂等重提自愈兜底

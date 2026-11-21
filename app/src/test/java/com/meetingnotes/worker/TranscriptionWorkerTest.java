@@ -229,13 +229,15 @@ class TranscriptionWorkerTest {
         // UPDATE ... RETURNING attempts → 本次失败后 attempts=1，未达上限 3
         doReturn(1).when(jdbc).query(contains("RETURNING attempts"),
                 ArgumentMatchers.<ResultSetExtractor<Integer>>any(), eq(9L));
-        when(queuePublisher.tryPublish(9L)).thenReturn(true);
+        when(queuePublisher.tryPublishToTail(9L)).thenReturn(true);
 
         ReflectionTestUtils.invokeMethod(worker, "markFailure", 9L,
                 new ProcessingException("ASR_ERROR", "ASR 转写调用失败：连接拒绝", null));
 
         verify(jdbc).update(contains("'RETRYING'"), eq("ASR_ERROR"), eq(9L));
-        verify(queuePublisher).tryPublish(9L);
+        /* T4.60 B1：失败重投必须走队尾（tryPublishToTail），且绝不碰头插通道（不插队） */
+        verify(queuePublisher).tryPublishToTail(9L);
+        verify(queuePublisher, org.mockito.Mockito.never()).tryPublish(9L);
         verify(jdbc, org.mockito.Mockito.never()).update(contains("'DEAD'"), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
     }
 
@@ -245,7 +247,7 @@ class TranscriptionWorkerTest {
         TranscriptionWorker worker = newWorker();
         doReturn(1).when(jdbc).query(contains("RETURNING attempts"),
                 ArgumentMatchers.<ResultSetExtractor<Integer>>any(), eq(11L));
-        when(queuePublisher.tryPublish(11L)).thenReturn(false);
+        when(queuePublisher.tryPublishToTail(11L)).thenReturn(false);
 
         ReflectionTestUtils.invokeMethod(worker, "markFailure", 11L,
                 new ProcessingException("ASR_ERROR", "ASR 转写调用失败：连接拒绝", null));
@@ -267,6 +269,7 @@ class TranscriptionWorkerTest {
 
         verify(jdbc).update(contains("'DEAD'"), eq("ASR_ERROR"), eq(10L));
         verify(jdbc).update(contains("dead_letter"), eq(10L), contains("服务不可达"));
+        verify(queuePublisher, org.mockito.Mockito.never()).tryPublishToTail(org.mockito.ArgumentMatchers.anyLong());
         verify(queuePublisher, org.mockito.Mockito.never()).tryPublish(org.mockito.ArgumentMatchers.anyLong());
     }
 

@@ -30,11 +30,11 @@ public class TaskRetryService {
     static final int MAX_IDS = 20;
 
     private final JdbcTemplate jdbc;
-    private final QueuePublisher queuePublisher;
+    private final TaskRequeueSupport taskRequeueSupport;
 
-    public TaskRetryService(JdbcTemplate jdbc, QueuePublisher queuePublisher) {
+    public TaskRetryService(JdbcTemplate jdbc, TaskRequeueSupport taskRequeueSupport) {
         this.jdbc = jdbc;
-        this.queuePublisher = queuePublisher;
+        this.taskRequeueSupport = taskRequeueSupport;
     }
 
     /** 逐条跳过原因（snake_case 响应：reason 只取固定值，不外泄内部细节）。 */
@@ -68,23 +68,9 @@ public class TaskRetryService {
                 skipped.add(new Skipped(id, "NOT_DEAD"));
                 continue;
             }
-            // 复活三连与 TaskService 的 DEAD 重传复活逐字同口径（D-049：重置计数 + 清死信 + 重入队）
-            jdbc.update("""
-                    UPDATE task SET attempts = 0, status = 'PENDING', error_code = NULL, updated_at = now()
-                    WHERE id = ?
-                    """, id);
-            jdbc.update("DELETE FROM dead_letter WHERE task_id = ?", id);
-            try {
-                queuePublisher.publish(id);
-            } catch (ApiException e) {
-                // T4.52 B2：复活只完成一半（已 PENDING、死信已删、队列没投）——回滚成 DEAD 并补回死信，
-                // 保证客户端重发仍能命中「DEAD→复活」路径，再把 503 抛给调用方；绝不许 retried 为空却 200
-                jdbc.update("UPDATE task SET status = 'DEAD', error_code = 'QUEUE_UNAVAILABLE', updated_at = now() WHERE id = ?",
-                        id);
-                jdbc.update("INSERT INTO dead_letter (task_id, reason) VALUES (?, ?)",
-                        id, "批量重试入队失败（Redis 不可用），已回滚为 DEAD；队列恢复后重新发起批量重试即可");
-                throw e;
-            }
+            // 复活三连 + 入队失败回滚，收敛到 TaskRequeueSupport（T4.60 B2，口径不变：D-049 重置 + 清死信 +
+            // 重入队；入队失败 → 回滚成 DEAD + 补死信 + 503 上抛，绝不许 retried 为空却 200）
+            taskRequeueSupport.reviveDeadThenPublishOrRollback(id);
             retried.add(id);
             log.info("任务 {} 已批量重试复活（DEAD→PENDING）并重入队", id);
         }

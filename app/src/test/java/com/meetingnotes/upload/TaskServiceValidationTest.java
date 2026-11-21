@@ -2,6 +2,7 @@ package com.meetingnotes.upload;
 
 import com.meetingnotes.task.QueuePublisher;
 import com.meetingnotes.task.QuotaService;
+import com.meetingnotes.task.TaskRequeueSupport;
 import com.meetingnotes.task.TaskService;
 import com.meetingnotes.common.ApiException;
 import org.junit.jupiter.api.Test;
@@ -53,10 +54,12 @@ class TaskServiceValidationTest {
     @Mock
     private QueuePublisher queuePublisher;
     @Mock
+    private TaskRequeueSupport taskRequeueSupport;
+    @Mock
     private TransactionTemplate transactionTemplate;
 
     private TaskService newService(long maxSizeBytes, long maxDurationSec) {
-        return new TaskService(jdbc, s3, probe, quotaService, queuePublisher, transactionTemplate,
+        return new TaskService(jdbc, s3, probe, quotaService, queuePublisher, taskRequeueSupport, transactionTemplate,
                 maxSizeBytes, maxDurationSec, "meetingnotes");
     }
 
@@ -200,8 +203,9 @@ class TaskServiceValidationTest {
         assertEquals(8L, resp.taskId());
         assertEquals("PENDING", resp.status(), "DEAD 复活后返回 PENDING");
         assertTrue(resp.reused());
-        verify(jdbc).update(contains("attempts = 0, status = 'PENDING', error_code = NULL"), eq(8L));
-        verify(queuePublisher).publish(8L);
+        /* T4.60 B2：复活 SQL 收敛到 TaskRequeueSupport（SQL 文本由 TaskRequeueSupportTest 钉住） */
+        verify(taskRequeueSupport).reviveDeadThenPublish(8L);
+        verify(queuePublisher, never()).publish(anyLong());
     }
 
     @Test

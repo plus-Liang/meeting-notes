@@ -52,6 +52,8 @@ class TaskServiceTest {
     @Mock
     private QueuePublisher queuePublisher;
     @Mock
+    private TaskRequeueSupport taskRequeueSupport;
+    @Mock
     private TransactionTemplate transactionTemplate;
 
     @BeforeEach
@@ -65,7 +67,7 @@ class TaskServiceTest {
     }
 
     private TaskService newService() {
-        return new TaskService(jdbc, s3, probe, quotaService, queuePublisher, transactionTemplate,
+        return new TaskService(jdbc, s3, probe, quotaService, queuePublisher, taskRequeueSupport, transactionTemplate,
                 1_000_000L, 7200L, "test-bucket");
     }
 
@@ -96,7 +98,7 @@ class TaskServiceTest {
         assertEquals(9L, resp.taskId());
         assertEquals("PENDING", resp.status(), "幂等命中返回库里真实状态");
         assertTrue(resp.reused(), "幂等命中 reused=true");
-        verify(queuePublisher).publish(9L);
+        verify(taskRequeueSupport).publishPending(eq(9L), ArgumentMatchers.contains("重传命中 PENDING"));
         verify(quotaService, never()).consume(ArgumentMatchers.anyLong(), ArgumentMatchers.anyInt());
     }
 
@@ -104,7 +106,7 @@ class TaskServiceTest {
     void idempotentHitPendingWithRedisDownThrows503T450() throws Exception {
         stubIdempotentHitPending(9L);
         doThrow(new ApiException(503, "QUEUE_UNAVAILABLE", "队列暂不可用，请稍后重试"))
-                .when(queuePublisher).publish(9L);
+                .when(taskRequeueSupport).publishPending(eq(9L), anyString());
 
         ApiException ex = assertThrows(ApiException.class, () -> newService().createUpload(wav()));
 

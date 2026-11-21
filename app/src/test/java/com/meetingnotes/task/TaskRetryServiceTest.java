@@ -35,10 +35,10 @@ class TaskRetryServiceTest {
     @Mock
     private JdbcTemplate jdbc;
     @Mock
-    private QueuePublisher queuePublisher;
+    private TaskRequeueSupport taskRequeueSupport;
 
     private TaskRetryService newService() {
-        return new TaskRetryService(jdbc, queuePublisher);
+        return new TaskRetryService(jdbc, taskRequeueSupport);
     }
 
     private void stubStatus(long id, String status) {
@@ -71,11 +71,9 @@ class TaskRetryServiceTest {
         assertEquals("NOT_DEAD", outcome.skipped().get(0).reason());
         assertEquals(9L, outcome.skipped().get(1).id());
         assertEquals("NOT_FOUND", outcome.skipped().get(1).reason());
-        verify(jdbc).update(contains("attempts = 0, status = 'PENDING', error_code = NULL"), eq(7L));
-        verify(jdbc).update(contains("DELETE FROM dead_letter"), eq(7L));
-        verify(queuePublisher).publish(7L);
+        verify(taskRequeueSupport).reviveDeadThenPublishOrRollback(7L);
         verify(jdbc, never()).update(contains("attempts = 0, status = 'PENDING'"), eq(8L));
-        verify(queuePublisher, never()).publish(8L);
+        verify(taskRequeueSupport, never()).reviveDeadThenPublishOrRollback(8L);
     }
 
     @Test
@@ -85,7 +83,7 @@ class TaskRetryServiceTest {
         TaskRetryService.RetryOutcome outcome = newService().retry(List.of(7L, 7L));
 
         assertEquals(List.of(7L), outcome.retried(), "同一 id 去重只重试一次");
-        verify(jdbc, times(1)).update(contains("attempts = 0, status = 'PENDING'"), eq(7L));
+        verify(taskRequeueSupport, times(1)).reviveDeadThenPublishOrRollback(7L);
     }
 
     @Test
@@ -104,18 +102,17 @@ class TaskRetryServiceTest {
         verify(jdbc, never()).update(ArgumentMatchers.anyString(), ArgumentMatchers.anyLong());
     }
 
-    /** T4.52 B2：入队失败必须 503，且该 id 回滚为 DEAD + 补回死信（不许假成功、也不许半复活卡死）。 */
+    /** T4.52 B2 / T4.60 B2：入队失败必须 503（回滚 SQL 已收敛到 TaskRequeueSupportTest 钉住）。 */
     @Test
     void enqueueFailureRollsBackToDeadAndThrows503T452() {
         stubStatus(7L, "DEAD");
         doThrow(new ApiException(503, "QUEUE_UNAVAILABLE", "队列暂不可用，请稍后重试"))
-                .when(queuePublisher).publish(7L);
+                .when(taskRequeueSupport).reviveDeadThenPublishOrRollback(7L);
 
         ApiException ex = assertThrows(ApiException.class, () -> newService().retry(List.of(7L)));
 
         assertEquals(503, ex.getStatus(), "入队失败必须 503，不得假成功（T4.52）");
         assertEquals("QUEUE_UNAVAILABLE", ex.getCode());
-        verify(jdbc).update(contains("status = 'DEAD', error_code = 'QUEUE_UNAVAILABLE'"), eq(7L));
-        verify(jdbc).update(contains("INSERT INTO dead_letter"), eq(7L), contains("Redis 不可用"));
+        verify(jdbc, never()).update(contains("status = 'DEAD'"), eq(7L));
     }
 }

@@ -50,6 +50,7 @@ public class LinkTaskService {
     private final AudioDurationProbe probe;
     private final QuotaService quotaService;
     private final QueuePublisher queuePublisher;
+    private final TaskRequeueSupport taskRequeueSupport;
     private final TransactionTemplate transactionTemplate;
     private final MediaFetcher httpFetcher;
     private final MediaFetcher byofFetcher;
@@ -61,6 +62,7 @@ public class LinkTaskService {
                            AudioDurationProbe probe,
                            QuotaService quotaService,
                            QueuePublisher queuePublisher,
+                           TaskRequeueSupport taskRequeueSupport,
                            TransactionTemplate transactionTemplate,
                            @Qualifier("httpMediaFetcher") MediaFetcher httpFetcher,
                            @Qualifier("processMediaFetcher") MediaFetcher byofFetcher,
@@ -71,6 +73,7 @@ public class LinkTaskService {
         this.probe = probe;
         this.quotaService = quotaService;
         this.queuePublisher = queuePublisher;
+        this.taskRequeueSupport = taskRequeueSupport;
         this.transactionTemplate = transactionTemplate;
         this.httpFetcher = httpFetcher;
         this.byofFetcher = byofFetcher;
@@ -165,20 +168,16 @@ public class LinkTaskService {
                     throw new ApiException(500, "INTERNAL_ERROR", "幂等冲突回查未找到已有任务，请联系管理员");
                 }
                 if ("DEAD".equals(existing.status())) {
-                    jdbc.update("""
-                            UPDATE task SET attempts = 0, status = 'PENDING', error_code = NULL, updated_at = now()
-                            WHERE id = ?
-                            """, existing.id());
-                    jdbc.update("DELETE FROM dead_letter WHERE task_id = ?", existing.id());
-                    queuePublisher.publish(existing.id());
+                    // T4.60 B2：复活两连 + 重投收敛到 TaskRequeueSupport
+                    taskRequeueSupport.reviveDeadThenPublish(existing.id());
                     log.info("链接任务 {} 已 DEAD，同链接重提触发复活重投（D-049）", existing.id());
                     return new TaskCreatedResponse(existing.id(), "PENDING", sha256, durationSec, size, true);
                 }
                 if ("PENDING".equals(existing.status())) {
                     // T4.52 B1 自愈：Redis 故障期间留下的 PENDING——重提即重新入队（与 TaskService 同口径），
                     // 否则 link/paste 入口"重提命中 PENDING 却永不入队"，三条自救全堵
-                    queuePublisher.publish(existing.id());
-                    log.info("链接任务 {} 重提命中 PENDING，重新入队（T4.52 自愈）", existing.id());
+                    taskRequeueSupport.publishPending(existing.id(),
+                            String.format("链接任务 %d 重提命中 PENDING，重新入队（T4.52 自愈）", existing.id()));
                 }
                 return new TaskCreatedResponse(existing.id(), existing.status(), sha256, durationSec, size, true);
             }

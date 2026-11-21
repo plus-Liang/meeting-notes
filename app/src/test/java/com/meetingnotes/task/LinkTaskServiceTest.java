@@ -61,6 +61,8 @@ class LinkTaskServiceTest {
     @Mock
     private QueuePublisher queuePublisher;
     @Mock
+    private TaskRequeueSupport taskRequeueSupport;
+    @Mock
     private TransactionTemplate transactionTemplate;
     @Mock
     private MediaFetcher fetcher;
@@ -68,8 +70,8 @@ class LinkTaskServiceTest {
     private com.meetingnotes.fetch.ProcessMediaFetcher byofFetcher;
 
     private LinkTaskService newService() {
-        return new LinkTaskService(jdbc, s3, probe, quotaService, queuePublisher, transactionTemplate, fetcher,
-                byofFetcher, 3600L, "meetingnotes");
+        return new LinkTaskService(jdbc, s3, probe, quotaService, queuePublisher, taskRequeueSupport,
+                transactionTemplate, fetcher, byofFetcher, 3600L, "meetingnotes");
     }
 
     @SuppressWarnings("unchecked")
@@ -174,7 +176,7 @@ class LinkTaskServiceTest {
         assertEquals(9L, resp.taskId());
         assertEquals("PENDING", resp.status());
         assertTrue(resp.reused());
-        verify(queuePublisher).publish(9L);
+        verify(taskRequeueSupport).publishPending(eq(9L), ArgumentMatchers.contains("重提命中 PENDING"));
         verify(quotaService, never()).consume(anyLong(), anyInt());
     }
 

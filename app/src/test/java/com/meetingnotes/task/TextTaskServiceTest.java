@@ -60,10 +60,12 @@ class TextTaskServiceTest {
     @Mock
     private QueuePublisher queuePublisher;
     @Mock
+    private TaskRequeueSupport taskRequeueSupport;
+    @Mock
     private TransactionTemplate transactionTemplate;
 
     private TextTaskService newService() {
-        return new TextTaskService(jdbc, s3, quotaService, queuePublisher, transactionTemplate,
+        return new TextTaskService(jdbc, s3, quotaService, queuePublisher, taskRequeueSupport, transactionTemplate,
                 "meetingnotes");
     }
 
@@ -153,7 +155,7 @@ class TextTaskServiceTest {
         assertEquals(9L, resp.taskId());
         assertEquals("PENDING", resp.status());
         assertTrue(resp.reused());
-        verify(queuePublisher).publish(9L);
+        verify(taskRequeueSupport).publishPending(eq(9L), ArgumentMatchers.contains("重提命中 PENDING"));
         verify(quotaService, never()).consume(anyLong(), anyInt());
     }
 
@@ -185,6 +187,7 @@ class TextTaskServiceTest {
         assertTrue(resp.reused());
         verify(quotaService, never()).consume(anyLong(), anyInt());
         verify(queuePublisher, never()).publish(anyLong());
+        verify(taskRequeueSupport, never()).publishPending(anyLong(), anyString());
     }
 
     @Test
@@ -198,9 +201,7 @@ class TextTaskServiceTest {
 
         assertEquals("PENDING", resp.status());
         assertTrue(resp.reused());
-        verify(jdbc).update(contains("status = 'PENDING'"), eq(6L));
-        verify(jdbc).update(contains("DELETE FROM dead_letter"), eq(6L));
-        verify(queuePublisher).publish(6L);
+        verify(taskRequeueSupport).reviveDeadThenPublish(6L);
     }
 
     @Test
