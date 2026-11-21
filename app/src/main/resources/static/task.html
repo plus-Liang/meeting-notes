@@ -536,17 +536,14 @@
       }))) return;
       btn.disabled = true;
       sendJson('api/v1/tasks/' + data.task_id, 'DELETE').then(function (resp) {
-        if (resp.status === 200) {
+        /* T4.58：sendJson 返回「已解析数据 + __httpStatus」，不是 Response——旧代码当 Response 用，
+           删除后永不跳转还抛 TypeError（服务端其实已删，K-118） */
+        if (resp.__httpStatus === 200) {
           window.location.href = 'tasks.html'; /* 删除成功跳回列表 */
           return;
         }
-        return resp.json().then(function (err) {
-          btn.disabled = false;
-          msgEl.textContent = '删除失败（' + (err.code || resp.status) + '）：' + (err.message || '未知错误');
-        }, function () {
-          btn.disabled = false;
-          msgEl.textContent = '删除失败（HTTP ' + resp.status + '）';
-        });
+        btn.disabled = false;
+        msgEl.textContent = '删除失败（' + (resp.code || resp.__httpStatus) + '）：' + (resp.message || '未知错误');
       }, function () {
         btn.disabled = false;
         msgEl.textContent = '删除失败：服务暂时不可用，请稍后重试。';
