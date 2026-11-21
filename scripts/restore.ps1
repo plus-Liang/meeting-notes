@@ -63,22 +63,29 @@ docker compose exec -T postgres sh -c "pg_restore -U $($manifest.pg_user) --clea
 if ($LASTEXITCODE -ne 0) { Write-Host '[restore] pg_restore 失败（见上方错误）'; docker compose start app | Out-Null; exit 12 }
 docker compose exec -T postgres rm /tmp/mn-restore.dump | Out-Null
 
-# ---- 4) MinIO volume：清空并解包 ----
+# ---- 4) MinIO volume：整卷清空（含隐藏项）再解包 ----
 Write-Host '[restore] 恢复 MinIO volume ...'
 docker compose stop minio | Out-Null
 $minioCid = (docker compose ps -aq minio).Trim()
+# T4.51：rm -rf /data/* 不匹配隐藏目录——新卷会残留新实例写的 .minio.sys（drive UUID 与备份不一致），
+# MinIO 判 "inconsistent drive found"，元数据只读、写入全 500。只有换机/卷被删/down -v 重建时才踩到。
+# find -mindepth 1 -delete 能删 .minio.sys 与空目录，实现真正的整卷清空。
 docker run --rm --volumes-from $minioCid -v "${backupPath}:/backup:ro" python:3.12-slim `
-    sh -c "rm -rf /data/* 2>/dev/null; tar xzf /backup/minio-data.tar.gz -C /"
+    sh -c "find /data -mindepth 1 -delete; tar xzf /backup/minio-data.tar.gz -C /; [ -f /data/.minio.sys/format.json ] || exit 14"
+if ($LASTEXITCODE -eq 14) { Write-Host '[restore] MinIO 卷重建后缺 /data/.minio.sys/format.json——备份包可能不含 MinIO 元数据，请核对备份'; docker compose start minio app | Out-Null; exit 14 }
 if ($LASTEXITCODE -ne 0) { Write-Host '[restore] MinIO volume 解包失败'; docker compose start minio app | Out-Null; exit 13 }
+Write-Host '[restore] MinIO 卷已整卷重建（含 .minio.sys）'
 docker compose start minio | Out-Null
 
 # ---- 5) 起服务并自检 ----
 Write-Host '[restore] 启动 app 并自检 ...'
 docker compose start app | Out-Null
+# 健康探测端口跟随 APP_PORT（T4.51：隔离栈/异端口部署下不再误探 8080——那会读到别的栈的 UP）
+$appPort = if ($env:APP_PORT) { $env:APP_PORT } else { '8080' }
 $deadline = (Get-Date).AddSeconds(90)
 do {
     Start-Sleep 3
-    try { $health = (curl.exe -s --noproxy '*' http://localhost:8080/actuator/health | ConvertFrom-Json).status } catch { $health = '' }
+    try { $health = (curl.exe -s --noproxy '*' "http://localhost:${appPort}/actuator/health" | ConvertFrom-Json).status } catch { $health = '' }
 } until ($health -eq 'UP' -or (Get-Date) -gt $deadline)
 
 $tables = @('task', 'task_result', 'glossary', 'quota', 'dead_letter')
