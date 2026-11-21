@@ -77,9 +77,10 @@
     <span>录音纪要平台 · 白纸档案</span>
   </footer>
 </div>
-<script src="auth.js"></script>
-<script src="app.js"></script>
-<script src="drawer.js"></script>
+    <script src="auth.js"></script>
+    <script src="app.js"></script>
+    <script src="confirm.js"></script>
+    <script src="drawer.js"></script>
 <script>
 (function () {
   var listEl = document.getElementById('list');
@@ -870,41 +871,8 @@
     document.getElementById('selHint').textContent = '';
   }
 
-  /* 站内确认弹窗（替代浏览器原生 confirm）：Promise<boolean>；焦点落「取消」（破坏性操作回车不误删）、
-     Esc/点遮罩=取消、关闭后焦点回触发按钮；同时只允许一个（后来者顶掉旧弹窗）。 */
-  var dlgEl = null, dlgPrevFocus = null;
-  function confirmDialog(opts) {
-    return new Promise(function (resolve) {
-      if (dlgEl) { dlgEl.remove(); dlgEl = null; }
-      dlgPrevFocus = document.activeElement;
-      var mask = document.createElement('div');
-      mask.className = 'dlg-mask';
-      mask.innerHTML =
-        '<div class="dlg-panel" role="dialog" aria-modal="true" aria-labelledby="dlgTitle" aria-describedby="dlgDesc">' +
-        '<h2 id="dlgTitle" class="dlg-title">' + escapeHtml(opts.title) + '</h2>' +
-        '<p id="dlgDesc" class="dlg-desc">' + escapeHtml(opts.desc) + '</p>' +
-        '<div class="dlg-actions"><button type="button" id="dlgCancel" class="btn-secondary">取消</button>' +
-        '<button type="button" id="dlgOk" class="btn-danger">' + escapeHtml(opts.okText || '确定') + '</button></div>' +
-        '</div>';
-      document.body.appendChild(mask);
-      dlgEl = mask;
-      function done(val) {
-        document.removeEventListener('keydown', onKey, true);
-        mask.remove();
-        dlgEl = null;
-        if (dlgPrevFocus && dlgPrevFocus.focus) { dlgPrevFocus.focus(); }
-        resolve(val);
-      }
-      function onKey(e) {
-        if (e.key === 'Escape') { e.stopPropagation(); done(false); }
-      }
-      mask.querySelector('#dlgCancel').addEventListener('click', function () { done(false); });
-      mask.querySelector('#dlgOk').addEventListener('click', function () { done(true); });
-      mask.addEventListener('click', function (e) { if (e.target === mask) { done(false); } });
-      document.addEventListener('keydown', onKey, true);
-      mask.querySelector('#dlgCancel').focus();
-    });
-  }
+  /* confirmDialog 已抽到共享文件 confirm.js（T4.57：两页共用一份实现，R4 不重复）；
+     引入顺序见 <head> 的 <script src="confirm.js">，本页所有调用点行为与 T4.53/T4.56 验收版一致。 */
 
   /* 收集将要操作的 id 集合（T4.53 缺陷3 + T4.56）：手动勾选 → 直接返回；
      全选 → 按当前筛选参数（与 filterParams 同源）以 limit=50 + before_id 游标翻页收集全部，

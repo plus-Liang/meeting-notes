@@ -45,6 +45,7 @@
 </div>
 <script src="auth.js"></script>
 <script src="app.js"></script>
+<script src="confirm.js"></script>
 <script>
 (function () {
   /* T4.38：被站内抽屉 iframe 内嵌时藏导航/页脚（深链 task.html?id= 直接访问不受影响） */
@@ -437,9 +438,14 @@
     var btn = document.getElementById('restructureBtn');
     var sel = document.getElementById('restructureTemplate');
     var msg = document.getElementById('restructureMsg');
-    btn.addEventListener('click', function () {
+    btn.addEventListener('click', async function () {
       var template = sel.value;
-      if (!window.confirm('按「' + TEMPLATE_NAMES[template] + '」模板重新生成？将覆盖当前摘要/关键词/待办/要点与模板（不重跑转写、不消耗配额）。')) return;
+      /* T4.57：站内确认弹窗（共享 confirm.js）——焦点落「取消」，Esc/遮罩=取消 */
+      if (!(await confirmDialog({
+        title: '重新生成确认',
+        desc: '按「' + TEMPLATE_NAMES[template] + '」模板重新生成？将覆盖当前摘要/关键词/待办/要点与模板（不重跑转写、不消耗配额）。',
+        okText: '重新生成'
+      }))) return;
       btn.disabled = true;
       msg.textContent = '重新生成中…（AI 调用可能需要一点时间）';
       postJson('api/v1/tasks/' + data.task_id + '/restructure', { template: template }).then(function (resp) {
@@ -500,8 +506,13 @@
       mnCopyText(fullUrl || '', function () { msg.textContent = '已复制链接。'; },
         function () { msg.textContent = '复制失败，请手动选择链接复制。'; });
     });
-    document.getElementById('shareRevokeBtn').addEventListener('click', function () {
-      if (!window.confirm('撤销该任务的全部分享链接？撤销后所有已分享出去的链接立即失效。')) return;
+    document.getElementById('shareRevokeBtn').addEventListener('click', async function () {
+      /* T4.57：站内确认弹窗（共享 confirm.js）——破坏性操作，焦点落「取消」 */
+      if (!(await confirmDialog({
+        title: '撤销分享确认',
+        desc: '撤销该任务的全部分享链接？撤销后所有已分享出去的链接立即失效。',
+        okText: '撤销'
+      }))) return;
       sendJson('api/v1/tasks/' + data.task_id + '/share', 'DELETE').then(function (resp) {
         if (resp.__httpStatus === 200) {
           msg.textContent = '已撤销 ' + (resp.revoked || 0) + ' 条链接。';
@@ -516,8 +527,13 @@
   function bindDelete(data) {
     var btn = document.getElementById('deleteTaskBtn');
     var msgEl = document.getElementById('deleteMsg');
-    btn.addEventListener('click', function () {
-      if (!window.confirm('删除任务 #' + data.task_id + '？删除后不可恢复，已用配额不退还。')) return;
+    btn.addEventListener('click', async function () {
+      /* T4.57：站内确认弹窗（共享 confirm.js）——焦点落「取消」，Esc/遮罩=取消 */
+      if (!(await confirmDialog({
+        title: '删除确认',
+        desc: '删除任务 #' + data.task_id + '？删除后不可恢复，已用配额不退还。',
+        okText: '删除'
+      }))) return;
       btn.disabled = true;
       sendJson('api/v1/tasks/' + data.task_id, 'DELETE').then(function (resp) {
         if (resp.status === 200) {
