@@ -79,6 +79,7 @@
 </div>
 <script src="auth.js"></script>
 <script src="app.js"></script>
+<script src="escape.js"></script>
 <script>
 (function () {
   /* 档案抬头行日期（T4.41） */
@@ -137,10 +138,7 @@
       }).join('') + '</tbody></table>';
   }
 
-  function escapeHtml(s) {
-    return String(s === undefined || s === null ? '' : s)
-      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  }
+  /* escapeHtml 已收敛到共享 escape.js（T4.59，五页一份） */
 
   /* T4.15⑦：系统状态——GET /actuator/health（认证豁免端点）；app=整体 status，
      asr/postgres(minio 的 db 组件)/minio/redis 取 components；任一失败显示「未知」，不弹错 */

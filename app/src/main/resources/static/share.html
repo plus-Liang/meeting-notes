@@ -38,16 +38,14 @@
 </div>
 <script src="auth.js"></script>
 <script src="app.js"></script>
+<script src="escape.js"></script>
 <script>
 (function () {
   var card = document.getElementById('shareCard');
   var params = new URLSearchParams(window.location.search);
   var token = (params.get('token') || '').trim();
 
-  function escapeHtml(s) {
-    return String(s === undefined || s === null ? '' : s)
-      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  }
+  /* escapeHtml 已收敛到共享 escape.js（T4.59，五页一份） */
 
   function errorHtml(title) {
     return '<h1 class="share-mast-h1">' + title + '</h1><p class="hint">链接无效、已被撤销或已过期。请联系分享者重新生成；' +

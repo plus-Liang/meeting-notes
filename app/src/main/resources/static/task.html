@@ -45,6 +45,7 @@
 </div>
 <script src="auth.js"></script>
 <script src="app.js"></script>
+<script src="escape.js"></script>
 <script src="confirm.js"></script>
 <script>
 (function () {
@@ -617,15 +618,7 @@
     });
   }
 
-  function escapeHtml(s) {
-    return String(s === undefined || s === null ? '' : s)
-      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  }
-
-  /* T4.43：拼进 HTML 属性的值一律 escapeAttr（含引号，同 tasks.html 口径） */
-  function escapeAttr(s) {
-    return escapeHtml(s).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-  }
+  /* escapeHtml/escapeAttr 已收敛到共享 escape.js（T4.59）；属性上下文一律 escapeAttr（含引号，同 tasks.html 口径） */
 
   function render(data) {
     lastDetail = data;

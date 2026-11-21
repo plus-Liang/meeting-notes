@@ -217,6 +217,7 @@
 </div>
 <script src="auth.js"></script>
 <script src="app.js"></script>
+<script src="escape.js"></script>
 <script src="drawer.js"></script>
 <script>
 /* ===== 页头档案行 / 刊头 meta / 右索引栏（T4.41-fix；只读端点，失败该模块显示"—"，不编数） ===== */
@@ -440,10 +441,8 @@
   function stDotClass(status) {
     return status === 'DONE' ? 'dot-ok' : (status === 'DEAD' ? 'dot-bad' : (status === 'RETRYING' ? 'dot-bad' : (status === 'PENDING' ? 'dot-wait' : 'dot-go')));
   }
-  function escapeHtmlIndex(s) {
-    return String(s === undefined || s === null ? '' : s)
-      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  }
+  /* escapeHtmlIndex 已收敛到共享 escape.js（T4.59）——属性上下文用 escapeAttr（含引号转义，比原行内补丁更严），
+     文本上下文用 escapeHtml（与原 escapeHtmlIndex 逐字等价） */
   getJson('api/v1/tasks?limit=3').then(function (data) {
     var empty = document.getElementById('recentEmpty');
     if (data.__httpStatus !== 200 || !Array.isArray(data.items) || !data.items.length) return; /* 保留空态提示 */
@@ -454,12 +453,12 @@
         '<span class="task-no">#' + item.id + '</span>' +
         '<span class="task-name"><span class="task-title"><a href="task.html?id=' + item.id +
         '" class="task-detail-link" data-task-id="' + item.id +
-        '" data-task-name="' + escapeHtmlIndex(name).replace(/"/g, '&quot;') + '">' + escapeHtmlIndex(name) + '</a></span></span>' +
+        '" data-task-name="' + escapeAttr(name) + '">' + escapeHtml(name) + '</a></span></span>' +
         '<span class="cell-num cell-dur">' + fmtDuration(item.duration_sec) + '</span>' +
         '<span class="cell-num cell-time">' + fmtClockShort(item.created_at) + '</span>' +
         '<span class="st"><i class="st-dot ' + stDotClass(item.status) + '"></i>' + statusText(item.status) + '</span>' +
         '<span class="task-side"><a href="task.html?id=' + item.id + '" class="task-detail-link" data-task-id="' + item.id +
-        '" data-task-name="' + escapeHtmlIndex(name).replace(/"/g, '&quot;') + '" aria-label="查看任务 #' + item.id + ' 详情">详情</a></span>' +
+        '" data-task-name="' + escapeAttr(name) + '" aria-label="查看任务 #' + item.id + ' 详情">详情</a></span>' +
         '</div>';
     }).join('');
     if (empty) empty.hidden = true;

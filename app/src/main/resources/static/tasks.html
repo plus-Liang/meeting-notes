@@ -79,6 +79,7 @@
 </div>
     <script src="auth.js"></script>
     <script src="app.js"></script>
+<script src="escape.js"></script>
     <script src="confirm.js"></script>
     <script src="drawer.js"></script>
 <script>
@@ -418,16 +419,8 @@
       '<a class="btn-secondary" href="tasks.html">刷新重试</a></div>';
   }
 
-  function escapeHtml(s) {
-    return String(s === undefined || s === null ? '' : s)
-      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  }
-
-  /* T4.42 缺陷修复②：拼进 HTML **属性**的值一律走 escapeAttr（在 escapeHtml 上再转引号），
-     防 `?label=x" onfocus=alert(1)` 这类合法标签（后端 1–20 字任意字符）击穿属性 */
-  function escapeAttr(s) {
-    return escapeHtml(s).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-  }
+  /* escapeHtml/escapeAttr 已收敛到共享 escape.js（T4.59，五页一份）；
+     属性上下文一律 escapeAttr（在 escapeHtml 上再转引号），防 `?label=x" onfocus=alert(1)` 击穿属性 */
 
   /* ===== T4.42：日期分组（今天 / 昨天 / 本周 / 更早；周一起算；未来时间归入今天） ===== */
   function dayStart(d) { return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }

@@ -1,6 +1,8 @@
 package com.meetingnotes;
 
 import org.junit.jupiter.api.Test;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -64,6 +66,9 @@ class NoKeyStartupTest {
     @Value("${app.llm.enabled:}")
     private String llmEnabled;
 
+    /** T4.59：诊断输出走 SLF4J（M7 同口径禁 System.out；内容与旧打印一致，无断言依赖）。 */
+    private static final Logger log = LoggerFactory.getLogger(NoKeyStartupTest.class);
+
     @Test
     void startsWithoutAnyApiKeyAndHealthIsUp() {
         assertEquals("false", llmEnabled, "无 key 时 app.llm.enabled 应为 false");
@@ -76,8 +81,8 @@ class NoKeyStartupTest {
         assertTrue(response.getBody().contains("\"status\":\"UP\""),
                 "/actuator/health 应为 UP，实际: " + response.getBody());
 
-        System.out.println("[NoKeyStartupTest] app.llm.enabled = " + llmEnabled);
-        System.out.println("[NoKeyStartupTest] ChatModel beans = " + context.getBeansOfType(ChatModel.class).size());
-        System.out.println("[NoKeyStartupTest] /actuator/health = " + response.getBody());
+        log.info("[NoKeyStartupTest] app.llm.enabled = {}", llmEnabled);
+        log.info("[NoKeyStartupTest] ChatModel beans = {}", context.getBeansOfType(ChatModel.class).size());
+        log.info("[NoKeyStartupTest] /actuator/health = {}", response.getBody());
     }
 }
