@@ -11,9 +11,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentMatchers;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.dao.DataAccessResourceFailureException;
-import org.springframework.data.redis.core.ListOperations;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.ResultSetExtractor;
 import org.springframework.mock.web.MockMultipartFile;
@@ -30,6 +27,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -52,9 +50,7 @@ class TaskServiceTest {
     @Mock
     private QuotaService quotaService;
     @Mock
-    private StringRedisTemplate redis;
-    @Mock
-    private ListOperations<String, String> listOps;
+    private QueuePublisher queuePublisher;
     @Mock
     private TransactionTemplate transactionTemplate;
 
@@ -69,8 +65,8 @@ class TaskServiceTest {
     }
 
     private TaskService newService() {
-        return new TaskService(jdbc, s3, probe, quotaService, redis, transactionTemplate,
-                1_000_000L, 7200L, "test-bucket", QUEUE_KEY);
+        return new TaskService(jdbc, s3, probe, quotaService, queuePublisher, transactionTemplate,
+                1_000_000L, 7200L, "test-bucket");
     }
 
     /** 最小合法 WAV 头（RIFF....WAVEfmt，16 字节，MediaMagic 只认文件头）。 */
@@ -94,23 +90,21 @@ class TaskServiceTest {
     @Test
     void idempotentHitPendingRequeuesT450() throws Exception {
         stubIdempotentHitPending(9L);
-        when(redis.opsForList()).thenReturn(listOps);
 
         TaskCreatedResponse resp = newService().createUpload(wav());
 
         assertEquals(9L, resp.taskId());
         assertEquals("PENDING", resp.status(), "幂等命中返回库里真实状态");
         assertTrue(resp.reused(), "幂等命中 reused=true");
-        verify(listOps).leftPush(QUEUE_KEY, "9");
+        verify(queuePublisher).publish(9L);
         verify(quotaService, never()).consume(ArgumentMatchers.anyLong(), ArgumentMatchers.anyInt());
     }
 
     @Test
     void idempotentHitPendingWithRedisDownThrows503T450() throws Exception {
         stubIdempotentHitPending(9L);
-        when(redis.opsForList()).thenReturn(listOps);
-        when(listOps.leftPush(anyString(), anyString()))
-                .thenThrow(new DataAccessResourceFailureException("redis down"));
+        doThrow(new ApiException(503, "QUEUE_UNAVAILABLE", "队列暂不可用，请稍后重试"))
+                .when(queuePublisher).publish(9L);
 
         ApiException ex = assertThrows(ApiException.class, () -> newService().createUpload(wav()));
 

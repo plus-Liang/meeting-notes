@@ -8,8 +8,6 @@ import com.meetingnotes.common.TaskCreatedResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.dao.DataAccessException;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -49,33 +47,30 @@ public class TaskService {
     private final S3Client s3;
     private final AudioDurationProbe probe;
     private final QuotaService quotaService;
-    private final StringRedisTemplate redis;
+    private final QueuePublisher queuePublisher;
     private final TransactionTemplate transactionTemplate;
     private final long maxSizeBytes;
     private final long maxDurationSec;
     private final String bucket;
-    private final String queueKey;
 
     public TaskService(JdbcTemplate jdbc,
                        S3Client s3,
                        AudioDurationProbe probe,
                        QuotaService quotaService,
-                       StringRedisTemplate redis,
+                       QueuePublisher queuePublisher,
                        TransactionTemplate transactionTemplate,
                        @Value("${app.task.max-size-bytes}") long maxSizeBytes,
                        @Value("${app.task.max-duration-sec}") long maxDurationSec,
-                       @Value("${app.storage.bucket}") String bucket,
-                       @Value("${app.worker.queue-key}") String queueKey) {
+                       @Value("${app.storage.bucket}") String bucket) {
         this.jdbc = jdbc;
         this.s3 = s3;
         this.probe = probe;
         this.quotaService = quotaService;
-        this.redis = redis;
+        this.queuePublisher = queuePublisher;
         this.transactionTemplate = transactionTemplate;
         this.maxSizeBytes = maxSizeBytes;
         this.maxDurationSec = maxDurationSec;
         this.bucket = bucket;
-        this.queueKey = queueKey;
     }
 
     public TaskCreatedResponse createUpload(MultipartFile file) throws IOException {
@@ -175,14 +170,14 @@ public class TaskService {
                             """, existing.id());
                     // T2.11 F-1：复活即清死信，否则死信列表出现"已 DONE 的任务"，再失败还会写第二条
                     jdbc.update("DELETE FROM dead_letter WHERE task_id = ?", existing.id());
-                    enqueue(existing.id());
+                    queuePublisher.publish(existing.id());
                     log.info("任务 {} 已 DEAD，重传触发复活重投（D-049）", existing.id());
                     return new TaskCreatedResponse(existing.id(), "PENDING", sha256, durationSec, size, true);
                 }
                 if ("PENDING".equals(existing.status())) {
                     // T4.50 自愈：Redis 故障期间留下的 PENDING（行已提交、队列未投）——重传即重新入队，
                     // 不再把"客户端重试"堵死在幂等命中上
-                    enqueue(existing.id());
+                    queuePublisher.publish(existing.id());
                     log.info("任务 {} 重传命中 PENDING，重新入队（T4.50 自愈）", existing.id());
                 }
                 return new TaskCreatedResponse(existing.id(), existing.status(), sha256, durationSec, size, true);
@@ -190,22 +185,11 @@ public class TaskService {
 
             // 7) 投递 worker 队列（T1.5；事务已提交，不会产生幽灵任务）。入队失败抛 503（T4.50：不得假成功）：
             //    任务行已提交停在 PENDING——客户端重传走幂等重投自愈，或由 T2.3 启动恢复兜底。
-            enqueue(taskId);
+            queuePublisher.publish(taskId);
 
             return new TaskCreatedResponse(taskId, "PENDING", sha256, durationSec, size, false);
         } finally {
             Files.deleteIfExists(tmp);
-        }
-    }
-
-    /** 投递 worker 队列；入队失败抛 503 QUEUE_UNAVAILABLE（T4.50：不得假成功）。任务行已提交停在 PENDING，
-     * 由幂等重传重投（同文件再传即自愈）或 T2.3 启动恢复（积压 PENDING 超 2 分钟）兜底。 */
-    private void enqueue(long taskId) {
-        try {
-            redis.opsForList().leftPush(queueKey, Long.toString(taskId));
-        } catch (DataAccessException e) {
-            log.error("任务 {} 入队失败（Redis 不可用），返回 503 QUEUE_UNAVAILABLE", taskId, e);
-            throw new ApiException(503, "QUEUE_UNAVAILABLE", "队列暂不可用，请稍后重试");
         }
     }
 

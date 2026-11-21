@@ -1,5 +1,6 @@
 package com.meetingnotes.upload;
 
+import com.meetingnotes.task.QueuePublisher;
 import com.meetingnotes.task.QuotaService;
 import com.meetingnotes.task.TaskService;
 import com.meetingnotes.common.ApiException;
@@ -8,8 +9,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentMatchers;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.data.redis.core.ListOperations;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.ResultSetExtractor;
 import org.springframework.mock.web.MockMultipartFile;
@@ -52,15 +51,13 @@ class TaskServiceValidationTest {
     @Mock
     private QuotaService quotaService;
     @Mock
-    private StringRedisTemplate redis;
-    @Mock
-    private ListOperations<String, String> listOps;
+    private QueuePublisher queuePublisher;
     @Mock
     private TransactionTemplate transactionTemplate;
 
     private TaskService newService(long maxSizeBytes, long maxDurationSec) {
-        return new TaskService(jdbc, s3, probe, quotaService, redis, transactionTemplate,
-                maxSizeBytes, maxDurationSec, "meetingnotes", "meetingnotes:task-queue");
+        return new TaskService(jdbc, s3, probe, quotaService, queuePublisher, transactionTemplate,
+                maxSizeBytes, maxDurationSec, "meetingnotes");
     }
 
     /** 让 transactionTemplate.execute(...) 直接执行回调（事务管理器行为不在本单测范围）。 */
@@ -152,7 +149,6 @@ class TaskServiceValidationTest {
         // T2.1：INSERT ... ON CONFLICT (user_id, content_hash) DO NOTHING RETURNING id → 新任务返回 7
         doReturn(7L).when(jdbc).query(contains("ON CONFLICT (user_id, content_hash)"),
                 ArgumentMatchers.<ResultSetExtractor<Long>>any(), eq(1L), any(), any(), any());
-        when(redis.opsForList()).thenReturn(listOps);
 
         TaskService service = newService(209715200L, 3600L);
         com.meetingnotes.common.TaskCreatedResponse resp = service.createUpload(wav(64));
@@ -162,7 +158,7 @@ class TaskServiceValidationTest {
         assertFalse(resp.reused(), "新文件不是幂等命中");
         assertEquals(90L, resp.durationSec().longValue(), "音频任务 duration_sec 仍是非空数字（T3.7 只放宽类型不改键）");
         verify(jdbc).update(contains("source_uri"), eq("s3://meetingnotes/tasks/7/audio.wav"), eq(7L));
-        verify(listOps).leftPush("meetingnotes:task-queue", "7");
+        verify(queuePublisher).publish(7L);
         verify(quotaService).consume(eq(1L), anyInt());
     }
 
@@ -185,7 +181,7 @@ class TaskServiceValidationTest {
         assertEquals("DONE", resp.status(), "幂等命中必须返回库里真实状态");
         assertTrue(resp.reused());
         verify(quotaService, never()).consume(anyLong(), anyInt());
-        verify(listOps, never()).leftPush(any(), any());
+        verify(queuePublisher, never()).publish(anyLong());
     }
 
     @Test
@@ -198,7 +194,6 @@ class TaskServiceValidationTest {
         doReturn(new TaskService.ExistingTask(8L, "DEAD")).when(jdbc)
                 .query(contains("SELECT id, status FROM task"),
                         ArgumentMatchers.<ResultSetExtractor<TaskService.ExistingTask>>any(), any(), eq(1L));
-        when(redis.opsForList()).thenReturn(listOps);
 
         com.meetingnotes.common.TaskCreatedResponse resp = newService(209715200L, 3600L).createUpload(wav(64));
 
@@ -206,7 +201,7 @@ class TaskServiceValidationTest {
         assertEquals("PENDING", resp.status(), "DEAD 复活后返回 PENDING");
         assertTrue(resp.reused());
         verify(jdbc).update(contains("attempts = 0, status = 'PENDING', error_code = NULL"), eq(8L));
-        verify(listOps).leftPush("meetingnotes:task-queue", "8");
+        verify(queuePublisher).publish(8L);
     }
 
     @Test
@@ -246,7 +241,7 @@ class TaskServiceValidationTest {
         assertEquals("RETRYING", resp.status());
         assertTrue(resp.reused());
         verify(jdbc, never()).update(contains("'PENDING'"), eq(9L));
-        verify(listOps, never()).leftPush(any(), any());
+        verify(queuePublisher, never()).publish(anyLong());
     }
 
     /* ---- T3.9 模板：非法值先行 400；文件名自动推荐 + 提交事务内落 template 行 ---- */
@@ -271,7 +266,6 @@ class TaskServiceValidationTest {
         runCallbackForReal();
         doReturn(15L).when(jdbc).query(contains("ON CONFLICT (user_id, content_hash)"),
                 ArgumentMatchers.<ResultSetExtractor<Long>>any(), eq(1L), any(), any(), any());
-        when(redis.opsForList()).thenReturn(listOps);
 
         // 不传 template：文件名"公开课Lecture03" 命中 course 关键字 → course（来源：文件名）
         MockMultipartFile file = new MockMultipartFile("file", "公开课Lecture03.wav", null, wav(64).getBytes());

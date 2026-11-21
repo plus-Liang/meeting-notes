@@ -10,6 +10,9 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
+import java.sql.Timestamp;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 
 /**
@@ -27,6 +30,9 @@ public class StartupRecovery implements ApplicationRunner {
 
     private static final Logger log = LoggerFactory.getLogger(StartupRecovery.class);
 
+    /** 陈旧 PENDING 阈值（分钟）：挡住"刚创建还没入队"的 PENDING，不与正常提交流程抢（T4.50 卡面口径）。 */
+    static final long STALE_PENDING_MINUTES = 2;
+
     private final JdbcTemplate jdbc;
     private final StringRedisTemplate redis;
     private final String queueKey;
@@ -43,9 +49,13 @@ public class StartupRecovery implements ApplicationRunner {
     public void run(ApplicationArguments args) {
         List<Long> stuck;
         try {
-            stuck = jdbc.query(
-                    "UPDATE task SET status = 'PENDING', updated_at = now() WHERE status = 'RUNNING' RETURNING id",
+            // T4.52 R3：两步式（先 SELECT 后 UPDATE）代替 UPDATE..RETURNING——后者 PG 专用语法，
+            // 真库测试（StartupRecoveryDbTest，H2）跑不了、之前 mock 测试也覆盖不到；启动期单线程无并发，两步等价。
+            stuck = jdbc.query("SELECT id FROM task WHERE status = 'RUNNING'",
                     (rs, i) -> rs.getLong(1));
+            if (!stuck.isEmpty()) {
+                jdbc.update("UPDATE task SET status = 'PENDING', updated_at = now() WHERE status = 'RUNNING'");
+            }
         } catch (DataAccessException e) {
             // 尽力而为（同 T1.4 ensureBucket 的教训）：无 key 启动（D-035）+ H2 空库等场景没有表可查，
             // 回收跳过但不许拖垮应用上下文
@@ -53,14 +63,19 @@ public class StartupRecovery implements ApplicationRunner {
             return;
         }
         pushBack(stuck);
-        // T4.50：Redis 故障期间提交的 PENDING（行已提交、队列未投）超过 2 分钟 → 启动时重新入队。
+        // T4.50/T4.52：Redis 故障期间提交的 PENDING（行已提交、队列未投）超过 2 分钟 → 启动时重新入队。
+        // 阈值 cutoff 用 JVM 侧参数（不用 PG 专用 interval 语法）：compose 里 JVM 与 PG 同宿主同时钟、
+        // TZ 一致（D-067），窗口为分钟级粗粒度，换来的可移植性让生产 SQL 能被 H2 真库测试覆盖。
         // updated_at 同步刷新：投递成功的下次启动不再重投；投递失败的等下个周期（≥2 分钟）再兜底。
         int requeuedPending = 0;
         try {
+            Timestamp staleBefore = Timestamp.from(Instant.now().minus(Duration.ofMinutes(STALE_PENDING_MINUTES)));
             List<Long> stale = jdbc.query(
-                    "UPDATE task SET updated_at = now() WHERE status = 'PENDING'"
-                            + " AND updated_at < now() - interval '2 minutes' RETURNING id",
-                    (rs, i) -> rs.getLong(1));
+                    "SELECT id FROM task WHERE status = 'PENDING' AND updated_at < ?",
+                    (rs, i) -> rs.getLong(1), staleBefore);
+            for (Long id : stale) {
+                jdbc.update("UPDATE task SET updated_at = now() WHERE id = ?", id);
+            }
             pushBack(stale);
             requeuedPending = stale.size();
         } catch (DataAccessException e) {

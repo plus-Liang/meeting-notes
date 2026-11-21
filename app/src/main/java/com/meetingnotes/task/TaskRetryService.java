@@ -4,9 +4,6 @@ import com.meetingnotes.common.ApiException;
 import com.meetingnotes.common.UserContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.dao.DataAccessException;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
@@ -33,15 +30,11 @@ public class TaskRetryService {
     static final int MAX_IDS = 20;
 
     private final JdbcTemplate jdbc;
-    private final StringRedisTemplate redis;
-    private final String queueKey;
+    private final QueuePublisher queuePublisher;
 
-    public TaskRetryService(JdbcTemplate jdbc,
-                            StringRedisTemplate redis,
-                            @Value("${app.worker.queue-key}") String queueKey) {
+    public TaskRetryService(JdbcTemplate jdbc, QueuePublisher queuePublisher) {
         this.jdbc = jdbc;
-        this.redis = redis;
-        this.queueKey = queueKey;
+        this.queuePublisher = queuePublisher;
     }
 
     /** 逐条跳过原因（snake_case 响应：reason 只取固定值，不外泄内部细节）。 */
@@ -81,20 +74,20 @@ public class TaskRetryService {
                     WHERE id = ?
                     """, id);
             jdbc.update("DELETE FROM dead_letter WHERE task_id = ?", id);
-            enqueue(id);
+            try {
+                queuePublisher.publish(id);
+            } catch (ApiException e) {
+                // T4.52 B2：复活只完成一半（已 PENDING、死信已删、队列没投）——回滚成 DEAD 并补回死信，
+                // 保证客户端重发仍能命中「DEAD→复活」路径，再把 503 抛给调用方；绝不许 retried 为空却 200
+                jdbc.update("UPDATE task SET status = 'DEAD', error_code = 'QUEUE_UNAVAILABLE', updated_at = now() WHERE id = ?",
+                        id);
+                jdbc.update("INSERT INTO dead_letter (task_id, reason) VALUES (?, ?)",
+                        id, "批量重试入队失败（Redis 不可用），已回滚为 DEAD；队列恢复后重新发起批量重试即可");
+                throw e;
+            }
             retried.add(id);
             log.info("任务 {} 已批量重试复活（DEAD→PENDING）并重入队", id);
         }
         return new RetryOutcome(retried, skipped);
-    }
-
-    /** 投递 worker 队列；入队失败抛 503 QUEUE_UNAVAILABLE（T4.50：不得假成功，与 TaskService 同口径）。 */
-    private void enqueue(long taskId) {
-        try {
-            redis.opsForList().leftPush(queueKey, Long.toString(taskId));
-        } catch (DataAccessException e) {
-            log.error("任务 {} 重试入队失败（Redis 不可用），返回 503 QUEUE_UNAVAILABLE", taskId, e);
-            throw new ApiException(503, "QUEUE_UNAVAILABLE", "队列暂不可用，请稍后重试");
-        }
     }
 }

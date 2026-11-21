@@ -44,8 +44,8 @@ class StartupRecoveryTest {
     void recoversRunningAndRequeuesStalePending() {
         when(jdbc.query(contains("WHERE status = 'RUNNING'"), ArgumentMatchers.<RowMapper<Long>>any()))
                 .thenReturn(List.of(7L));
-        when(jdbc.query(contains("interval '2 minutes'"), ArgumentMatchers.<RowMapper<Long>>any()))
-                .thenReturn(List.of(9L));
+        when(jdbc.query(contains("status = 'PENDING'"), ArgumentMatchers.<RowMapper<Long>>any(),
+                ArgumentMatchers.any())).thenReturn(List.of(9L));
         when(redis.opsForList()).thenReturn(listOps);
 
         newRecovery().run(null);
@@ -67,8 +67,8 @@ class StartupRecoveryTest {
     void redisDownDuringRecoveryDoesNotCrash() {
         when(jdbc.query(contains("WHERE status = 'RUNNING'"), ArgumentMatchers.<RowMapper<Long>>any()))
                 .thenReturn(List.of(7L));
-        when(jdbc.query(contains("interval '2 minutes'"), ArgumentMatchers.<RowMapper<Long>>any()))
-                .thenReturn(List.of(9L));
+        when(jdbc.query(contains("status = 'PENDING'"), ArgumentMatchers.<RowMapper<Long>>any(),
+                ArgumentMatchers.any())).thenReturn(List.of(9L));
         when(redis.opsForList()).thenReturn(listOps);
         when(listOps.leftPush(anyString(), anyString()))
                 .thenThrow(new DataAccessResourceFailureException("redis down"));

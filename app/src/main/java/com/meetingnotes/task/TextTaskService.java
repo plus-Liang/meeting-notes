@@ -7,8 +7,6 @@ import com.meetingnotes.upload.SubtitleParser;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.dao.DataAccessException;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -46,25 +44,22 @@ public class TextTaskService {
     private final JdbcTemplate jdbc;
     private final S3Client s3;
     private final QuotaService quotaService;
-    private final StringRedisTemplate redis;
+    private final QueuePublisher queuePublisher;
     private final TransactionTemplate transactionTemplate;
     private final String bucket;
-    private final String queueKey;
 
     public TextTaskService(JdbcTemplate jdbc,
                            S3Client s3,
                            QuotaService quotaService,
-                           StringRedisTemplate redis,
+                           QueuePublisher queuePublisher,
                            TransactionTemplate transactionTemplate,
-                           @Value("${app.storage.bucket}") String bucket,
-                           @Value("${app.worker.queue-key}") String queueKey) {
+                           @Value("${app.storage.bucket}") String bucket) {
         this.jdbc = jdbc;
         this.s3 = s3;
         this.quotaService = quotaService;
-        this.redis = redis;
+        this.queuePublisher = queuePublisher;
         this.transactionTemplate = transactionTemplate;
         this.bucket = bucket;
-        this.queueKey = queueKey;
     }
 
     /** JSON 文本 PASTE 入口（controller 已保证非 null body）。 */
@@ -163,13 +158,18 @@ public class TextTaskService {
                         WHERE id = ?
                         """, existing.id());
                 jdbc.update("DELETE FROM dead_letter WHERE task_id = ?", existing.id());
-                enqueue(existing.id());
+                queuePublisher.publish(existing.id());
                 log.info("文本任务 {} 已 DEAD，重复提交触发复活重投（D-049）", existing.id());
                 return new TaskCreatedResponse(existing.id(), "PENDING", sha256, null, bytes.length, true);
             }
+            if ("PENDING".equals(existing.status())) {
+                // T4.52 B1 自愈：Redis 故障期间留下的 PENDING——重提即重新入队（与 TaskService 同口径）
+                queuePublisher.publish(existing.id());
+                log.info("文本任务 {} 重提命中 PENDING，重新入队（T4.52 自愈）", existing.id());
+            }
             return new TaskCreatedResponse(existing.id(), existing.status(), sha256, null, bytes.length, true);
         }
-        enqueue(taskId);
+        queuePublisher.publish(taskId);
         return new TaskCreatedResponse(taskId, "PENDING", sha256, null, bytes.length, false);
     }
 
@@ -183,16 +183,6 @@ public class TextTaskService {
             return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException("SHA-256 不可用", e);
-        }
-    }
-
-    /** 投递 worker 队列；入队失败抛 503 QUEUE_UNAVAILABLE（T4.50：不得假成功，与 TaskService 同口径）。 */
-    private void enqueue(long taskId) {
-        try {
-            redis.opsForList().leftPush(queueKey, Long.toString(taskId));
-        } catch (DataAccessException e) {
-            log.error("任务 {} 入队失败（Redis 不可用），返回 503 QUEUE_UNAVAILABLE", taskId, e);
-            throw new ApiException(503, "QUEUE_UNAVAILABLE", "队列暂不可用，请稍后重试");
         }
     }
 

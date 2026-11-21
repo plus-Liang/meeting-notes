@@ -9,8 +9,6 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.ArgumentMatchers;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.data.redis.core.ListOperations;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.ResultSetExtractor;
 import org.springframework.transaction.support.TransactionCallback;
@@ -38,6 +36,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -59,15 +58,13 @@ class TextTaskServiceTest {
     @Mock
     private QuotaService quotaService;
     @Mock
-    private StringRedisTemplate redis;
+    private QueuePublisher queuePublisher;
     @Mock
     private TransactionTemplate transactionTemplate;
-    @Mock
-    private ListOperations<String, String> listOps;
 
     private TextTaskService newService() {
-        return new TextTaskService(jdbc, s3, quotaService, redis, transactionTemplate,
-                "meetingnotes", "meetingnotes:task-queue");
+        return new TextTaskService(jdbc, s3, quotaService, queuePublisher, transactionTemplate,
+                "meetingnotes");
     }
 
     @SuppressWarnings("unchecked")
@@ -110,7 +107,6 @@ class TextTaskServiceTest {
     void pasteCreatesTaskConsumesZeroMinutesAndStoresTextObject() {
         txExecutesCallback();
         stubInsertInserts(9L);
-        when(redis.opsForList()).thenReturn(listOps);
 
         TaskCreatedResponse resp = newService().createPaste("  新的一段会议文本  ");
 
@@ -128,7 +124,37 @@ class TextTaskServiceTest {
         verify(s3).putObject(put.capture(), any(RequestBody.class));
         assertTrue(put.getValue().key().endsWith("/paste.txt"), "文本对象 key：" + put.getValue().key());
         verify(jdbc).update(contains("source_uri"), contains("s3://meetingnotes/tasks/9/paste.txt"), eq(9L));
-        verify(listOps).leftPush("meetingnotes:task-queue", "9");
+        verify(queuePublisher).publish(9L);
+    }
+
+    /** T4.52 B1：Redis 不可用时建文本任务必须 503（不得假成功 201）。 */
+    @Test
+    void pasteCreateFails503WhenQueueDown() {
+        txExecutesCallback();
+        stubInsertInserts(9L);
+        doThrow(new ApiException(503, "QUEUE_UNAVAILABLE", "队列暂不可用，请稍后重试"))
+                .when(queuePublisher).publish(9L);
+
+        ApiException e = assertThrows(ApiException.class, () -> newService().createPaste("一段会议文本"));
+
+        assertEquals(503, e.getStatus());
+        assertEquals("QUEUE_UNAVAILABLE", e.getCode());
+    }
+
+    /** T4.52 B1：幂等命中 PENDING 必须重新入队（重提即自愈），返回语义 reused=true/PENDING 不变。 */
+    @Test
+    void pasteIdempotentHitPendingRequeuesT452() {
+        txExecutesCallback();
+        stubConflict();
+        stubExisting(new TextTaskService.ExistingTask(9L, "PENDING"));
+
+        TaskCreatedResponse resp = newService().createPaste("重复的文本");
+
+        assertEquals(9L, resp.taskId());
+        assertEquals("PENDING", resp.status());
+        assertTrue(resp.reused());
+        verify(queuePublisher).publish(9L);
+        verify(quotaService, never()).consume(anyLong(), anyInt());
     }
 
     @Test
@@ -136,7 +162,6 @@ class TextTaskServiceTest {
         // 裁决 1：hash = sha256(最终文本 UTF-8)——trim 前后同文本必须同 hash（srt/ass/同文本不建重复任务）
         txExecutesCallback();
         stubInsertInserts(9L);
-        when(redis.opsForList()).thenReturn(listOps);
 
         TaskCreatedResponse first = newService().createPaste("稳定文本");
         TaskCreatedResponse second = newService().createPaste("  稳定文本  ");
@@ -159,7 +184,7 @@ class TextTaskServiceTest {
         assertEquals("DONE", resp.status());
         assertTrue(resp.reused());
         verify(quotaService, never()).consume(anyLong(), anyInt());
-        verify(listOps, never()).leftPush(anyString(), anyString());
+        verify(queuePublisher, never()).publish(anyLong());
     }
 
     @Test
@@ -168,7 +193,6 @@ class TextTaskServiceTest {
         txExecutesCallback();
         stubConflict();
         stubExisting(new TextTaskService.ExistingTask(6L, "DEAD"));
-        when(redis.opsForList()).thenReturn(listOps);
 
         TaskCreatedResponse resp = newService().createPaste("复活文本");
 
@@ -176,7 +200,7 @@ class TextTaskServiceTest {
         assertTrue(resp.reused());
         verify(jdbc).update(contains("status = 'PENDING'"), eq(6L));
         verify(jdbc).update(contains("DELETE FROM dead_letter"), eq(6L));
-        verify(listOps).leftPush("meetingnotes:task-queue", "6");
+        verify(queuePublisher).publish(6L);
     }
 
     @Test
@@ -219,7 +243,6 @@ class TextTaskServiceTest {
         // 裁决 1 推论：同内容存成 srt/ass 不该建两个任务 → hash 都基于解析后文本
         txExecutesCallback();
         stubInsertInserts(9L);
-        when(redis.opsForList()).thenReturn(listOps);
 
         byte[] srt = "1\n00:00:01,000 --> 00:00:02,000\n会议开始\n".getBytes(StandardCharsets.UTF_8);
         String ass = "[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
@@ -282,7 +305,6 @@ class TextTaskServiceTest {
     void pasteWritesTemplateRowInsideSubmitTransaction() {
         txExecutesCallback();
         stubInsertInserts(9L);
-        when(redis.opsForList()).thenReturn(listOps);
 
         TaskCreatedResponse resp = newService().createPaste("一段会议文本", "  COURSE ");
 
@@ -312,7 +334,6 @@ class TextTaskServiceTest {
         // 字幕不做自动推荐：文件名含"会议"关键字但不采纳；显式 MEETING → meeting
         txExecutesCallback();
         stubInsertInserts(12L);
-        when(redis.opsForList()).thenReturn(listOps);
         byte[] srt = "1\n00:00:01,000 --> 00:00:02,000\n会议开始\n".getBytes(StandardCharsets.UTF_8);
 
         TaskCreatedResponse resp = newService().createSubtitle(multipart("会议记录_2026.srt", srt), "MEETING");

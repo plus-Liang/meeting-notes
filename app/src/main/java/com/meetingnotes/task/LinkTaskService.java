@@ -10,8 +10,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.dao.DataAccessException;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -51,36 +49,33 @@ public class LinkTaskService {
     private final software.amazon.awssdk.services.s3.S3Client s3;
     private final AudioDurationProbe probe;
     private final QuotaService quotaService;
-    private final StringRedisTemplate redis;
+    private final QueuePublisher queuePublisher;
     private final TransactionTemplate transactionTemplate;
     private final MediaFetcher httpFetcher;
     private final MediaFetcher byofFetcher;
     private final long maxDurationSec;
     private final String bucket;
-    private final String queueKey;
 
     public LinkTaskService(JdbcTemplate jdbc,
                            software.amazon.awssdk.services.s3.S3Client s3,
                            AudioDurationProbe probe,
                            QuotaService quotaService,
-                           StringRedisTemplate redis,
+                           QueuePublisher queuePublisher,
                            TransactionTemplate transactionTemplate,
                            @Qualifier("httpMediaFetcher") MediaFetcher httpFetcher,
                            @Qualifier("processMediaFetcher") MediaFetcher byofFetcher,
                            @Value("${app.task.max-duration-sec}") long maxDurationSec,
-                           @Value("${app.storage.bucket}") String bucket,
-                           @Value("${app.worker.queue-key}") String queueKey) {
+                           @Value("${app.storage.bucket}") String bucket) {
         this.jdbc = jdbc;
         this.s3 = s3;
         this.probe = probe;
         this.quotaService = quotaService;
-        this.redis = redis;
+        this.queuePublisher = queuePublisher;
         this.transactionTemplate = transactionTemplate;
         this.httpFetcher = httpFetcher;
         this.byofFetcher = byofFetcher;
         this.maxDurationSec = maxDurationSec;
         this.bucket = bucket;
-        this.queueKey = queueKey;
     }
 
     /**
@@ -175,14 +170,20 @@ public class LinkTaskService {
                             WHERE id = ?
                             """, existing.id());
                     jdbc.update("DELETE FROM dead_letter WHERE task_id = ?", existing.id());
-                    enqueue(existing.id());
+                    queuePublisher.publish(existing.id());
                     log.info("链接任务 {} 已 DEAD，同链接重提触发复活重投（D-049）", existing.id());
                     return new TaskCreatedResponse(existing.id(), "PENDING", sha256, durationSec, size, true);
+                }
+                if ("PENDING".equals(existing.status())) {
+                    // T4.52 B1 自愈：Redis 故障期间留下的 PENDING——重提即重新入队（与 TaskService 同口径），
+                    // 否则 link/paste 入口"重提命中 PENDING 却永不入队"，三条自救全堵
+                    queuePublisher.publish(existing.id());
+                    log.info("链接任务 {} 重提命中 PENDING，重新入队（T4.52 自愈）", existing.id());
                 }
                 return new TaskCreatedResponse(existing.id(), existing.status(), sha256, durationSec, size, true);
             }
 
-            enqueue(taskId);
+            queuePublisher.publish(taskId);
             return new TaskCreatedResponse(taskId, "PENDING", sha256, durationSec, size, false);
         } catch (IOException e) {
             log.error("直链临时文件读写失败", e);
@@ -245,16 +246,6 @@ public class LinkTaskService {
             }
         }
         return HexFormat.of().formatHex(md.digest());
-    }
-
-    /** 投递 worker 队列；入队失败抛 503 QUEUE_UNAVAILABLE（T4.50：不得假成功，与 TaskService 同口径）。 */
-    private void enqueue(long taskId) {
-        try {
-            redis.opsForList().leftPush(queueKey, Long.toString(taskId));
-        } catch (DataAccessException e) {
-            log.error("任务 {} 入队失败（Redis 不可用），返回 503 QUEUE_UNAVAILABLE", taskId, e);
-            throw new ApiException(503, "QUEUE_UNAVAILABLE", "队列暂不可用，请稍后重试");
-        }
     }
 
     /** 幂等命中时返回的已有任务摘要：id + 库里真实状态。 */

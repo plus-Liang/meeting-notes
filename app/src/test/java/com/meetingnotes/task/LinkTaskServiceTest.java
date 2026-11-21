@@ -10,8 +10,6 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.ArgumentMatchers;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.data.redis.core.ListOperations;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.ResultSetExtractor;
 import org.springframework.transaction.support.TransactionCallback;
@@ -34,6 +32,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -60,19 +59,17 @@ class LinkTaskServiceTest {
     @Mock
     private QuotaService quotaService;
     @Mock
-    private StringRedisTemplate redis;
+    private QueuePublisher queuePublisher;
     @Mock
     private TransactionTemplate transactionTemplate;
     @Mock
     private MediaFetcher fetcher;
     @Mock
     private com.meetingnotes.fetch.ProcessMediaFetcher byofFetcher;
-    @Mock
-    private ListOperations<String, String> listOps;
 
     private LinkTaskService newService() {
-        return new LinkTaskService(jdbc, s3, probe, quotaService, redis, transactionTemplate, fetcher,
-                byofFetcher, 3600L, "meetingnotes", "meetingnotes:task-queue");
+        return new LinkTaskService(jdbc, s3, probe, quotaService, queuePublisher, transactionTemplate, fetcher,
+                byofFetcher, 3600L, "meetingnotes");
     }
 
     @SuppressWarnings("unchecked")
@@ -125,7 +122,6 @@ class LinkTaskServiceTest {
         txExecutesCallback();
         stubInsertInserts(9L);
         when(probe.durationSeconds(any(Path.class))).thenReturn(2.0);
-        when(redis.opsForList()).thenReturn(listOps);
 
         TaskCreatedResponse resp = newService().createLink("http://example.com/a/sample.wav", false);
 
@@ -144,7 +140,42 @@ class LinkTaskServiceTest {
         verify(s3).putObject(put.capture(), any(RequestBody.class));
         assertTrue(put.getValue().key().endsWith("/sample.wav"), "对象 key 取 URL 文件名：" + put.getValue().key());
         verify(jdbc).update(contains("source_uri"), contains("s3://meetingnotes/tasks/9/sample.wav"), eq(9L));
-        verify(listOps).leftPush("meetingnotes:task-queue", "9");
+        verify(queuePublisher).publish(9L);
+    }
+
+    /** T4.52 B1：Redis 不可用时建链接任务必须 503（不得假成功 201）。 */
+    @Test
+    void linkCreateFails503WhenQueueDown() throws Exception {
+        fetcherWrites(WAV);
+        txExecutesCallback();
+        stubInsertInserts(9L);
+        when(probe.durationSeconds(any(Path.class))).thenReturn(2.0);
+        doThrow(new ApiException(503, "QUEUE_UNAVAILABLE", "队列暂不可用，请稍后重试"))
+                .when(queuePublisher).publish(9L);
+
+        ApiException e = assertThrows(ApiException.class,
+                () -> newService().createLink("http://example.com/a/sample.wav", false));
+
+        assertEquals(503, e.getStatus());
+        assertEquals("QUEUE_UNAVAILABLE", e.getCode());
+    }
+
+    /** T4.52 B1：幂等命中 PENDING 必须重新入队（重提即自愈），返回语义 reused=true/PENDING 不变。 */
+    @Test
+    void linkIdempotentHitPendingRequeuesT452() throws Exception {
+        fetcherWrites(WAV);
+        txExecutesCallback();
+        stubConflict();
+        stubExisting(new LinkTaskService.ExistingTask(9L, "PENDING"));
+        when(probe.durationSeconds(any(Path.class))).thenReturn(2.0);
+
+        TaskCreatedResponse resp = newService().createLink("http://example.com/a/sample.wav", false);
+
+        assertEquals(9L, resp.taskId());
+        assertEquals("PENDING", resp.status());
+        assertTrue(resp.reused());
+        verify(queuePublisher).publish(9L);
+        verify(quotaService, never()).consume(anyLong(), anyInt());
     }
 
     @Test
@@ -204,7 +235,7 @@ class LinkTaskServiceTest {
         assertEquals("DONE", resp.status());
         assertTrue(resp.reused());
         verify(quotaService, never()).consume(anyLong(), anyInt());
-        verify(redis, never()).opsForList();
+        verify(queuePublisher, never()).publish(anyLong());
     }
 
     /** T4.32b：use_byof=true 且未配置 FETCHER_CMD → 400 FETCHER_UNAVAILABLE（新码，码表只增）。 */
@@ -231,7 +262,6 @@ class LinkTaskServiceTest {
         txExecutesCallback();
         stubInsertInserts(9L);
         when(probe.durationSeconds(any(Path.class))).thenReturn(2.0);
-        when(redis.opsForList()).thenReturn(listOps);
 
         TaskCreatedResponse resp = newService().createLink("http://example.com/some/page", true);
 

@@ -6,9 +6,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentMatchers;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.dao.DataAccessResourceFailureException;
-import org.springframework.data.redis.core.ListOperations;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.ResultSetExtractor;
 
@@ -19,9 +16,9 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -30,6 +27,7 @@ import static org.mockito.Mockito.when;
 /**
  * T4.1 批量重试：只处理 DEAD（复活 SQL 与 D-049 重传复活逐字同口径 + 清死信 + 重入队，不消费配额）；
  * 非 DEAD / 不存在逐条 skipped 不整体失败；非法 body 400 INVALID_PARAM；入参去重。
+ * T4.52 B2：入队失败必须 503 且该 id 回滚为 DEAD + 补回死信（不许假成功、也不许半复活卡死）。
  */
 @ExtendWith(MockitoExtension.class)
 class TaskRetryServiceTest {
@@ -37,12 +35,10 @@ class TaskRetryServiceTest {
     @Mock
     private JdbcTemplate jdbc;
     @Mock
-    private StringRedisTemplate redis;
-    @Mock
-    private ListOperations<String, String> listOps;
+    private QueuePublisher queuePublisher;
 
     private TaskRetryService newService() {
-        return new TaskRetryService(jdbc, redis, "meetingnotes:task-queue");
+        return new TaskRetryService(jdbc, queuePublisher);
     }
 
     private void stubStatus(long id, String status) {
@@ -66,7 +62,6 @@ class TaskRetryServiceTest {
         stubStatus(7L, "DEAD");
         stubStatus(8L, "DONE");
         stubStatus(9L, null);
-        when(redis.opsForList()).thenReturn(listOps);
 
         TaskRetryService.RetryOutcome outcome = newService().retry(List.of(7L, 8L, 9L));
 
@@ -78,15 +73,14 @@ class TaskRetryServiceTest {
         assertEquals("NOT_FOUND", outcome.skipped().get(1).reason());
         verify(jdbc).update(contains("attempts = 0, status = 'PENDING', error_code = NULL"), eq(7L));
         verify(jdbc).update(contains("DELETE FROM dead_letter"), eq(7L));
-        verify(listOps).leftPush("meetingnotes:task-queue", "7");
+        verify(queuePublisher).publish(7L);
         verify(jdbc, never()).update(contains("attempts = 0, status = 'PENDING'"), eq(8L));
-        verify(listOps, never()).leftPush("meetingnotes:task-queue", "8");
+        verify(queuePublisher, never()).publish(8L);
     }
 
     @Test
     void duplicateIdsAreDeduplicated() {
         stubStatus(7L, "DEAD");
-        when(redis.opsForList()).thenReturn(listOps);
 
         TaskRetryService.RetryOutcome outcome = newService().retry(List.of(7L, 7L));
 
@@ -110,17 +104,18 @@ class TaskRetryServiceTest {
         verify(jdbc, never()).update(ArgumentMatchers.anyString(), ArgumentMatchers.anyLong());
     }
 
-    /** T4.50：入队失败（Redis 不可用）必须 503 QUEUE_UNAVAILABLE，不得假成功。 */
+    /** T4.52 B2：入队失败必须 503，且该 id 回滚为 DEAD + 补回死信（不许假成功、也不许半复活卡死）。 */
     @Test
-    void enqueueFailureThrows503QueueUnavailableT450() {
+    void enqueueFailureRollsBackToDeadAndThrows503T452() {
         stubStatus(7L, "DEAD");
-        when(redis.opsForList()).thenReturn(listOps);
-        when(listOps.leftPush(anyString(), anyString()))
-                .thenThrow(new DataAccessResourceFailureException("redis down"));
+        doThrow(new ApiException(503, "QUEUE_UNAVAILABLE", "队列暂不可用，请稍后重试"))
+                .when(queuePublisher).publish(7L);
 
         ApiException ex = assertThrows(ApiException.class, () -> newService().retry(List.of(7L)));
 
-        assertEquals(503, ex.getStatus(), "入队失败必须 503，不得假成功（T4.50）");
+        assertEquals(503, ex.getStatus(), "入队失败必须 503，不得假成功（T4.52）");
         assertEquals("QUEUE_UNAVAILABLE", ex.getCode());
+        verify(jdbc).update(contains("status = 'DEAD', error_code = 'QUEUE_UNAVAILABLE'"), eq(7L));
+        verify(jdbc).update(contains("INSERT INTO dead_letter"), eq(7L), contains("Redis 不可用"));
     }
 }

@@ -22,10 +22,9 @@ import java.util.concurrent.TimeUnit;
  * 转写 worker（T1.5 / plan §7 步骤 6–8）。队列消费用 Redis BLPOP（阻塞取，不轮询空转）；单线程顺序处理。
  * 状态机：PENDING/RETRYING → RUNNING → DONE；失败：重试未耗尽 → RETRYING 重新入队（队尾，FIFO 不插队），
  * 耗尽 → DEAD + dead_letter；兜底 catch 保证任务不永久卡 RUNNING（崩溃恢复属 T2.3）。
- * <p>管线：MinIO 拉文件 → ffmpeg 抽 16k 单声道 wav（D-010）→ {@link com.meetingnotes.asr.AsrClient}
- * 转写（T4.35a：一次调用同时拿 text + segments 句子级时间戳；容器内 http://asr:8000，D-034）→
- * 写 transcript + segments → 结构化（T3.3：摘要+关键词+待办+要点一次调用、三档级联降级）
- * → AI 加标点（T4.18，结构化成功后追加一次独立调用，失败留 null 不影响 DONE）→ 最后置 DONE（D-069）。
+ * <p>管线：MinIO 拉文件 → ffmpeg 抽 16k 单声道 wav（D-010）→ AsrClient 一次调用拿 text + segments（T4.35a，
+ * 容器内 http://asr:8000，D-034）→ 写 transcript+segments → 结构化（T3.3：摘要+关键词+待办+要点一次调用、
+ * 三档级联降级）→ AI 加标点（T4.18，失败留 null 不影响 DONE）→ 最后置 DONE（D-069）。
  */
 @Component
 public class TranscriptionWorker implements SmartLifecycle {
@@ -41,6 +40,7 @@ public class TranscriptionWorker implements SmartLifecycle {
     private final com.meetingnotes.webhook.WebhookDeliveryService webhookService;
     private final PasteTextReader pasteTextReader;
     private final MonoWavExtractor monoWavExtractor;
+    private final com.meetingnotes.task.QueuePublisher queuePublisher;
     private final String queueKey;
     private final Duration pollTimeout;
     private final String bucket;
@@ -58,6 +58,7 @@ public class TranscriptionWorker implements SmartLifecycle {
                                com.meetingnotes.webhook.WebhookDeliveryService webhookService,
                                PasteTextReader pasteTextReader,
                                MonoWavExtractor monoWavExtractor,
+                               com.meetingnotes.task.QueuePublisher queuePublisher,
                                @Value("${app.worker.queue-key}") String queueKey,
                                @Value("${app.worker.poll-timeout-sec}") long pollTimeoutSec,
                                @Value("${app.storage.bucket}") String bucket,
@@ -71,6 +72,7 @@ public class TranscriptionWorker implements SmartLifecycle {
         this.webhookService = webhookService;
         this.pasteTextReader = pasteTextReader;
         this.monoWavExtractor = monoWavExtractor;
+        this.queuePublisher = queuePublisher;
         this.queueKey = queueKey;
         this.pollTimeout = Duration.ofSeconds(pollTimeoutSec);
         this.bucket = bucket;
@@ -89,9 +91,7 @@ public class TranscriptionWorker implements SmartLifecycle {
     @Override
     public void stop() {
         running = false;
-        if (workerThread != null) {
-            workerThread.interrupt();
-        }
+        if (workerThread != null) { workerThread.interrupt(); }
     }
 
     @Override
@@ -105,9 +105,7 @@ public class TranscriptionWorker implements SmartLifecycle {
             try {
                 taskId = redis.opsForList().leftPop(queueKey, pollTimeout);
             } catch (RuntimeException e) {
-                if (!running) {
-                    break;
-                }
+                if (!running) { break; }
                 log.warn("Redis 不可用，{}s 后重试：{}", pollTimeout.getSeconds(), e.getMessage());
                 sleepQuietly();
                 continue;
@@ -197,12 +195,8 @@ public class TranscriptionWorker implements SmartLifecycle {
             // 4) 收口（finalizeResult）：写 transcript + segments → 摘要/待办（AI 失败只 WARN 留空，T3.3 接管）→ 最后置 DONE；空文本照常（D-048）
             finalizeResult(taskId, text, segments);
         } finally {
-            if (dir != null) {
-                deleteRecursively(dir);
-            }
-            if (wav != null) {
-                Files.deleteIfExists(wav);
-            }
+            if (dir != null) { deleteRecursively(dir); }
+            if (wav != null) { Files.deleteIfExists(wav); }
         }
     }
 
@@ -246,8 +240,8 @@ public class TranscriptionWorker implements SmartLifecycle {
     }
 
     /**
-     * 失败兜底：不永久卡 RUNNING。重试未耗尽 → RETRYING + 重新入队；耗尽 → DEAD + dead_letter。
-     * error_code 只存稳定错误码（列宽 64），完整原因写 dead_letter.reason（TEXT）。
+     * 失败兜底：不永久卡 RUNNING。重试未耗尽 → RETRYING + 重新入队；重投失败 → 退回 PENDING（T4.52 S6：
+     * RETRYING 无任何机制回收）；耗尽 → DEAD + dead_letter。error_code 只存稳定码（列宽 64），原因写 dead_letter。
      */
     private void markFailure(long taskId, Exception cause) {
         String code = cause instanceof ProcessingException pe ? pe.code : "UNKNOWN_ERROR";
@@ -265,8 +259,13 @@ public class TranscriptionWorker implements SmartLifecycle {
             } else {
                 jdbc.update("UPDATE task SET status = 'RETRYING', error_code = ?, updated_at = now() WHERE id = ?",
                         code, taskId);
-                redis.opsForList().rightPush(queueKey, Long.toString(taskId));
-                log.warn("任务 {} 失败（{}/{} 次，{}），已置 RETRYING 并重新入队：{}", taskId, attempts, maxRetries, code, reason);
+                if (queuePublisher.tryPublish(taskId)) {
+                    log.warn("任务 {} 失败（{}/{} 次，{}），已置 RETRYING 并重新入队：{}", taskId, attempts, maxRetries, code, reason);
+                } else {
+                    // T4.52 S6：重投失败不能停在 RETRYING（无人回收）——退回 PENDING，由启动恢复/幂等重提自愈兜底
+                    jdbc.update("UPDATE task SET status = 'PENDING', updated_at = now() WHERE id = ?", taskId);
+                    log.error("任务 {} 失败（{}/{} 次，{}）后重投失败（Redis 不可用），已退回 PENDING", taskId, attempts, maxRetries, code);
+                }
             }
         } catch (RuntimeException e) {
             log.error("任务 {} 写回失败状态时出错（可能卡在 RUNNING，待 T2.3 恢复）", taskId, e);
