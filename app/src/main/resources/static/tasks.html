@@ -50,13 +50,14 @@
     <div class="filter-bar" id="filterBar"></div>
     <div class="active-chips" id="activeChips"></div> <!-- T4.42：已选条件胶囊（可单个移除）+ 清除筛选 -->
     <div class="retry-bar" id="retryBar" style="display:none;">
-      <label><input type="checkbox" id="checkAll"> 全选</label>
+      <label><input type="checkbox" id="checkAll"> 全选当前筛选</label> <!-- T4.53 缺陷3：全选=当前筛选内全部 -->
       <span class="batch-actions">
         <button id="batchRetryBtn" class="btn-secondary">批量重试</button>
         <button id="exportBtn" class="btn-secondary">导出选中 Markdown</button>
         <button id="deleteBtn" class="btn-danger">删除所选</button>
         <button id="deleteFailedBtn" class="btn-danger">清空失败任务</button>
       </span>
+      <span id="selHint" class="hint"></span>
       <span id="retryResult" class="hint"></span>
     </div>
     <p class="result-count" id="resultCount" style="display:none;"></p> <!-- T4.42：共 N 条 · 已加载 M 条 -->
@@ -95,7 +96,15 @@
   var timer = null;
   var lastRenderKey = null;
   var state = { filter: '', cursor: null, items: [], checked: {}, checkedCount: 0, search: '',
-    filterFavorite: false, filterLabels: [], range: '', total: null }; /* T4.42：标签多选/时间范围/total */
+    filterFavorite: false, filterLabels: [], range: '', total: null,
+    selectAll: false }; /* T4.42：标签多选/时间范围/total；T4.53 缺陷3：全选=当前筛选内全部 */
+
+  /* 清空选择（含全选态）：筛选变化 / 动作完成后的统一入口（T4.53 缺陷3 引入 selectAll） */
+  function clearSelection() {
+    state.checked = {};
+    state.checkedCount = 0;
+    state.selectAll = false;
+  }
   /* T4.24：状态计数改调 GET /tasks/counts（服务端真计数无上限；页面可见时 30s 刷新保留） */
   var countState = { total: null, active: 0, done: 0, dead: 0 };
 
@@ -476,7 +485,7 @@
     state.filter = ''; state.range = ''; state.filterLabels = [];
     state.filterFavorite = false; state.search = '';
     searchInput.value = '';
-    state.checked = {}; state.checkedCount = 0;
+    clearSelection();
     retryResult.textContent = '';
     applyFilters();
   }
@@ -495,15 +504,20 @@
     var key = renderKey();
     if (!force && key === lastRenderKey) { scheduleRefresh(); return; }
     lastRenderKey = key;
-    /* 操作条：DEAD 筛选（重试场景）或存在失败任务（清空场景）或有勾选（导出/删除场景）时出现 */
+    /* 操作条：DEAD 筛选（重试场景）或存在失败任务（清空场景）或有勾选/全选（导出/删除场景）时出现 */
     retryBar.style.display = state.items.length &&
-      (state.filter === 'DEAD' || count > 0 || countState.dead > 0) ? 'flex' : 'none';
+      (state.filter === 'DEAD' || count > 0 || countState.dead > 0 || state.selectAll) ? 'flex' : 'none';
     retryBtn.style.display = state.filter === 'DEAD' ? '' : 'none'; /* 重试只对 DEAD 开放（语义不变） */
     deleteFailedBtn.style.display = countState.dead > 0 ? '' : 'none'; /* T4.21：无失败任务时隐藏 */
-    checkAllEl.checked = count > 0 && count === state.items.length;
-    retryBtn.disabled = count === 0;
-    exportBtn.disabled = count === 0;
-    deleteBtn.disabled = count === 0;
+    /* T4.53 缺陷3：全选=当前筛选内全部——total 拿不到就禁用全选（不猜）；勾态 = 全选态 或 已加载全勾 */
+    checkAllEl.disabled = state.total === null;
+    checkAllEl.checked = state.selectAll || (count > 0 && count === state.items.length);
+    retryBtn.disabled = count === 0 && !state.selectAll;
+    exportBtn.disabled = count === 0 && !state.selectAll;
+    deleteBtn.disabled = count === 0 && !state.selectAll;
+    /* T4.53 缺陷3：全选态在操作条明示数量（N = state.total） */
+    document.getElementById('selHint').textContent =
+      (state.selectAll && state.total !== null) ? '已选全部 ' + state.total + ' 条（筛选内）' : '';
     /* T4.42：计数行「共 N 条 · 已加载 M 条」（N = 当前筛选组合 total；未拿到不显示） */
     var rc = document.getElementById('resultCount');
     if (state.total !== null) {
@@ -525,7 +539,7 @@
       box.addEventListener('change', function () {
         var id = box.getAttribute('data-id');
         if (box.checked) { state.checked[id] = true; state.checkedCount++; }
-        else { delete state.checked[id]; state.checkedCount--; }
+        else { delete state.checked[id]; state.checkedCount--; state.selectAll = false; /* T4.53 缺陷3：取消任一行=退出全选态 */ }
         render(true); /* 勾选影响操作条状态，强制重绘 */
       });
     });
@@ -587,23 +601,48 @@
   }
 
   function doBatchRetry() {
-    var ids = Object.keys(state.checked).map(Number).sort(function (a, b) { return a - b; });
-    if (!ids.length) return;
-    retryBtn.disabled = true;
-    retryResult.textContent = '重试中…';
-    postJson('api/v1/tasks/retry', { ids: ids }).then(function (data) {
-      retryBtn.disabled = false;
-      if (data.__httpStatus === 200) {
-        var skipped = (data.skipped || []).map(function (s) {
-          return '#' + s.id + ' ' + (s.reason === 'NOT_DEAD' ? '非失败状态' : '不存在');
-        }).join('、');
-        retryResult.textContent = '已重试 ' + (data.retried || []).length + ' 个' +
-          ((data.skipped || []).length ? '；跳过：' + skipped : '');
-        state.checked = {}; state.checkedCount = 0;
-        setTimeout(function () { loadFirst(false); }, 800);
-      } else {
-        retryResult.textContent = '失败（' + (data.message || ('HTTP ' + data.__httpStatus)) + '）';
+    if (batchBusy) return;
+    setBatchBusy(true);
+    retryResult.textContent = '准备中…';
+    resolveSelectedIds().then(function (ids) {
+      if (!ids.length) { setBatchBusy(false); retryResult.textContent = ''; return; }
+      /* 服务端 RetryRequest 限 1..20 个 id：按筛选全集分块 20/批（T4.53 缺陷3） */
+      var batches = [];
+      for (var i = 0; i < ids.length; i += 20) {
+        batches.push(ids.slice(i, i + 20));
       }
+      retryResult.textContent = '重试中… 0/' + ids.length;
+      var retriedAll = [], skippedAll = [], done = 0;
+      function next() {
+        if (done >= batches.length) {
+          var skipped = skippedAll.map(function (s) {
+            return '#' + s.id + ' ' + (s.reason === 'NOT_DEAD' ? '非失败状态' : '不存在');
+          }).join('、');
+          retryResult.textContent = '已重试 ' + retriedAll.length + ' 个' +
+            (skippedAll.length ? '；跳过：' + skipped : '');
+          resetSelection();
+          setTimeout(function () { loadFirst(false); }, 800);
+          return;
+        }
+        postJson('api/v1/tasks/retry', { ids: batches[done] }).then(function (data) {
+          done++;
+          if (data.__httpStatus === 200) {
+            retriedAll = retriedAll.concat(data.retried || []);
+            skippedAll = skippedAll.concat(data.skipped || []);
+            retryResult.textContent = '重试中… ' + Math.min(done * 20, ids.length) + '/' + ids.length;
+            next();
+          } else {
+            /* 任一请求失败立即中止，不静默吞掉剩余块 */
+            setBatchBusy(false);
+            retryResult.textContent = '失败（' + (data.message || ('HTTP ' + data.__httpStatus)) +
+              '）· 已中止，剩余任务未重试。';
+          }
+        });
+      }
+      next();
+    }, function (err) {
+      setBatchBusy(false);
+      retryResult.textContent = '收集失败（' + (err && err.message ? err.message : '未知错误') + '），已中止。';
     });
   }
 
@@ -707,7 +746,7 @@
     }
     if (btn.id === 'favoriteFilterBtn') { /* T4.29：收藏开关（独立于状态筛选） */
       state.filterFavorite = !state.filterFavorite;
-      state.checked = {}; state.checkedCount = 0;
+      clearSelection();
       retryResult.textContent = '';
       applyFilters();
       return;
@@ -715,13 +754,13 @@
     var range = btn.getAttribute('data-range');
     if (range !== null) {
       state.range = range;
-      state.checked = {}; state.checkedCount = 0;
+      clearSelection();
       retryResult.textContent = '';
       applyFilters();
       return;
     }
     state.filter = btn.getAttribute('data-status');
-    state.checked = {}; state.checkedCount = 0;
+    clearSelection();
     retryResult.textContent = '';
     applyFilters();
   });
@@ -733,7 +772,7 @@
     var i = state.filterLabels.indexOf(v);
     if (e.target.checked && i < 0) state.filterLabels.push(v);
     if (!e.target.checked && i >= 0) state.filterLabels.splice(i, 1);
-    state.checked = {}; state.checkedCount = 0;
+    clearSelection();
     var btn = document.getElementById('labelMultiBtn');
     if (btn) {
       var picked = state.filterLabels.length;
@@ -767,7 +806,7 @@
         if (i >= 0) state.filterLabels.splice(i, 1);
       } else if (kind === 'favorite') state.filterFavorite = false;
       else if (kind === 'q') { state.search = ''; searchInput.value = ''; }
-      state.checked = {}; state.checkedCount = 0;
+      clearSelection();
       retryResult.textContent = '';
       applyFilters();
       return;
@@ -775,70 +814,195 @@
     if (e.target.closest('.js-clear-filters')) clearAllFilters();
   });
   checkAllEl.addEventListener('change', function () {
-    state.checked = {}; state.checkedCount = 0;
-    if (checkAllEl.checked) {
-      state.items.forEach(function (item) { state.checked[item.id] = true; });
-      state.checkedCount = state.items.length;
-    }
+    clearSelection();
+    /* T4.53 缺陷3：全选=当前筛选内全部（不再只勾已加载行）——实际 id 集合在动作触发时由
+       resolveSelectedIds() 按当前筛选翻页收集；total 为 null 时 render() 已禁用本框 */
+    state.selectAll = checkAllEl.checked;
     render(true);
   });
   retryBtn.addEventListener('click', doBatchRetry);
   moreBtn.addEventListener('click', loadMore);
 
-  /* ===== T4.21（D-115）：删除所选（≤100/批分批调 POST /tasks/delete）+ 清空失败任务 =====
-     二次确认文案固定含"不可恢复/配额不退还"；成功后就地刷新（保留当前筛选/搜索） */
+  /* ===== T4.21（D-115）+ T4.53：删除所选（≤100/批分批调 POST /tasks/delete）+ 清空失败任务 =====
+     二次确认改站内弹窗（缺陷1）；成功后不再报成功条数文案（缺陷2）；全选=当前筛选内全部（缺陷3）。
+     批量动作共用 resolveSelectedIds()：selectAll 时按当前筛选翻页收集全部 id，任一页失败立即中止。 */
   var DELETE_CONFIRM_NOTE = '删除后不可恢复，已用配额不退还。';
+  var batchBusy = false; /* T4.53：收集/删除期间防重入 */
+
+  function setBatchBusy(on) {
+    batchBusy = on;
+    retryBtn.disabled = on;
+    exportBtn.disabled = on;
+    deleteBtn.disabled = on;
+    deleteFailedBtn.disabled = on;
+    checkAllEl.disabled = on || state.total === null;
+  }
+
+  function resetSelection() {
+    clearSelection();
+    document.getElementById('selHint').textContent = '';
+  }
+
+  /* 站内确认弹窗（替代浏览器原生 confirm）：Promise<boolean>；焦点落「取消」（破坏性操作回车不误删）、
+     Esc/点遮罩=取消、关闭后焦点回触发按钮；同时只允许一个（后来者顶掉旧弹窗）。 */
+  var dlgEl = null, dlgPrevFocus = null;
+  function confirmDialog(opts) {
+    return new Promise(function (resolve) {
+      if (dlgEl) { dlgEl.remove(); dlgEl = null; }
+      dlgPrevFocus = document.activeElement;
+      var mask = document.createElement('div');
+      mask.className = 'dlg-mask';
+      mask.innerHTML =
+        '<div class="dlg-panel" role="dialog" aria-modal="true" aria-labelledby="dlgTitle" aria-describedby="dlgDesc">' +
+        '<h2 id="dlgTitle" class="dlg-title">' + escapeHtml(opts.title) + '</h2>' +
+        '<p id="dlgDesc" class="dlg-desc">' + escapeHtml(opts.desc) + '</p>' +
+        '<div class="dlg-actions"><button type="button" id="dlgCancel" class="btn-secondary">取消</button>' +
+        '<button type="button" id="dlgOk" class="btn-danger">' + escapeHtml(opts.okText || '确定') + '</button></div>' +
+        '</div>';
+      document.body.appendChild(mask);
+      dlgEl = mask;
+      function done(val) {
+        document.removeEventListener('keydown', onKey, true);
+        mask.remove();
+        dlgEl = null;
+        if (dlgPrevFocus && dlgPrevFocus.focus) { dlgPrevFocus.focus(); }
+        resolve(val);
+      }
+      function onKey(e) {
+        if (e.key === 'Escape') { e.stopPropagation(); done(false); }
+      }
+      mask.querySelector('#dlgCancel').addEventListener('click', function () { done(false); });
+      mask.querySelector('#dlgOk').addEventListener('click', function () { done(true); });
+      mask.addEventListener('click', function (e) { if (e.target === mask) { done(false); } });
+      document.addEventListener('keydown', onKey, true);
+      mask.querySelector('#dlgCancel').focus();
+    });
+  }
+
+  /* 收集将要操作的 id 集合（T4.53 缺陷3）：手动勾选 → 直接返回；
+     全选 → 按当前筛选参数（与 filterParams 同源）以 limit=50 + before_id 游标翻页收集全部，
+     ACTIVE 按三状态分别翻页去重；任一页失败立即 reject（绝不带着缺 id 的集合继续删）。
+     服务端 MAX_LIMIT=50：写 500 也会被 clamp，不假设页大小（负向对照 D① 已验证）。 */
+  function resolveSelectedIds() {
+    if (!state.selectAll) {
+      return Promise.resolve(Object.keys(state.checked).map(Number).sort(function (a, b) { return a - b; }));
+    }
+    var q = state.search ? '&q=' + encodeURIComponent(state.search) : '';
+    var meta = filterParams();
+    function collect(status) {
+      var ids = [], seen = {}, cursor = null;
+      function step() {
+        var url = 'api/v1/tasks?limit=50' +
+          (status ? '&status=' + status : '') + q + meta +
+          (cursor ? '&before_id=' + cursor : '');
+        return getJson(url).then(function (data) {
+          if (data.__httpStatus !== 200) {
+            throw new Error(data.message || ('HTTP ' + data.__httpStatus));
+          }
+          (data.items || []).forEach(function (item) {
+            if (!seen[item.id]) { seen[item.id] = true; ids.push(item.id); }
+          });
+          retryResult.textContent = '准备中… 已收集 ' + ids.length + '/' +
+            (typeof data.total === 'number' ? data.total : '?') + ' 条';
+          cursor = data.next_before_id || null;
+          if (cursor) { return step(); }
+        });
+      }
+      return step().then(function () { return ids; });
+    }
+    if (state.filter === 'ACTIVE') {
+      return Promise.all(['PENDING', 'RUNNING', 'RETRYING'].map(function (s) { return collect(s); }))
+        .then(function (parts) {
+          var seen = {}, ids = [];
+          parts.forEach(function (part) {
+            part.forEach(function (id) { if (!seen[id]) { seen[id] = true; ids.push(id); } });
+          });
+          ids.sort(function (a, b) { return a - b; });
+          return ids;
+        });
+    }
+    return collect(state.filter || null);
+  }
 
   function deleteSelected() {
-    var ids = Object.keys(state.checked).map(Number).sort(function (a, b) { return a - b; });
-    if (!ids.length) return;
-    if (!window.confirm('删除所选 ' + ids.length + ' 个任务？' + DELETE_CONFIRM_NOTE)) return;
-    deleteBtn.disabled = true;
-    var all = [], done = 0, batches = [];
-    for (var i = 0; i < ids.length; i += 100) {
-      batches.push(ids.slice(i, i + 100));
-    }
-    retryResult.textContent = '删除中… 0/' + ids.length;
-    function next() {
-      if (done >= batches.length) {
-        var ok = all.filter(function (r) { return r.deleted; }).length;
-        var skipped = all.filter(function (r) { return !r.deleted; }).map(function (r) {
-          return '#' + r.id + ' ' + (r.reason === 'TASK_BUSY' ? '进行中' : '不存在');
-        }).join('、');
-        retryResult.textContent = '已删除 ' + ok + ' 个' +
-          (skipped ? '；跳过：' + skipped : '') + '。';
-        state.checked = {}; state.checkedCount = 0;
-        lastRenderKey = null;
-        loadFirst(false); /* 就地刷新：保留当前筛选/搜索 */
+    if (batchBusy) return;
+    setBatchBusy(true);
+    retryResult.textContent = '准备中…';
+    resolveSelectedIds().then(function (ids) {
+      if (!ids.length) { setBatchBusy(false); retryResult.textContent = ''; return; }
+      /* 收集数与筛选 total 对不上 = 有页没拉全：宁可中止也不删（负向对照 D② 口径） */
+      if (state.selectAll && state.total !== null && ids.length !== state.total) {
+        setBatchBusy(false);
+        retryResult.textContent = '收集到 ' + ids.length + ' 条与筛选总数 ' + state.total +
+          ' 不一致，已中止删除（请刷新后重试）。';
         return;
       }
-      postJson('api/v1/tasks/delete', { ids: batches[done] }).then(function (data) {
-        done++;
-        if (data.__httpStatus === 200 && data.results) {
-          all = all.concat(data.results);
-          retryResult.textContent = '删除中… ' + done + '/' + batches.length + ' 批';
-        } else {
-          retryResult.textContent = '删除失败（' + (data.message || ('HTTP ' + data.__httpStatus)) + '）';
+      confirmDialog({
+        title: '删除确认',
+        desc: '删除所选 ' + ids.length + ' 个任务？' + DELETE_CONFIRM_NOTE,
+        okText: '删除'
+      }).then(function (yes) {
+        if (!yes) { setBatchBusy(false); render(true); return; }
+        var all = [], done = 0, batches = [];
+        for (var i = 0; i < ids.length; i += 100) {
+          batches.push(ids.slice(i, i + 100));
+        }
+        retryResult.textContent = '删除中… 0/' + ids.length;
+        function next() {
+          if (done >= batches.length) {
+            var skipped = all.filter(function (r) { return !r.deleted; }).map(function (r) {
+              return '#' + r.id + ' ' + (r.reason === 'TASK_BUSY' ? '进行中' : '不存在');
+            }).join('、');
+            /* T4.53 缺陷2：不再出现成功条数文案；全部成功清空提示；确有跳过时才说明 */
+            retryResult.textContent = skipped ? '部分未删除：' + skipped : '';
+            resetSelection();
+            lastRenderKey = null;
+            loadFirst(false); /* 就地刷新：保留当前筛选/搜索 */
+            return;
+          }
+          postJson('api/v1/tasks/delete', { ids: batches[done] }).then(function (data) {
+            done++;
+            if (data.__httpStatus === 200 && data.results) {
+              all = all.concat(data.results);
+              retryResult.textContent = '删除中… ' + Math.min(done * 100, ids.length) + '/' + ids.length;
+              next();
+            } else {
+              /* 任一批失败立即中止：已删部分如实保留，不带着缺 id 的清单继续删 */
+              setBatchBusy(false);
+              retryResult.textContent = '删除失败（' + (data.message || ('HTTP ' + data.__httpStatus)) +
+                '）· 已中止，剩余任务未删除。';
+            }
+          });
         }
         next();
       });
-    }
-    next();
+    }, function (err) {
+      setBatchBusy(false);
+      retryResult.textContent = '收集失败（' + (err && err.message ? err.message : '未知错误') + '），已中止删除。';
+    });
   }
 
   function deleteFailedAll() {
-    if (!window.confirm('清空全部失败（DEAD）任务？' + DELETE_CONFIRM_NOTE)) return;
-    deleteFailedBtn.disabled = true;
-    postJson('api/v1/tasks/delete-failed', {}).then(function (data) {
-      deleteFailedBtn.disabled = false;
-      if (data.__httpStatus === 200) {
-        retryResult.textContent = '已清空失败任务 ' + (data.deleted || 0) + ' 个。';
-        state.checked = {}; state.checkedCount = 0;
-        lastRenderKey = null;
-        loadFirst(false);
-      } else {
-        retryResult.textContent = '清空失败（' + (data.message || ('HTTP ' + data.__httpStatus)) + '）';
-      }
+    if (batchBusy) return;
+    /* 清空失败任务作用于服务端全部 DEAD（/tasks/delete-failed 无 ids 参数），与全选态无关 */
+    confirmDialog({
+      title: '清空确认',
+      desc: '清空全部失败（DEAD）任务？' + DELETE_CONFIRM_NOTE,
+      okText: '清空'
+    }).then(function (yes) {
+      if (!yes) return;
+      setBatchBusy(true);
+      postJson('api/v1/tasks/delete-failed', {}).then(function (data) {
+        setBatchBusy(false);
+        if (data.__httpStatus === 200) {
+          /* T4.53 缺陷2：不再出现成功条数文案 */
+          resetSelection();
+          lastRenderKey = null;
+          loadFirst(false);
+        } else {
+          retryResult.textContent = '清空失败（' + (data.message || ('HTTP ' + data.__httpStatus)) + '）';
+        }
+      });
     });
   }
   deleteBtn.addEventListener('click', deleteSelected);
@@ -856,24 +1020,29 @@
     }, 300);
   });
 
-  /* ===== T4.27：多选批量导出 zip——一次请求下载 1 个 zip（后端流式打包，条内容与单条导出一致）；
-     >20 提示分批；失败就地提示 ===== */
+  /* ===== T4.27 + T4.53：多选批量导出 zip——后端 MAX_ZIP_IDS=20（TaskZipExportController，本卡不改 Java）：
+     超限中止并提示（含卡面文案「筛选结果过多，请缩小范围后再导出」），不许静默截断 ===== */
   exportBtn.addEventListener('click', function () {
-    var ids = Object.keys(state.checked).map(Number).sort(function (a, b) { return a - b; });
-    if (!ids.length) return;
-    if (ids.length > 20) {
-      retryResult.textContent = '一次最多导出 20 个任务（当前选了 ' + ids.length + ' 个），请分批勾选导出。';
-      return;
-    }
+    if (batchBusy) return;
+    setBatchBusy(true);
+    retryResult.textContent = '准备中…';
+    resolveSelectedIds().then(function (ids) {
+      if (!ids.length) { setBatchBusy(false); retryResult.textContent = ''; return; }
+      if (ids.length > 20) {
+        setBatchBusy(false);
+        retryResult.textContent = '筛选结果过多，请缩小范围后再导出（导出一次最多 20 个，当前选中 ' +
+          ids.length + ' 个）。';
+        return;
+      }
     exportBtn.disabled = true;
     retryResult.textContent = '打包导出中…（' + ids.length + ' 个任务）';
     apiFetch('api/v1/tasks/export?ids=' + ids.join(',')).then(function (resp) {
       if (resp.status !== 200) {
         return resp.json().then(function (err) {
-          exportBtn.disabled = false;
+          setBatchBusy(false);
           retryResult.textContent = '导出失败（' + (err.code || resp.status) + '）：' + (err.message || '未知错误');
         }, function () {
-          exportBtn.disabled = false;
+          setBatchBusy(false);
           retryResult.textContent = '导出失败（HTTP ' + resp.status + '）';
         });
       }
@@ -888,14 +1057,15 @@
         a.click();
         a.remove();
         URL.revokeObjectURL(a.href);
-        exportBtn.disabled = false;
+        setBatchBusy(false);
         retryResult.textContent = '已下载 zip（' + ids.length + ' 个任务' +
           (ids.length < 20 ? '；不存在的任务会在 zip 内 _errors.txt 说明' : '') + '）。';
       });
     }, function () {
-      exportBtn.disabled = false;
+      setBatchBusy(false);
       retryResult.textContent = '导出失败：服务暂时不可用，请稍后重试。';
     });
+    }); /* T4.53：闭合 resolveSelectedIds().then —— 全选态下导出走同一收集链 */
   });
 
   /* 档案抬头行日期（T4.41） */
