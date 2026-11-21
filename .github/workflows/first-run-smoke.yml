@@ -29,21 +29,21 @@ jobs:
           bash -n scripts/first-run.sh
           echo "bash -n scripts/first-run.sh OK"
 
+      # 此 run 块必须保持纯 ASCII：GitHub 把 run: 块写成无 BOM 的临时 .ps1 交给 PS 5.1（按 ANSI
+      # 解码），内联脚本里一旦有中文，解析阶段就会乱码炸掉（T4.18 事故，K-101 同类）。
       - name: PS 5.1 语法 + UTF-8 BOM 校验（Windows）
         if: runner.os == 'Windows'
         shell: powershell
         run: |
           $files = Get-ChildItem scripts/*.ps1
-          if (-not $files) { throw "scripts 下未找到 .ps1" }
+          if (-not $files) { throw "no .ps1 found under scripts" }
           foreach ($f in $files) {
             $tokens = $null; $errors = $null
             [System.Management.Automation.Language.Parser]::ParseFile($f.FullName, [ref]$tokens, [ref]$errors) | Out-Null
-            if ($errors.Count -gt 0) { throw ("语法错误: " + $f.Name + " -> " + $errors[0].Message) }
+            if ($errors.Count -gt 0) { throw ("syntax error: " + $f.Name + " -> " + $errors[0].Message) }
             $b = [System.IO.File]::ReadAllBytes($f.FullName)
-            if ($b[0] -ne 239 -or $b[1] -ne 187 -or $b[2] -ne 191) {
-              throw ("缺 UTF-8 BOM（首字节应为 239,187,191）: " + $f.Name)
-            }
-            Write-Host ("checked " + $f.Name + " : 语法 OK + BOM OK")
+            if ($b[0] -ne 239 -or $b[1] -ne 187 -or $b[2] -ne 191) { throw ("missing UTF-8 BOM: " + $f.Name) }
+            Write-Host ("checked " + $f.Name + " : syntax OK + BOM OK")
           }
 
       - name: docker compose config -q（只校验插值，不起栈）
