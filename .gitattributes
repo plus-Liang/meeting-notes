@@ -1,0 +1,5 @@
+# 本仓只跟踪项目代码与「文档副本」。
+# 文档权威版在 D:\new，由 tools\sync-docs-to-code.ps1 单向同步进来。
+# Markdown 一律 LF：D:\new 侧是 LF，若这里按 core.autocrlf=true 转成 CRLF，
+# 每次同步都会变成「整文件 diff」，真实改动被行尾噪声淹没（K-114）。
+*.md text eol=lf
