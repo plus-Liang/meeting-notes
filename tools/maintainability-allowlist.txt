@@ -5,3 +5,10 @@
 # ---- 当前已登记的技术债：无（2026-11-14 清零）----
 # 历史：M5 的 4 条 web 反向依赖豁免（TaskService/QuotaService/AudioDurationProbe/TaskMutationService）
 #       与 M9 的 1 条 "todo" 键名误报豁免，均已随 T3.5 复核（common 迁移 + M9 改只扫注释）清零删除。
+
+# ---- M-12 前端规模豁免（T4.55 新增节）：格式 "M-12|相对路径"，整文件豁免 >600 行提示 ----
+# 登记理由：T4.54 inventory 第 6 类历史欠账（拆分需按域重构，另出卡），拆分卡落地后必须删除对应行。
+M-12|app/src/main/resources/static/task.html
+M-12|app/src/main/resources/static/tasks.html
+M-12|app/src/main/resources/static/components.css
+M-12|app/src/main/resources/static/index.html

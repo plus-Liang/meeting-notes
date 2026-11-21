@@ -196,6 +196,84 @@ if (Test-Path $yml) {
     }
 }
 
+# ===== T4.55 新增 M-11：清理类残留（阻塞）=====
+# 11a 前端调试残留：console.log( / debugger / alert( （跳过注释行，app.js:2 的纪律声明不误报）
+$staticDir = Join-Path $Repo 'app\src\main\resources\static'
+$feFiles = @()
+if (Test-Path $staticDir) {
+    $feFiles = Get-ChildItem $staticDir -Recurse -File -Include *.html,*.js,*.css
+    foreach ($f in $feFiles) {
+        $rel = RelPath $f.FullName
+        $ln = 0
+        # 前端文件无 BOM：必须显式 UTF8 读（Get-Content 会按 ANSI 解码中文，K-102）
+        foreach ($line in [System.IO.File]::ReadAllLines($f.FullName, [System.Text.Encoding]::UTF8)) {
+            $ln++
+            $t = $line.Trim()
+            # 注释行跳过：// 行注释、/* 或 * 块注释行、以 */ 收尾的块注释行（tasks.html:427 的 XSS 说明注释曾误报）
+            if ($t.StartsWith('//') -or $t.StartsWith('/*') -or $t.StartsWith('*') -or $t.EndsWith('*/')) { continue }
+            if (($line -match 'console\.log\s*\(' -or $line -match '\bdebugger\b' -or $line -match '\balert\s*\(') `
+                -and -not (Is-Allowed $rel $line)) {
+                [void]$blocking.Add(("M11 前端调试残留 {0}:{1} → {2}" -f $rel, $ln, $line.Trim()))
+            }
+        }
+    }
+}
+
+# 11b 一次性产物：已被 git 跟踪的文件（.gitignore 挡未提交的，这里拦已进仓的）
+$tracked = & git -C $Repo ls-files 2>$null
+if ($LASTEXITCODE -eq 0 -and $tracked) {
+    $artifactPatterns = @('\.(bak|orig|rej|tmp|log)$', '^detect-rendered-task', '^lead-[^/]*\.py$', '^_resume_text', '^parse_luqu')
+    foreach ($t in $tracked) {
+        foreach ($p in $artifactPatterns) {
+            if ($t -match $p -and -not (Is-Allowed $t $t)) {
+                [void]$blocking.Add(("M11 一次性产物 {0}（匹配 {1}）" -f $t, $p))
+            }
+        }
+    }
+}
+
+# 11c Java 被注释掉的代码块：连续 ≥3 行 //，其中至少一行像代码（含 ; 或以 if(/for(/return/log./jdbc./catch 开头）
+foreach ($rel in $javaLines.Keys) {
+    $lines = $javaLines[$rel]
+    $runStart = 0; $runLen = 0
+    for ($i = 0; $i -le $lines.Count; $i++) {
+        $isComment = ($i -lt $lines.Count -and $lines[$i].TrimStart().StartsWith('//'))
+        if ($isComment) {
+            if ($runLen -eq 0) { $runStart = $i + 1 }
+            $runLen++
+        } else {
+            if ($runLen -ge 3) {
+                $codey = 0
+                for ($j = $runStart - 1; $j -lt $runStart - 1 + $runLen; $j++) {
+                    $t2 = $lines[$j].TrimStart().Substring(2).Trim()
+                    if ($t2 -match ';' -or $t2 -match '^(if\s*\(|for\s*\(|return\b|log\.|jdbc\.|catch\b)') { $codey++ }
+                }
+                if ($codey -ge 1 -and -not (Is-Allowed $rel $lines[$runStart - 1])) {
+                    [void]$blocking.Add(("M11 注释代码块 {0}:{1}（连续 {2} 行 //，含疑似代码）" -f $rel, $runStart, $runLen))
+                }
+            }
+            $runLen = 0
+        }
+    }
+}
+
+# ===== T4.55 新增 M-12：前端规模（提示，不阻塞；豁免走 allowlist 的 "M-12|相对路径" 行）=====
+if (Test-Path $staticDir) {
+    $m12Exempt = @()
+    foreach ($a in $allow) {
+        $parts = $a.Split('|', 2)
+        if ($parts.Count -eq 2 -and $parts[0].Trim() -eq 'M-12') { $m12Exempt += $parts[1].Trim() }
+    }
+    foreach ($f in $feFiles) {
+        $rel = RelPath $f.FullName
+        if ($m12Exempt -contains $rel) { continue }
+        $count = ([System.IO.File]::ReadAllLines($f.FullName, [System.Text.Encoding]::UTF8)).Count
+        if ($count -gt 600) {
+            [void]$warnings.Add(("M12 前端文件过大 {0} = {1} 行（>600；登记技术债并安排拆分，见 T4.54 inventory）" -f $rel, $count))
+        }
+    }
+}
+
 Write-Host ""
 Write-Host ("阻塞项 {0} 个 / 提示 {1} 个" -f $blocking.Count, $warnings.Count) -ForegroundColor Yellow
 foreach ($b in $blocking) { Write-Host ("✗ " + $b) -ForegroundColor Red }
