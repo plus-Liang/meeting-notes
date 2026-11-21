@@ -88,12 +88,13 @@ public class TaskRetryService {
         return new RetryOutcome(retried, skipped);
     }
 
-    /** 投递 worker 队列；入队失败只记日志（任务停在 PENDING，T2.3 恢复机制兜底），不向上抛。 */
+    /** 投递 worker 队列；入队失败抛 503 QUEUE_UNAVAILABLE（T4.50：不得假成功，与 TaskService 同口径）。 */
     private void enqueue(long taskId) {
         try {
             redis.opsForList().leftPush(queueKey, Long.toString(taskId));
         } catch (DataAccessException e) {
-            log.error("任务 {} 重试入队失败（Redis 不可用），停在 PENDING，待 T2.3 恢复机制兜底", taskId, e);
+            log.error("任务 {} 重试入队失败（Redis 不可用），返回 503 QUEUE_UNAVAILABLE", taskId, e);
+            throw new ApiException(503, "QUEUE_UNAVAILABLE", "队列暂不可用，请稍后重试");
         }
     }
 }

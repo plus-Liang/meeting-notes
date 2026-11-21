@@ -6,6 +6,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentMatchers;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.data.redis.core.ListOperations;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -18,6 +19,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
@@ -106,5 +108,19 @@ class TaskRetryServiceTest {
         assertEquals(400, over.getStatus());
         assertTrue(over.getMessage().contains("ids"), "错误信息说明 ids 约束：" + over.getMessage());
         verify(jdbc, never()).update(ArgumentMatchers.anyString(), ArgumentMatchers.anyLong());
+    }
+
+    /** T4.50：入队失败（Redis 不可用）必须 503 QUEUE_UNAVAILABLE，不得假成功。 */
+    @Test
+    void enqueueFailureThrows503QueueUnavailableT450() {
+        stubStatus(7L, "DEAD");
+        when(redis.opsForList()).thenReturn(listOps);
+        when(listOps.leftPush(anyString(), anyString()))
+                .thenThrow(new DataAccessResourceFailureException("redis down"));
+
+        ApiException ex = assertThrows(ApiException.class, () -> newService().retry(List.of(7L)));
+
+        assertEquals(503, ex.getStatus(), "入队失败必须 503，不得假成功（T4.50）");
+        assertEquals("QUEUE_UNAVAILABLE", ex.getCode());
     }
 }

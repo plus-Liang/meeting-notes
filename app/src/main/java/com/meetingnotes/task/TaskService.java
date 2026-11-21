@@ -179,11 +179,17 @@ public class TaskService {
                     log.info("任务 {} 已 DEAD，重传触发复活重投（D-049）", existing.id());
                     return new TaskCreatedResponse(existing.id(), "PENDING", sha256, durationSec, size, true);
                 }
+                if ("PENDING".equals(existing.status())) {
+                    // T4.50 自愈：Redis 故障期间留下的 PENDING（行已提交、队列未投）——重传即重新入队，
+                    // 不再把"客户端重试"堵死在幂等命中上
+                    enqueue(existing.id());
+                    log.info("任务 {} 重传命中 PENDING，重新入队（T4.50 自愈）", existing.id());
+                }
                 return new TaskCreatedResponse(existing.id(), existing.status(), sha256, durationSec, size, true);
             }
 
-            // 7) 投递 worker 队列（T1.5；事务已提交，不会产生幽灵任务）。入队失败不回滚任务：
-            //    任务停在 PENDING，由 T2.3 的恢复机制兜底，避免"客户端拿到 500 后重试 → 幂等命中 → 永不入队"。
+            // 7) 投递 worker 队列（T1.5；事务已提交，不会产生幽灵任务）。入队失败抛 503（T4.50：不得假成功）：
+            //    任务行已提交停在 PENDING——客户端重传走幂等重投自愈，或由 T2.3 启动恢复兜底。
             enqueue(taskId);
 
             return new TaskCreatedResponse(taskId, "PENDING", sha256, durationSec, size, false);
@@ -192,12 +198,14 @@ public class TaskService {
         }
     }
 
-    /** 投递 worker 队列；入队失败只记日志（任务停在 PENDING，T2.3 恢复机制兜底），不向上抛。 */
+    /** 投递 worker 队列；入队失败抛 503 QUEUE_UNAVAILABLE（T4.50：不得假成功）。任务行已提交停在 PENDING，
+     * 由幂等重传重投（同文件再传即自愈）或 T2.3 启动恢复（积压 PENDING 超 2 分钟）兜底。 */
     private void enqueue(long taskId) {
         try {
             redis.opsForList().leftPush(queueKey, Long.toString(taskId));
         } catch (DataAccessException e) {
-            log.error("任务 {} 入队失败（Redis 不可用），停在 PENDING，待 T2.3 恢复机制兜底", taskId, e);
+            log.error("任务 {} 入队失败（Redis 不可用），返回 503 QUEUE_UNAVAILABLE", taskId, e);
+            throw new ApiException(503, "QUEUE_UNAVAILABLE", "队列暂不可用，请稍后重试");
         }
     }
 
