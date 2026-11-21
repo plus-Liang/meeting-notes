@@ -97,13 +97,25 @@
   var lastRenderKey = null;
   var state = { filter: '', cursor: null, items: [], checked: {}, checkedCount: 0, search: '',
     filterFavorite: false, filterLabels: [], range: '', total: null,
-    selectAll: false }; /* T4.42：标签多选/时间范围/total；T4.53 缺陷3：全选=当前筛选内全部 */
+    selectAll: false, excluded: {} }; /* T4.42：标签/时间范围/total；T4.53 缺陷3：全选=筛选内全部；
+    T4.56：全选态下被单独取消的行进 excluded（勾选框表达"排除"，不再写 checked/计数） */
 
-  /* 清空选择（含全选态）：筛选变化 / 动作完成后的统一入口（T4.53 缺陷3 引入 selectAll） */
+  /* 清空选择（含全选态与排除集）：筛选变化 / 动作完成后的统一入口（T4.53 缺陷3 + T4.56 excluded） */
   function clearSelection() {
     state.checked = {};
     state.checkedCount = 0;
     state.selectAll = false;
+    state.excluded = {};
+  }
+
+  /* T4.56：按钮禁用判据与 resolveSelectedIds() 同源——"实际可执行集合是否为空"（严格 > 0）。
+     全选态用 total - 排除数；非全选态用勾选数。total 拿不到时全选态不视为可选（render 已禁全选框）。 */
+  function hasSelection() {
+    if (state.selectAll) {
+      if (state.total === null) { return false; }
+      return state.total - Object.keys(state.excluded).length > 0;
+    }
+    return state.checkedCount > 0;
   }
   /* T4.24：状态计数改调 GET /tasks/counts（服务端真计数无上限；页面可见时 30s 刷新保留） */
   var countState = { total: null, active: 0, done: 0, dead: 0 };
@@ -362,7 +374,8 @@
     /* T4.29：星标 + 标签 chips（favorite/labels 为列表接口只增字段） */
     var star = item.favorite ? '<span class="fav-star" title="已收藏">★</span>' : '';
     var checkbox = '<span class="row-check-cell"><input type="checkbox" class="row-check" data-id="' + item.id + '"' +
-      (state.checked[item.id] ? ' checked' : '') + ' aria-label="选择任务 #' + item.id + '"></span>'; /* T4.15⑥：勾选不再限于 DEAD；重试仍只对 DEAD 开放 */
+      ((state.selectAll ? !state.excluded[item.id] : !!state.checked[item.id]) ? ' checked' : '') +
+      ' aria-label="选择任务 #' + item.id + '"></span>'; /* T4.56：全选态勾选框反映操作集合（未排除=勾上）；勾选不再限于 DEAD */
     return '<div class="task-row" data-id="' + item.id + '">' +
       checkbox +
       '<span class="task-no">#' + item.id + '</span>' +
@@ -512,12 +525,18 @@
     /* T4.53 缺陷3：全选=当前筛选内全部——total 拿不到就禁用全选（不猜）；勾态 = 全选态 或 已加载全勾 */
     checkAllEl.disabled = state.total === null;
     checkAllEl.checked = state.selectAll || (count > 0 && count === state.items.length);
-    retryBtn.disabled = count === 0 && !state.selectAll;
-    exportBtn.disabled = count === 0 && !state.selectAll;
-    deleteBtn.disabled = count === 0 && !state.selectAll;
-    /* T4.53 缺陷3：全选态在操作条明示数量（N = state.total） */
-    document.getElementById('selHint').textContent =
-      (state.selectAll && state.total !== null) ? '已选全部 ' + state.total + ' 条（筛选内）' : '';
+    retryBtn.disabled = !hasSelection(); /* T4.56：三个批量按钮统一"实际可执行集合是否为空"判据 */
+    exportBtn.disabled = !hasSelection();
+    deleteBtn.disabled = !hasSelection();
+    /* T4.53 缺陷3 + T4.56：全选态在操作条明示数量（N = state.total；有排除时显示 N-M 与排除数） */
+    var selHintText = '';
+    if (state.selectAll && state.total !== null) {
+      var excludedCount = Object.keys(state.excluded).length;
+      selHintText = excludedCount > 0
+        ? '已选 ' + (state.total - excludedCount) + ' 条（已排除 ' + excludedCount + ' 条）'
+        : '已选全部 ' + state.total + ' 条（筛选内）';
+    }
+    document.getElementById('selHint').textContent = selHintText;
     /* T4.42：计数行「共 N 条 · 已加载 M 条」（N = 当前筛选组合 total；未拿到不显示） */
     var rc = document.getElementById('resultCount');
     if (state.total !== null) {
@@ -538,8 +557,16 @@
     listEl.querySelectorAll('.row-check').forEach(function (box) {
       box.addEventListener('change', function () {
         var id = box.getAttribute('data-id');
-        if (box.checked) { state.checked[id] = true; state.checkedCount++; }
-        else { delete state.checked[id]; state.checkedCount--; state.selectAll = false; /* T4.53 缺陷3：取消任一行=退出全选态 */ }
+        if (state.selectAll) {
+          /* T4.56：全选态下勾选框 = "排除"开关——取消勾选→排除该行，重新勾选→恢复包含；不碰 checked/计数 */
+          if (box.checked) { delete state.excluded[id]; }
+          else { state.excluded[id] = true; }
+        } else if (box.checked) {
+          state.checked[id] = true; state.checkedCount++;
+        } else {
+          delete state.checked[id];
+          state.checkedCount = Math.max(0, state.checkedCount - 1); /* T4.56：兜底不为负（正常路径递减已配对） */
+        }
         render(true); /* 勾选影响操作条状态，强制重绘 */
       });
     });
@@ -879,10 +906,10 @@
     });
   }
 
-  /* 收集将要操作的 id 集合（T4.53 缺陷3）：手动勾选 → 直接返回；
+  /* 收集将要操作的 id 集合（T4.53 缺陷3 + T4.56）：手动勾选 → 直接返回；
      全选 → 按当前筛选参数（与 filterParams 同源）以 limit=50 + before_id 游标翻页收集全部，
-     ACTIVE 按三状态分别翻页去重；任一页失败立即 reject（绝不带着缺 id 的集合继续删）。
-     服务端 MAX_LIMIT=50：写 500 也会被 clamp，不假设页大小（负向对照 D① 已验证）。 */
+     ACTIVE 按三状态分别翻页去重，然后剔除 excluded（被单独取消的行）；任一页失败立即 reject。
+     服务端 MAX_LIMIT=50 是硬拒绝（400），不是 clamp——错误 limit 走统一失败中止路径（D① 已验证）。 */
   function resolveSelectedIds() {
     if (!state.selectAll) {
       return Promise.resolve(Object.keys(state.checked).map(Number).sort(function (a, b) { return a - b; }));
@@ -910,6 +937,11 @@
       }
       return step().then(function () { return ids; });
     }
+    var exclude = state.excluded;
+    function withoutExcluded(list) {
+      return list.filter(function (id) { return !exclude[id]; })
+        .sort(function (a, b) { return a - b; });
+    }
     if (state.filter === 'ACTIVE') {
       return Promise.all(['PENDING', 'RUNNING', 'RETRYING'].map(function (s) { return collect(s); }))
         .then(function (parts) {
@@ -917,11 +949,10 @@
           parts.forEach(function (part) {
             part.forEach(function (id) { if (!seen[id]) { seen[id] = true; ids.push(id); } });
           });
-          ids.sort(function (a, b) { return a - b; });
-          return ids;
+          return withoutExcluded(ids);
         });
     }
-    return collect(state.filter || null);
+    return collect(state.filter || null).then(withoutExcluded);
   }
 
   function deleteSelected() {
@@ -930,11 +961,13 @@
     retryResult.textContent = '准备中…';
     resolveSelectedIds().then(function (ids) {
       if (!ids.length) { setBatchBusy(false); retryResult.textContent = ''; return; }
-      /* 收集数与筛选 total 对不上 = 有页没拉全：宁可中止也不删（负向对照 D② 口径） */
-      if (state.selectAll && state.total !== null && ids.length !== state.total) {
+      /* 收集数与「total - 排除数」对不上 = 有页没拉全：宁可中止也不删（负向对照 D② 口径，T4.56 计入排除） */
+      var expected = (state.selectAll && state.total !== null)
+        ? state.total - Object.keys(state.excluded).length : null;
+      if (expected !== null && ids.length !== expected) {
         setBatchBusy(false);
-        retryResult.textContent = '收集到 ' + ids.length + ' 条与筛选总数 ' + state.total +
-          ' 不一致，已中止删除（请刷新后重试）。';
+        retryResult.textContent = '收集到 ' + ids.length + ' 条与应选 ' + expected +
+          ' 条不一致，已中止删除（请刷新后重试）。';
         return;
       }
       confirmDialog({
