@@ -1,12 +1,11 @@
 package com.meetingnotes.worker;
 
+import com.meetingnotes.task.QueuePublisher;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.data.redis.core.ListOperations;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 
@@ -18,11 +17,10 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * T4.52 R3：启动恢复的 PENDING 清扫 SQL 必须真实执行过——此前 StartupRecoveryTest 全 mock jdbc，
- * SQL 写错也全绿（R3 的原话："不能只 mock jdbc"、"不许只写 assertDoesNotThrow"）。
- * 这里用真实 H2（MODE=PostgreSQL）建 task 表跑 StartupRecovery.run：
- * ① RUNNING 回收重投；② 陈旧 PENDING（>2 分钟）被重投且 updated_at 刷新；③ 新鲜 PENDING 不动。
- * redis 用 mock（本测试验证的是 SQL 行为，不是 Redis）。
+ * T4.52 R3 + T4.62 S2：启动恢复的 PENDING 清扫 SQL 必须真实执行过（mock jdbc 会假绿）。
+ * 真实 H2（MODE=PostgreSQL）建 task 表跑 StartupRecovery.run：① RUNNING 回收重投；
+ * ② 陈旧 PENDING（>2 分钟）重投且 updated_at 刷新（经 StalePendingQueries.touch）；③ 新鲜 PENDING 不动。
+ * redis 侧（QueuePublisher）mock——本测试验证的是 SQL 行为，不是 Redis。
  */
 @ExtendWith(MockitoExtension.class)
 class StartupRecoveryDbTest {
@@ -31,9 +29,7 @@ class StartupRecoveryDbTest {
     private static final String QUEUE_KEY = "meetingnotes:task-queue";
 
     @Mock
-    private StringRedisTemplate redis;
-    @Mock
-    private ListOperations<String, String> listOps;
+    private QueuePublisher queuePublisher;
 
     private JdbcTemplate jdbc;
 
@@ -56,15 +52,15 @@ class StartupRecoveryDbTest {
         long runningId = insert("RUNNING", runStart);
         long staleId = insert("PENDING", Timestamp.from(runStart.toInstant().minusSeconds(180)));
         long freshId = insert("PENDING", runStart);
-        when(redis.opsForList()).thenReturn(listOps);
+        when(queuePublisher.tryPublish(org.mockito.ArgumentMatchers.anyLong())).thenReturn(true);
 
-        new StartupRecovery(jdbc, redis, QUEUE_KEY).run(null);
+        /* StalePendingQueries 用同一份 H2 jdbc（真 SQL），QueuePublisher mock */
+        new StartupRecovery(jdbc, queuePublisher, new StalePendingQueries(jdbc)).run(null);
 
         // RUNNING 回收 + 陈旧 PENDING 重投；新鲜 PENDING 不动（阈值挡住刚创建的）
-        verify(listOps).leftPush(QUEUE_KEY, Long.toString(runningId));
-        verify(listOps).leftPush(QUEUE_KEY, Long.toString(staleId));
-        verify(listOps, org.mockito.Mockito.never())
-                .leftPush(QUEUE_KEY, Long.toString(freshId));
+        verify(queuePublisher).tryPublish(runningId);
+        verify(queuePublisher).tryPublish(staleId);
+        verify(queuePublisher, org.mockito.Mockito.never()).tryPublish(freshId);
         // 陈旧 PENDING 的 updated_at 确实被生产 SQL 刷新到运行时刻之后（证明 UPDATE 真执行）
         Integer refreshed = jdbc.queryForObject(
                 "SELECT COUNT(*) FROM task WHERE id = ? AND updated_at > ?", Integer.class, staleId, runStart);

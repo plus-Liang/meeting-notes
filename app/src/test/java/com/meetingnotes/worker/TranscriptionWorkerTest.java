@@ -62,6 +62,8 @@ class TranscriptionWorkerTest {
     private ListOperations<String, String> listOps;
     @Mock
     private com.meetingnotes.task.QueuePublisher queuePublisher;
+    @Mock
+    private StalePendingQueries stalePendingQueries;
 
     private TranscriptionWorker newWorker() {
         return new TranscriptionWorker(redis, jdbc, s3, asrClient,
@@ -278,28 +280,27 @@ class TranscriptionWorkerTest {
     @Test
     void startupRecoveryRequeuesRunningTasksAsPending() {
         com.meetingnotes.worker.StartupRecovery recovery = new com.meetingnotes.worker.StartupRecovery(
-                jdbc, redis, "meetingnotes:task-queue");
+                jdbc, queuePublisher, stalePendingQueries);
         doReturn(List.of(5L, 7L)).when(jdbc).query(contains("WHERE status = 'RUNNING'"),
                 ArgumentMatchers.<org.springframework.jdbc.core.RowMapper<Long>>any());
-        when(redis.opsForList()).thenReturn(listOps);
 
         recovery.run(null);
 
         verify(jdbc).query(contains("WHERE status = 'RUNNING'"),
                 ArgumentMatchers.<org.springframework.jdbc.core.RowMapper<Long>>any());
-        verify(listOps).leftPush("meetingnotes:task-queue", "5");
-        verify(listOps).leftPush("meetingnotes:task-queue", "7");
+        verify(queuePublisher).tryPublish(5L);
+        verify(queuePublisher).tryPublish(7L);
     }
 
     @Test
     void startupRecoveryWithNoZombiesLogsZeroAndPushesNothing() {
         com.meetingnotes.worker.StartupRecovery recovery = new com.meetingnotes.worker.StartupRecovery(
-                jdbc, redis, "meetingnotes:task-queue");
+                jdbc, queuePublisher, stalePendingQueries);
         doReturn(List.of()).when(jdbc).query(contains("WHERE status = 'RUNNING'"),
                 ArgumentMatchers.<org.springframework.jdbc.core.RowMapper<Long>>any());
 
         recovery.run(null);
 
-        verify(listOps, org.mockito.Mockito.never()).leftPush(org.mockito.Mockito.anyString(), org.mockito.Mockito.anyString());
+        verify(queuePublisher, org.mockito.Mockito.never()).tryPublish(org.mockito.ArgumentMatchers.anyLong());
     }
 }

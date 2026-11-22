@@ -5,13 +5,9 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataAccessException;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
-import java.sql.Timestamp;
-import java.time.Duration;
-import java.time.Instant;
 import java.util.List;
 
 /**
@@ -22,6 +18,9 @@ import java.util.List;
  * stale-minutes（默认 2 分钟，挡住"刚创建还没入队"的行，不与正常提交流程抢）。
  * 重投复用 {@link QueuePublisher#publish(long)}（队头，单一入队实现，不自建第 5 份 leftPush）；
  * 成功入队后刷新 updated_at，下一轮不再重复入队。
+ *
+ * <p>顺序语义（T4.62 S2，与 StartupRecovery 相反、不许合并）：**先投递成功、再 touch**——
+ * 投递失败绝不刷新 updated_at，下一轮再兜底。判据/刷新语句在 {@link StalePendingQueries}。
  *
  * <p>开销边界：每轮一条 SELECT（仅 id 列）+ 每条成功重投一条 UPDATE；Redis 长期不可用时
  * 每条投递等待 Lettuce command-timeout（默认 60s）后记 warn 进下一轮——阻塞发生在
@@ -34,8 +33,8 @@ public class StalePendingSweeper {
 
     private static final Logger log = LoggerFactory.getLogger(StalePendingSweeper.class);
 
-    private final JdbcTemplate jdbc;
     private final QueuePublisher queuePublisher;
+    private final StalePendingQueries stalePendingQueries;
 
     @Value("${app.queue.pending-sweep.enabled:true}")
     private boolean enabled;
@@ -44,9 +43,9 @@ public class StalePendingSweeper {
     @Value("${app.queue.pending-sweep.stale-minutes:2}")
     private long staleMinutes;
 
-    public StalePendingSweeper(JdbcTemplate jdbc, QueuePublisher queuePublisher) {
-        this.jdbc = jdbc;
+    public StalePendingSweeper(QueuePublisher queuePublisher, StalePendingQueries stalePendingQueries) {
         this.queuePublisher = queuePublisher;
+        this.stalePendingQueries = stalePendingQueries;
     }
 
     /** 周期清扫；enabled=false 时完全不动（不查库、不投递）。fixedDelayString 外置周期（M-1）。 */
@@ -55,12 +54,9 @@ public class StalePendingSweeper {
         if (!enabled) {
             return;
         }
-        Timestamp staleBefore = Timestamp.from(Instant.now().minus(Duration.ofMinutes(staleMinutes)));
         List<Long> stale;
         try {
-            stale = jdbc.query(
-                    "SELECT id FROM task WHERE status = 'PENDING' AND updated_at < ?",
-                    (rs, i) -> rs.getLong(1), staleBefore);
+            stale = stalePendingQueries.findStalePending(StalePendingQueries.cutoff(staleMinutes));
         } catch (DataAccessException e) {
             /* 空库/测试环境没有表：静默跳过（D-035 口径，同 StartupRecovery），不拖垮调度线程 */
             return;
@@ -72,7 +68,7 @@ public class StalePendingSweeper {
         for (Long id : stale) {
             try {
                 queuePublisher.publish(id);
-                jdbc.update("UPDATE task SET updated_at = now() WHERE id = ?", id);
+                stalePendingQueries.touch(id); /* T4.62 S2：先投递成功、再 touch——失败绝不刷新 */
                 requeued++;
             } catch (RuntimeException e) {
                 /* 单条投递失败（如 Redis 抖动）：记 warn 继续下一条，不刷新 updated_at——下一轮再兜底 */

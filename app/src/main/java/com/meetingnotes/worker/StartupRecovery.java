@@ -1,18 +1,14 @@
 package com.meetingnotes.worker;
 
+import com.meetingnotes.task.QueuePublisher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.dao.DataAccessException;
-import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
-import java.sql.Timestamp;
-import java.time.Duration;
-import java.time.Instant;
 import java.util.List;
 
 /**
@@ -23,6 +19,8 @@ import java.util.List;
  * RUNNING 一律回收；PENDING 超过 2 分钟仍未投递的也重新入队（T4.50：Redis 故障期间提交的任务行已落库、
  * 队列没投成，阈值挡住"刚创建还没入队"的 PENDING，不与正常提交流程抢）；不碰 DONE/DEAD/RETRYING
  * （DONE 回收等于重跑，RETRYING 本就在队列里）。
+ * 入队走 {@link QueuePublisher#tryPublish(long)}（T4.62 S1：启动期 Redis 未就绪不抛异常、不拖垮上下文；
+ * 失败原因由 QueuePublisher 内部带原始异常记 error）。
  * 与消费 worker（{@link TranscriptionWorker}）解耦：本类只做启动回收，失败分级/消费不变。
  */
 @Component
@@ -34,15 +32,15 @@ public class StartupRecovery implements ApplicationRunner {
     static final long STALE_PENDING_MINUTES = 2;
 
     private final JdbcTemplate jdbc;
-    private final StringRedisTemplate redis;
-    private final String queueKey;
+    private final QueuePublisher queuePublisher;
+    private final StalePendingQueries stalePendingQueries;
 
     public StartupRecovery(JdbcTemplate jdbc,
-                           StringRedisTemplate redis,
-                           @Value("${app.worker.queue-key}") String queueKey) {
+                           QueuePublisher queuePublisher,
+                           StalePendingQueries stalePendingQueries) {
         this.jdbc = jdbc;
-        this.redis = redis;
-        this.queueKey = queueKey;
+        this.queuePublisher = queuePublisher;
+        this.stalePendingQueries = stalePendingQueries;
     }
 
     @Override
@@ -64,17 +62,13 @@ public class StartupRecovery implements ApplicationRunner {
         }
         pushBack(stuck);
         // T4.50/T4.52：Redis 故障期间提交的 PENDING（行已提交、队列未投）超过 2 分钟 → 启动时重新入队。
-        // 阈值 cutoff 用 JVM 侧参数（不用 PG 专用 interval 语法）：compose 里 JVM 与 PG 同宿主同时钟、
-        // TZ 一致（D-067），窗口为分钟级粗粒度，换来的可移植性让生产 SQL 能被 H2 真库测试覆盖。
-        // updated_at 同步刷新：投递成功的下次启动不再重投；投递失败的等下个周期（≥2 分钟）再兜底。
+        // T4.62 S2：判据与刷新语句收敛到 StalePendingQueries（启动口径=先 touch 全部、再逐条投递，顺序保留）。
         int requeuedPending = 0;
         try {
-            Timestamp staleBefore = Timestamp.from(Instant.now().minus(Duration.ofMinutes(STALE_PENDING_MINUTES)));
-            List<Long> stale = jdbc.query(
-                    "SELECT id FROM task WHERE status = 'PENDING' AND updated_at < ?",
-                    (rs, i) -> rs.getLong(1), staleBefore);
+            List<Long> stale = stalePendingQueries.findStalePending(
+                    StalePendingQueries.cutoff(STALE_PENDING_MINUTES));
             for (Long id : stale) {
-                jdbc.update("UPDATE task SET updated_at = now() WHERE id = ?", id);
+                stalePendingQueries.touch(id);
             }
             pushBack(stale);
             requeuedPending = stale.size();
@@ -87,15 +81,13 @@ public class StartupRecovery implements ApplicationRunner {
                 .log("启动恢复：回收 RUNNING 僵尸任务重新入队");
     }
 
-    /** 逐条入队；单条失败（Redis 未就绪）只记日志不中断——任务已在 PENDING，下次启动/重传再兜底。 */
+    /** 逐条入队（T4.62 S1：走 QueuePublisher.tryPublish，永不抛——启动期 Redis 未就绪不拖垮上下文）；
+     * 单条失败只记 error + taskId 字段（原始异常由 QueuePublisher 内部带栈记录）。 */
     private void pushBack(List<Long> ids) {
         for (Long id : ids) {
-            try {
-                redis.opsForList().leftPush(queueKey, Long.toString(id));
-            } catch (RuntimeException e) {
+            if (!queuePublisher.tryPublish(id)) {
                 log.atError()
                         .addKeyValue("taskId", id)
-                        .setCause(e)
                         .log("启动恢复：任务回 PENDING 成功但入队失败（Redis 不可用）");
             }
         }
