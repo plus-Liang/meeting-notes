@@ -4,16 +4,22 @@ import com.meetingnotes.common.ApiException;
 import com.meetingnotes.task.QueuePublisher;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.sql.Timestamp;
 import java.util.Collections;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
@@ -21,10 +27,12 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * T4.61/T4.62 S2：周期清扫的**编排语义**（判据/刷新 SQL 已收敛到 StalePendingQueries，
+ * T4.61/T4.62/T4.67 S1：周期清扫的**编排语义**（判据/刷新 SQL 已收敛到 StalePendingQueries，
  * 其方向语义由 StalePendingQueriesTest 在真 H2 上钉住）：
  * ①陈旧行→先 publish 后 touch（顺序不许反：投递失败绝不刷新）；②空集→零动作；
  * ③enabled=false→连 findStalePending 都不调；④单条投递 503→warn 继续，失败行不 touch。
+ * S1：cutoff 必须随配置的 staleMinutes 走（非默认值 7 也能算对，±60s 容差）；
+ *     默认值契约 = 字面量 2 分钟（字段初始化器 + @Value 注解串，变异改 :0 时变红）。
  */
 @ExtendWith(MockitoExtension.class)
 class StalePendingSweeperTest {
@@ -39,6 +47,40 @@ class StalePendingSweeperTest {
         ReflectionTestUtils.setField(sweeper, "enabled", enabled);
         ReflectionTestUtils.setField(sweeper, "staleMinutes", 2L);
         return sweeper;
+    }
+
+    /* ===== T4.67 S1：cutoff 必须随配置的 staleMinutes 走；默认值 = 2 分钟（字面量契约） ===== */
+
+    /** 非默认值 7 分钟：cutoff ≈ now - 7 分钟（±60s 容差，避免时钟抖动）。 */
+    @Test
+    void cutoffReflectsConfiguredStaleMinutes() {
+        StalePendingSweeper sweeper = newSweeper(true);
+        ReflectionTestUtils.setField(sweeper, "staleMinutes", 7L);
+        when(stalePendingQueries.findStalePending(any())).thenReturn(Collections.emptyList());
+
+        sweeper.sweepStalePending();
+
+        ArgumentCaptor<Timestamp> captor = ArgumentCaptor.forClass(Timestamp.class);
+        verify(stalePendingQueries).findStalePending(captor.capture());
+        long captured = captor.getValue().getTime();
+        long now = System.currentTimeMillis();
+        long sevenMinMs = 7 * 60 * 1000L;
+        /* 容差 ±60s：断言执行本身有时钟消耗 */
+        assertTrue(captured >= now - sevenMinMs - 60_000 && captured <= now - sevenMinMs + 60_000,
+                "cutoff 应 ≈ now - 7 分钟（±60s）：captured=" + captured + " now=" + now);
+    }
+
+    /** 默认值字面量契约：字段初始化器 = 2；@Value 注解串默认 = 2 分钟（变异改 :0 时此断言变红）。 */
+    @Test
+    void staleMinutesDefaultsToTwoMinutes() throws Exception {
+        StalePendingSweeper fresh = new StalePendingSweeper(queuePublisher, stalePendingQueries);
+        assertEquals(2L, (Long) ReflectionTestUtils.getField(fresh, "staleMinutes"),
+                "字段声明处默认值必须是 2 分钟（S4：与 StartupRecovery 共用单一来源）");
+
+        Value v = StalePendingSweeper.class.getDeclaredField("staleMinutes")
+                .getAnnotation(Value.class);
+        assertTrue(v != null && v.value().endsWith(":" + StalePendingQueries.DEFAULT_STALE_MINUTES + "}"),
+                "@Value 默认值必须引用共享常量（当前 = " + (v == null ? "null" : v.value()) + "）");
     }
 
     @Test

@@ -39,9 +39,9 @@ public class StalePendingSweeper {
     @Value("${app.queue.pending-sweep.enabled:true}")
     private boolean enabled;
 
-    /** 陈旧阈值（分钟）：与 StartupRecovery.STALE_PENDING_MINUTES 的 2 分钟口径一致。 */
-    @Value("${app.queue.pending-sweep.stale-minutes:2}")
-    private long staleMinutes;
+    /** 陈旧阈值（分钟）：与 StartupRecovery 共用单一来源（T4.67 S4，DEFAULT_STALE_MINUTES）。 */
+    @Value("${app.queue.pending-sweep.stale-minutes:" + StalePendingQueries.DEFAULT_STALE_MINUTES + "}")
+    private long staleMinutes = StalePendingQueries.DEFAULT_STALE_MINUTES;
 
     public StalePendingSweeper(QueuePublisher queuePublisher, StalePendingQueries stalePendingQueries) {
         this.queuePublisher = queuePublisher;

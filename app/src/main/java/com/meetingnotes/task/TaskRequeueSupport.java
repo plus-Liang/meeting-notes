@@ -1,6 +1,7 @@
 package com.meetingnotes.task;
 
 import com.meetingnotes.common.ApiException;
+import com.meetingnotes.worker.StalePendingQueries;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -28,10 +29,13 @@ public class TaskRequeueSupport {
 
     private final JdbcTemplate jdbc;
     private final QueuePublisher queuePublisher;
+    private final StalePendingQueries stalePendingQueries;
 
-    public TaskRequeueSupport(JdbcTemplate jdbc, QueuePublisher queuePublisher) {
+    public TaskRequeueSupport(JdbcTemplate jdbc, QueuePublisher queuePublisher,
+                              StalePendingQueries stalePendingQueries) {
         this.jdbc = jdbc;
         this.queuePublisher = queuePublisher;
+        this.stalePendingQueries = stalePendingQueries;
     }
 
     /** DEAD 复活两连（D-049）：重置计数/状态/错误码 + 清死信。SQL 与原四处逐字一致。 */
@@ -63,9 +67,12 @@ public class TaskRequeueSupport {
         }
     }
 
-    /** 幂等命中 PENDING 的重投（T4.50/T4.52 自愈）；logTag = 调用方原日志文案（措辞各处不同，保留）。 */
+    /** 幂等命中 PENDING 的重投（T4.50/T4.52 自愈）；logTag = 调用方原日志文案（措辞各处不同，保留）。
+     * T4.67 S9：成功入队后 touch（与 Sweeper「先投后 touch」口径一致）——否则用户重提一个停很久的
+     * PENDING 后，60s 内清扫器仍会当「陈旧」再投一遍，把「用户重提」记成「清扫自愈」。失败不 touch。 */
     public void publishPending(long id, String logTag) {
         queuePublisher.publish(id);
+        stalePendingQueries.touch(id);
         log.info("{}", logTag);
     }
 }

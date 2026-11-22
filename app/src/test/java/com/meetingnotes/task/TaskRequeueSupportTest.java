@@ -28,9 +28,11 @@ class TaskRequeueSupportTest {
     private JdbcTemplate jdbc;
     @Mock
     private QueuePublisher queuePublisher;
+    @Mock
+    private com.meetingnotes.worker.StalePendingQueries stalePendingQueries;
 
     private TaskRequeueSupport newSupport() {
-        return new TaskRequeueSupport(jdbc, queuePublisher);
+        return new TaskRequeueSupport(jdbc, queuePublisher, stalePendingQueries);
     }
 
     @Test
@@ -68,10 +70,20 @@ class TaskRequeueSupportTest {
         verify(jdbc, never()).update(contains("INSERT INTO dead_letter"), anyString(), anyString());
     }
 
-    /** 幂等命中 PENDING 的重投：publish 一次，logTag 由调用方传入（文案沿用各处原文）。 */
+    /** 幂等命中 PENDING 的重投：publish 一次 + touch 一次（T4.67 S9：防清扫器重复投递），logTag 沿用原文。 */
     @Test
-    void publishPendingRepublishesAndLogsCallerText() {
+    void publishPendingRepublishesTouchesAndLogsCallerText() {
         newSupport().publishPending(9L, "任务 9 重传命中 PENDING，重新入队（T4.50 自愈）");
         verify(queuePublisher).publish(9L);
+        verify(stalePendingQueries).touch(9L);
+    }
+
+    /** T4.67 S9 变异对照：publishPending 的 touch 删掉时本用例必须红（否则清扫器 60s 内重复投递）。 */
+    @Test
+    void publishPendingTouchesImmediatelyAfterPublish() {
+        newSupport().publishPending(9L, "任务 9 重传命中 PENDING，重新入队（T4.50 自愈）");
+        org.mockito.InOrder order = org.mockito.Mockito.inOrder(queuePublisher, stalePendingQueries);
+        order.verify(queuePublisher).publish(9L);
+        order.verify(stalePendingQueries).touch(9L); /* 先投后 touch 的顺序也要钉住 */
     }
 }

@@ -84,4 +84,16 @@ class StartupRecoveryTest {
         assertDoesNotThrow(() -> newRecovery().run(null));
         verify(queuePublisher).tryPublish(9L); /* 单条失败不中断：其余 id 仍逐条尝试 */
     }
+
+    /** T4.67 S2：tryPublish 抛非 ApiException 的运行时异常（如连接工厂未就绪）→ pushBack 宽兜底不向上抛。 */
+    @Test
+    void nonApiRuntimeExceptionFromTryPublishDoesNotCrashStartup() {
+        when(jdbc.query(contains("WHERE status = 'RUNNING'"), ArgumentMatchers.<RowMapper<Long>>any()))
+                .thenReturn(List.of(7L));
+        doThrow(new IllegalStateException("connection factory not initialized"))
+                .when(queuePublisher).tryPublish(7L);
+
+        assertDoesNotThrow(() -> newRecovery().run(null));
+        verify(queuePublisher).tryPublish(7L); /* 宽兜底吞掉后继续逐条尝试 */
+    }
 }

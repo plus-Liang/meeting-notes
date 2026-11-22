@@ -22,15 +22,25 @@ import java.util.List;
 @Component
 public class StalePendingQueries {
 
+    /** T4.67 S4：陈旧 PENDING 阈值的单一来源——启动恢复与运行期清扫两条路径共用（默认 2 分钟）。 */
+    public static final long DEFAULT_STALE_MINUTES = 2;
+
     private final JdbcTemplate jdbc;
 
     public StalePendingQueries(JdbcTemplate jdbc) {
         this.jdbc = jdbc;
     }
 
-    /** 陈旧 PENDING id 列表：status='PENDING' 且 updated_at 早于 cutoff。SQL 与原两处逐字一致。 */
+    /**
+     * 陈旧 PENDING id 列表：status='PENDING' 且 updated_at 早于 cutoff。SQL 与原两处逐字一致。
+     *
+     * <p>T4.67 S8（出队顺序）：ORDER BY updated_at DESC（最新在前）+ 调用方逐条 leftPush（头插）=
+     * 后压入的排更前 → 最先出队的是 updated_at 最旧的行 → 「先卡住的更早被处理」（先来先服务）。
+     * 若把 DESC 改成 ASC，leftPush 会把最旧的压到队尾、最新的压到队头，处理顺序整体反转。
+     */
     public List<Long> findStalePending(Timestamp cutoff) {
-        return jdbc.query("SELECT id FROM task WHERE status = 'PENDING' AND updated_at < ?",
+        return jdbc.query("SELECT id FROM task WHERE status = 'PENDING' AND updated_at < ?"
+                        + " ORDER BY updated_at DESC",
                 (rs, i) -> rs.getLong(1), cutoff);
     }
 
