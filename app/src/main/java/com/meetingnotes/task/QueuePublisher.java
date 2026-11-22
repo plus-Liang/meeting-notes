@@ -18,10 +18,12 @@ import org.springframework.stereotype.Component;
  * <p>{@link #publish(long)}/{@link #publishToTail(long)}：入队失败抛 503 QUEUE_UNAVAILABLE（T4.50 口径：
  * 不得假成功）——错误码/文案/状态码是对外契约（接入指南 §错误码）。
  * {@link #tryPublish(long)}/{@link #tryPublishToTail(long)}：不抛，返回是否成功——
- * worker 重投这类"失败要自行回退状态"的调用方用它。
+ * 用于「失败要自行处理」的调用方：worker 失败重投（{@code tryPublishToTail}）、
+ * 启动恢复 {@code StartupRecovery}（{@code tryPublish}）。
  *
- * <p>{@code StartupRecovery} 不走本类：启动期 Redis 未就绪属正常场景（D-035），
- * 必须逐条尽力而为、带着原始异常写日志，不许拖垮应用上下文。
+ * <p>{@code StartupRecovery} 启动恢复也走本类：用 {@link #tryPublish(long)}（永不抛），
+ * 启动期 Redis 未就绪（D-035）时返回 false、由调用方记 error 日志，不拖垮应用上下文；
+ * 原始异常栈由本类内部记录。
  */
 @Component
 public class QueuePublisher {
