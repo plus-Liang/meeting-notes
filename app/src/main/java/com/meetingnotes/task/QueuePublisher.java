@@ -49,7 +49,8 @@ public class QueuePublisher {
         }
     }
 
-    /** 不抛版本：供 worker 重投等调用方自行回退状态（S6），失败记 WARN 不中断调用方流程。 */
+    /** 不抛版本：启动恢复（StartupRecovery）等"失败要自行处理"的调用方用（T4.63 O-2）；
+     * worker 失败重投走 {@code tryPublishToTail}（队尾语义）。失败记 WARN 不中断调用方流程。 */
     public boolean tryPublish(long taskId) {
         try {
             publish(taskId);

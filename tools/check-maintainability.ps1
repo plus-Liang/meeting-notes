@@ -16,6 +16,12 @@ if ([string]::IsNullOrWhiteSpace($Repo)) {
     else { $Repo = 'D:\new\projects\meeting-notes' }
 }
 
+# T4.65：-Repo 允许正斜杠写法，但下游按 Windows 反斜杠口径工作——
+# Get-ChildItem 输出恒为反斜杠，而 RelPath 的前缀剥离用 ($Repo + '\')：正斜杠入参会剥离失败，
+# RelPath 退回绝对路径 → M-11/M-12 的 allowlist 相对路径键（正斜杠）全部失配（假提示 4 条）。
+# 入口统一为反斜杠，下游 Join-Path/RelPath/豁免比对全部一致。
+$Repo = $Repo.Replace('/', '\')
+
 $ErrorActionPreference = 'Stop'
 $src = Join-Path $Repo 'app\src\main\java'
 $test = Join-Path $Repo 'app\src\test\java'
