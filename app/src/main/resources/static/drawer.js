@@ -8,6 +8,24 @@
 
   var lastTrigger = null; /* 关闭后焦点还原 */
 
+  /* T4.69 C2：抽屉深链版本化——iframe 与「新标签打开」/「复制链接」共用 task.html?id= 同一 URL，
+   * 浏览器可能还存着部署前的旧 task.html（T4.68 的 no-cache 只约束之后的响应、不作废已存条目）。
+   * 页面加载即取一次构建标识（每页面一次，内存缓存），深链追加 &v=<build>；
+   * 取失败或未就绪 → 降级 &_=<Date.now()>（保证能开、且不命中旧缓存条目）。 */
+  var mnBuildTag = null;
+  try {
+    fetch('api/v1/version')
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) {
+        if (j && j.build) { mnBuildTag = String(j.build).replace(/[^0-9A-Za-z._-]/g, ''); }
+      })
+      .catch(function () { /* 保持 null → 降级 cache-buster */ });
+  } catch (e) { /* 无 fetch 的极旧环境 → 降级 cache-buster */ }
+
+  function mnCacheBust() {
+    return mnBuildTag ? '&v=' + mnBuildTag : '&_=' + Date.now();
+  }
+
   function mnOpenTaskDrawer(taskId, title) {
     if (document.querySelector('.mn-drawer-root')) return; /* 单实例 */
     lastTrigger = document.activeElement;
@@ -17,7 +35,7 @@
     root.setAttribute('aria-modal', 'true');
     root.setAttribute('aria-label', '任务详情（站内抽屉）');
     var safeId = String(taskId).replace(/[^0-9]/g, '');
-    var deepLink = 'task.html?id=' + safeId;
+    var deepLink = 'task.html?id=' + safeId + mnCacheBust();
     var safeTitle = String(title === undefined || title === null ? '' : title)
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     root.innerHTML =

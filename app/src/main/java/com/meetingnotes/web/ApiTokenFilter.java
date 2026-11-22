@@ -29,6 +29,7 @@ import java.util.List;
  * <p>豁免面（filter 只挂 /api/v1 前缀，其余一律放行）：/actuator/**、静态页与资源、
  * /v3/api-docs/**、/swagger-ui/**。T4.28（K-46）：/api/v1/share/ 前缀（匿名只读分享）；
  * T4.35b：GET ^/api/v1/tasks/\d+/audio$（自带 HMAC 短时签名验签）；
+ * T4.69 C1：GET /api/v1/version（构建标识，version/build 两个非敏感字段）；
  * **T4.37a 只加两条精确路径**：POST /api/v1/auth/login、POST /api/v1/auth/register
  * （/auth/logout、/auth/me 仍要认证）。
  *
@@ -71,6 +72,9 @@ public class ApiTokenFilter extends OncePerRequestFilter {
         }
         if ("GET".equals(request.getMethod()) && uri.matches("^/api/v1/tasks/\\d+/audio$")) {
             return true; // T4.35b：音频流自带短时签名，验签在 controller（失败 404，绝不回退成无签名下载）
+        }
+        if ("GET".equals(request.getMethod()) && "/api/v1/version".equals(uri)) {
+            return true; // T4.69 C1：构建版本端点免鉴权（只含 version/build 两个非敏感字段）
         }
         if ("POST".equals(request.getMethod())
                 && ("/api/v1/auth/login".equals(uri) || "/api/v1/auth/register".equals(uri))) {

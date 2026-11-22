@@ -29,6 +29,12 @@
     <spring-ai.version>1.1.8</spring-ai.version>
     <!-- 2026-11-13 Maven Central 核对的最新 GA；Spring Boot 不管理 AWS SDK v2 -->
     <aws.sdk.version>2.59.0</aws.sdk.version>
+    <!-- T4.69 C1：构建标识——GIT_SHA 由 app/Dockerfile 的 ARG 传入（本地/无 git 环境默认 dev）。
+         build.time 先在 pom 内插值 ${maven.build.timestamp}（此格式属性只在模型插值时生效，
+         资源过滤拿到的是物化后的字符串），再经资源过滤写入 version.properties -->
+    <GIT_SHA>dev</GIT_SHA>
+    <maven.build.timestamp.format>yyyyMMdd-HHmmss</maven.build.timestamp.format>
+    <build.time>${maven.build.timestamp}</build.time>
   </properties>
 
   <dependencyManagement>
@@ -131,6 +137,24 @@
   </dependencies>
 
   <build>
+    <!-- T4.69 C1：只对 version.properties 开资源过滤（写入版本/短 sha/构建时间）；
+         其余资源不过滤——application.yml 里的 ${...} 是 Spring 占位符，绝不能被 Maven 改写 -->
+    <resources>
+      <resource>
+        <directory>src/main/resources</directory>
+        <filtering>true</filtering>
+        <includes>
+          <include>version.properties</include>
+        </includes>
+      </resource>
+      <resource>
+        <directory>src/main/resources</directory>
+        <filtering>false</filtering>
+        <excludes>
+          <exclude>version.properties</exclude>
+        </excludes>
+      </resource>
+    </resources>
     <plugins>
       <plugin>
         <groupId>org.springframework.boot</groupId>

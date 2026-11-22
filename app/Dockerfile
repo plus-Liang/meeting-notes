@@ -15,7 +15,10 @@ RUN if [ -n "$MAVEN_MIRROR" ]; then \
     fi \
  && mvn -B -q dependency:go-offline
 COPY src ./src
-RUN mvn -B -q -DskipTests package
+# T4.69 C1：构建标识短 sha——本地/CI 用 --build-arg GIT_SHA=$(git rev-parse --short HEAD) 传入；
+# 不传时默认 dev（build 仍随 maven.build.timestamp 变化，满足「build 必须随构建变化」）
+ARG GIT_SHA=dev
+RUN mvn -B -q -DskipTests package -DGIT_SHA=$GIT_SHA
 
 FROM ${REGISTRY_PREFIX}library/eclipse-temurin:21-jre
 WORKDIR /app
