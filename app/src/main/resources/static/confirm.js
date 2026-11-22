@@ -45,6 +45,16 @@
       panel.appendChild(actions);
       mask.appendChild(panel);
       document.body.appendChild(mask);
+      /* T4.68 C2（D-211/K-137）：样式表兜底——components.css 缺失或停留在旧缓存（没有 .dlg-* 规则）时，
+       * 弹窗会退化成文档流末尾的普通块级元素（实测：面板落到页面左下角、遮罩透明）。
+       * 插入后读一次 computed position：不是 fixed ⇒ .dlg-* 规则没生效，给遮罩/面板补关键内联样式；
+       * 样式表正常时一个字节不改（内联只在兜底分支生效，components.css 的类规则不动）。 */
+      if (getComputedStyle(mask).position !== 'fixed') {
+        mask.style.cssText = 'position:fixed; inset:0; z-index:90; background:rgba(20,18,14,0.45);'
+          + ' display:flex; align-items:center; justify-content:center;';
+        panel.style.cssText = 'position:relative; max-width:min(430px, calc(100vw - 32px));'
+          + ' background:#fff; border-radius:12px; padding:20px;';
+      }
       dlgEl = mask;
       function done(val) {
         document.removeEventListener('keydown', onKey, true);

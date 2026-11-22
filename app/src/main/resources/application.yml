@@ -87,6 +87,16 @@ spring:
         # 调度池扩到 4，隔离两类周期任务。
         size: 4
 
+  web:
+    resources:
+      cache:
+        cachecontrol:
+          # T4.68 C1（D-211/K-137）：静态资源此前只发 Last-Modified、没有 Cache-Control，
+          # 浏览器按启发式缓存长期保留旧 CSS/HTML →「代码改了、部署对了，用户还是旧界面」。
+          # no-cache = 每次用条件请求校验：未变 304（不重传体积），变了立刻拿新。
+          # 不改静态文件 URL 形式（不做手写版本号）。
+          no-cache: true
+
 app:
   base-url: ${APP_BASE_URL:http://localhost:8080}
 

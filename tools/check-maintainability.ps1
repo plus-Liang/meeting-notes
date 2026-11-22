@@ -266,6 +266,30 @@ foreach ($rel in $javaLines.Keys) {
     }
 }
 
+# ===== T4.68 新增 M-13：静态资源原生弹窗残留（阻塞）=====
+# C3（K-137）：window.confirm/alert/prompt（含裸调用）会弹浏览器原生对话框，绕过站内 confirmDialog
+# 的焦点/Esc/遮罩契约——静态资源里出现即阻塞。注释里的字样不命中（tasks.html:423 的 XSS 说明注释
+# 含 alert(1) 字样：跳过规则与 M-11 相同的行首/行尾近似，另补 HTML 注释 <!-- / --> 形态）。
+# alert 的裸调用形态 M-11 已拦（11a），此处按卡面口径再报一次，同行双报属预期。
+if (Test-Path $staticDir) {
+    foreach ($f in (Get-ChildItem $staticDir -Recurse -File -Include *.html,*.js)) {
+        $rel = RelPath $f.FullName
+        $ln = 0
+        # 前端文件无 BOM：显式 UTF8 读（K-102）
+        foreach ($line in [System.IO.File]::ReadAllLines($f.FullName, [System.Text.Encoding]::UTF8)) {
+            $ln++
+            $t = $line.Trim()
+            if ($t.StartsWith('//') -or $t.StartsWith('/*') -or $t.StartsWith('*') -or $t.EndsWith('*/') `
+                -or $t.StartsWith('<!--') -or $t.EndsWith('-->')) { continue }
+            if (($line -match 'window\.confirm\s*\(' -or $line -match 'window\.alert\s*\(' -or $line -match 'window\.prompt\s*\(' `
+                -or $line -match '\bconfirm\s*\(' -or $line -match '\balert\s*\(' -or $line -match '\bprompt\s*\(') `
+                -and -not (Is-Allowed $rel $line)) {
+                [void]$blocking.Add(("M13 原生弹窗残留 {0}:{1} → {2}" -f $rel, $ln, $line.Trim()))
+            }
+        }
+    }
+}
+
 # ===== T4.55 新增 M-12：前端规模（提示，不阻塞；豁免走 allowlist 的 "M-12|相对路径" 行）=====
 if (Test-Path $staticDir) {
     $m12Exempt = @()
