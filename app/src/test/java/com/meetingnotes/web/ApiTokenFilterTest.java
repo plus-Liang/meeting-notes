@@ -137,17 +137,20 @@ class ApiTokenFilterTest {
 
     @Test
     void accountTokenPassesWithItsUserId() throws Exception {
-        when(jdbc.query(contains("SELECT id FROM app_user WHERE token_hash = ?"),
+        // T4.71：账号令牌改查 user_session（join app_user），命中即续期 last_used_at
+        when(jdbc.query(contains("FROM user_session s JOIN app_user u ON u.id = s.user_id WHERE s.token_hash = ?"),
                 any(RowMapper.class), eq(sha256Hex(USER_TOKEN)))).thenReturn(List.of(2L));
-        // 账号令牌 → 对应用户 id
+
         mvc.perform(get("/api/v1/tasks").header("Authorization", "Bearer " + USER_TOKEN))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$").value("2"));
+        Mockito.verify(jdbc).update(contains("UPDATE user_session SET last_used_at = now()"),
+                eq(sha256Hex(USER_TOKEN)));
     }
 
     @Test
     void unknownAccountTokenIsRejected() throws Exception {
-        when(jdbc.query(contains("SELECT id FROM app_user WHERE token_hash = ?"),
+        when(jdbc.query(contains("FROM user_session s JOIN app_user u ON u.id = s.user_id WHERE s.token_hash = ?"),
                 any(RowMapper.class), eq(sha256Hex("ghost-token")))).thenReturn(List.of());
         mvc.perform(get("/api/v1/tasks").header("Authorization", "Bearer ghost-token"))
                 .andExpect(status().isUnauthorized());

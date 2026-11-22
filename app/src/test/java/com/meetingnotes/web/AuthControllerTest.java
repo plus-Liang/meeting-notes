@@ -56,6 +56,48 @@ class AuthControllerTest {
                 "不得泄露用户名/哈希等任何其它字段：" + body.keySet());
     }
 
+    /* ---- T4.71：logout 传当前 Bearer + 会话列表 ---- */
+
+    @Test
+    void logoutPassesCurrentBearerToService() {
+        UserContext.set(2L);
+
+        Map<String, Object> body = authController.logout("Bearer raw-device-token");
+
+        assertEquals(true, body.get("revoked"));
+        verify(authService).logout(2L, "raw-device-token");
+    }
+
+    @Test
+    void sessionsListDefaultsToSelfAndMapsIsoTimestamps() {
+        UserContext.set(2L);
+        when(authService.listSessions(2L)).thenReturn(List.of(
+                new AuthService.SessionInfo(11, java.time.Instant.parse("2026-11-22T01:00:00Z"),
+                        java.time.Instant.parse("2026-11-22T02:00:00Z"))));
+
+        List<Map<String, Object>> rows = authController.sessions(null);
+
+        assertEquals(1, rows.size());
+        assertEquals(11L, rows.get(0).get("id"));
+        assertEquals("2026-11-22T01:00:00Z", rows.get(0).get("created_at"));
+        assertEquals("2026-11-22T02:00:00Z", rows.get(0).get("last_used_at"));
+        assertTrue(rows.get(0).keySet().stream().noneMatch(k -> k.contains("token") || k.contains("hash")),
+                "会话项不得含令牌/hash 字段");
+        verify(authService, org.mockito.Mockito.never()).requireAdmin(2L);
+    }
+
+    /** 查他人会话：非本人非 ADMIN → 403 FORBIDDEN（服务端闸）。 */
+    @Test
+    void sessionsOfOtherUserRequireAdmin403() {
+        UserContext.set(2L);
+        org.mockito.Mockito.doThrow(new ApiException(403, "FORBIDDEN", "需要管理员权限"))
+                .when(authService).requireAdmin(2L);
+
+        ApiException e = assertThrows(ApiException.class, () -> authController.sessions(1L));
+        assertEquals(403, e.getStatus());
+        assertEquals("FORBIDDEN", e.getCode());
+    }
+
     @Test
     void adminCreateDelegatesAndReturnsSnakeCaseKeys() {
         UserContext.set(1L);

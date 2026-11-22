@@ -19,6 +19,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -37,7 +38,11 @@ class AuthServiceTest {
     private final TokenService tokens = new TokenService();
 
     private AuthService newService(boolean registrationEnabled) {
-        return new AuthService(jdbc, hasher, tokens, registrationEnabled);
+        return new AuthService(jdbc, hasher, tokens, registrationEnabled, 10);
+    }
+
+    private AuthService newService(boolean registrationEnabled, int maxSessions) {
+        return new AuthService(jdbc, hasher, tokens, registrationEnabled, maxSessions);
     }
 
     private static ApiException ofCode(Runnable action, String code) {
@@ -50,9 +55,9 @@ class AuthServiceTest {
 
     @Test
     void firstRegisterClaimsAdminId1AdminRole() {
-        // 条件更新影响 1 行 = 认领成功
+        // 条件更新影响 1 行 = 认领成功（T4.71：令牌不再写 app_user，改进 user_session）
         when(jdbc.update(contains("WHERE id = 1 AND password_hash = ?"),
-                anyString(), anyString(), anyString(), anyString())).thenReturn(1);
+                anyString(), anyString(), anyString())).thenReturn(1);
 
         AuthService.AuthSession s = newService(true).register("Boss", "password123");
 
@@ -61,14 +66,16 @@ class AuthServiceTest {
         assertEquals("Boss", s.username());
         assertNotNull(s.token());
         verify(jdbc).update(contains("WHERE id = 1 AND password_hash = ?"), eq("Boss"),
-                anyString(), anyString(), eq("!"));
+                anyString(), eq("!"));
+        verify(jdbc).update(contains("INSERT INTO user_session (user_id, token_hash) VALUES (?, ?)"),
+                eq(1L), anyString());
     }
 
     @Test
     void claimUsernameConflictingWithOtherUserIs409() {
         // 认领请求的用户名撞其它用户 → 唯一索引 DuplicateKeyException → 409
         when(jdbc.update(contains("WHERE id = 1 AND password_hash = ?"),
-                anyString(), anyString(), anyString(), anyString()))
+                anyString(), anyString(), anyString()))
                 .thenThrow(new org.springframework.dao.DuplicateKeyException("ux_app_user_username"));
 
         ofCode(() -> newService(true).register("admin", "password123"), "USERNAME_TAKEN");
@@ -80,22 +87,24 @@ class AuthServiceTest {
     void secondRegisterCreatesUserIdRole() {
         // 认领条件更新影响 0 行（admin 已被认领）→ 走普通注册
         when(jdbc.update(contains("WHERE id = 1 AND password_hash = ?"),
-                anyString(), anyString(), anyString(), anyString())).thenReturn(0);
+                anyString(), anyString(), anyString())).thenReturn(0);
         when(jdbc.query(contains("WHERE lower(username) = lower(?)"),
                 any(ResultSetExtractor.class), eq("bob"))).thenReturn(null);
         when(jdbc.queryForObject(contains("INSERT INTO app_user"), eq(Long.class),
-                eq("bob"), anyString(), eq("USER"), anyString())).thenReturn(5L);
+                eq("bob"), anyString(), eq("USER"))).thenReturn(5L);
 
         AuthService.AuthSession s = newService(true).register("bob", "password123");
 
         assertEquals(5L, s.userId());
         assertEquals("USER", s.role());
+        verify(jdbc).update(contains("INSERT INTO user_session (user_id, token_hash) VALUES (?, ?)"),
+                eq(5L), anyString());
     }
 
     @Test
     void duplicateUsernameCaseInsensitive409() {
         when(jdbc.update(contains("WHERE id = 1 AND password_hash = ?"),
-                anyString(), anyString(), anyString(), anyString())).thenReturn(0);
+                anyString(), anyString(), anyString())).thenReturn(0);
         when(jdbc.query(contains("WHERE lower(username) = lower(?)"),
                 any(ResultSetExtractor.class), eq("BOB"))).thenReturn(5L);
 
@@ -106,11 +115,11 @@ class AuthServiceTest {
     @Test
     void concurrentInsertUniqueViolationIs409Not500() {
         when(jdbc.update(contains("WHERE id = 1 AND password_hash = ?"),
-                anyString(), anyString(), anyString(), anyString())).thenReturn(0);
+                anyString(), anyString(), anyString())).thenReturn(0);
         when(jdbc.query(contains("WHERE lower(username) = lower(?)"),
                 any(ResultSetExtractor.class), eq("bob"))).thenReturn(null);
         when(jdbc.queryForObject(contains("INSERT INTO app_user"), eq(Long.class),
-                eq("bob"), anyString(), eq("USER"), anyString()))
+                eq("bob"), anyString(), eq("USER")))
                 .thenThrow(new org.springframework.dao.DuplicateKeyException("ux_app_user_username"));
 
         ApiException e = ofCode(() -> newService(true).register("bob", "password123"), "USERNAME_TAKEN");
@@ -121,7 +130,7 @@ class AuthServiceTest {
     void registrationDisabled403WhenAdminClaimed() {
         // 认领 0 行（已被占）+ 开关关 → 403
         when(jdbc.update(contains("WHERE id = 1 AND password_hash = ?"),
-                anyString(), anyString(), anyString(), anyString())).thenReturn(0);
+                anyString(), anyString(), anyString())).thenReturn(0);
 
         ofCode(() -> newService(false).register("bob", "password123"), "REGISTRATION_DISABLED");
     }
@@ -129,7 +138,7 @@ class AuthServiceTest {
     @Test
     void registrationDisabledDoesNotBlockAdminClaim() {
         when(jdbc.update(contains("WHERE id = 1 AND password_hash = ?"),
-                anyString(), anyString(), anyString(), anyString())).thenReturn(1);
+                anyString(), anyString(), anyString())).thenReturn(1);
 
         AuthService.AuthSession s = newService(false).register("admin", "password123");
         assertEquals(1L, s.userId(), "认领不受开关限制");
@@ -153,7 +162,7 @@ class AuthServiceTest {
     /* ---- 登录 ---- */
 
     @Test
-    void loginSuccessRotatesToken() {
+    void loginIssuesIndependentSessions() {
         String realHash = hasher.hash("right-pass");
         when(jdbc.query(contains("SELECT id, username, password_hash, role FROM app_user WHERE lower(username) = lower(?)"),
                 any(RowMapper.class), eq("alice")))
@@ -165,9 +174,12 @@ class AuthServiceTest {
         assertEquals(2L, s1.userId());
         assertEquals("USER", s1.role());
         assertNotNull(s1.token());
-        assertNotEquals(s1.token(), s2.token(), "重登轮换：旧令牌被覆盖失效");
+        assertNotEquals(s1.token(), s2.token(), "两次登录各签发独立令牌");
+        /* T4.71：多设备会话——每次登录 INSERT 一条 user_session，绝不覆盖/不碰 app_user.token_hash */
         verify(jdbc, org.mockito.Mockito.times(2))
-                .update(contains("UPDATE app_user SET token_hash"), anyString(), eq(2L));
+                .update(contains("INSERT INTO user_session (user_id, token_hash) VALUES (?, ?)"),
+                        eq(2L), anyString());
+        verify(jdbc, never()).update(contains("UPDATE app_user SET token_hash"), anyString(), eq(2L));
     }
 
     @Test
@@ -195,9 +207,10 @@ class AuthServiceTest {
     /* ---- 注销 / me ---- */
 
     @Test
-    void logoutClearsTokenHash() {
-        newService(true).logout(2L);
-        verify(jdbc).update(contains("SET token_hash = NULL"), eq(2L));
+    void logoutDeletesOnlyCurrentTokenSession() {
+        newService(true).logout(2L, "raw-device-token");
+        verify(jdbc).update(contains("DELETE FROM user_session WHERE user_id = ? AND token_hash = ?"),
+                eq(2L), eq(tokens.sha256Hex("raw-device-token")));
     }
 
     @Test
@@ -235,7 +248,7 @@ class AuthServiceTest {
         when(jdbc.query(contains("WHERE lower(username) = lower(?)"),
                 any(ResultSetExtractor.class), eq("carol"))).thenReturn(null);
         when(jdbc.queryForObject(contains("INSERT INTO app_user"), eq(Long.class),
-                eq("carol"), anyString(), eq("USER"), org.mockito.ArgumentMatchers.isNull())).thenReturn(7L);
+                eq("carol"), anyString(), eq("USER"))).thenReturn(7L);
 
         AuthService.UserInfo info = newService(true).createUserAsAdmin("carol", "password123", "USER");
 
@@ -243,7 +256,7 @@ class AuthServiceTest {
         assertEquals("carol", info.username());
         assertEquals("USER", info.role());
         verify(jdbc).queryForObject(contains("INSERT INTO app_user"), eq(Long.class),
-                eq("carol"), anyString(), eq("USER"), org.mockito.ArgumentMatchers.isNull());
+                eq("carol"), anyString(), eq("USER"));
     }
 
     @Test
@@ -267,7 +280,7 @@ class AuthServiceTest {
         when(jdbc.query(contains("WHERE lower(username) = lower(?)"),
                 any(ResultSetExtractor.class), eq("carol"))).thenReturn(null);
         when(jdbc.queryForObject(contains("INSERT INTO app_user"), eq(Long.class),
-                eq("carol"), anyString(), eq("USER"), org.mockito.ArgumentMatchers.isNull())).thenReturn(7L);
+                eq("carol"), anyString(), eq("USER"))).thenReturn(7L);
 
         AuthService.UserInfo info = newService(true).createUserAsAdmin("carol", "password123", "USER");
 
@@ -290,6 +303,58 @@ class AuthServiceTest {
                 .thenReturn(List.of(new AuthService.UserInfo(2L, "carol", "USER")));
         ApiException e = ofCode(() -> newService(true).requireAdmin(2L), "FORBIDDEN");
         assertEquals(403, e.getStatus());
+    }
+
+    /* ---- T4.71：会话上限淘汰 / 会话列表 ---- */
+
+    @Test
+    void sessionsEvictOldestOverLimit() {
+        // COUNT=3 > max=2 → 删最旧的 3−2=1 条（id IN ... ORDER BY created_at LIMIT 1），保留最新 2 条
+        when(jdbc.update(contains("WHERE id = 1 AND password_hash = ?"),
+                anyString(), anyString(), anyString())).thenReturn(0);
+        when(jdbc.query(contains("WHERE lower(username) = lower(?)"),
+                any(ResultSetExtractor.class), eq("bob"))).thenReturn(null);
+        when(jdbc.queryForObject(contains("INSERT INTO app_user"), eq(Long.class),
+                eq("bob"), anyString(), eq("USER"))).thenReturn(5L);
+        when(jdbc.queryForObject(contains("SELECT COUNT(*) FROM user_session WHERE user_id = ?"),
+                eq(Integer.class), eq(5L))).thenReturn(3);
+
+        newService(true, 2).register("bob", "password123");
+
+        verify(jdbc).update(contains("AND id IN (SELECT id FROM user_session WHERE user_id = ? "
+                + "ORDER BY created_at, id LIMIT ?)"), eq(5L), eq(5L), eq(1));
+    }
+
+    @Test
+    void sessionsUnderLimitAreNotPruned() {
+        when(jdbc.update(contains("WHERE id = 1 AND password_hash = ?"),
+                anyString(), anyString(), anyString())).thenReturn(0);
+        when(jdbc.query(contains("WHERE lower(username) = lower(?)"),
+                any(ResultSetExtractor.class), eq("bob"))).thenReturn(null);
+        when(jdbc.queryForObject(contains("INSERT INTO app_user"), eq(Long.class),
+                eq("bob"), anyString(), eq("USER"))).thenReturn(5L);
+        when(jdbc.queryForObject(contains("SELECT COUNT(*) FROM user_session WHERE user_id = ?"),
+                eq(Integer.class), eq(5L))).thenReturn(2);
+
+        newService(true, 2).register("bob", "password123");
+
+        verify(jdbc, never()).update(contains("ORDER BY created_at, id LIMIT ?"));
+    }
+
+    @Test
+    void listSessionsReturnsRowsWithoutTokenMaterial() {
+        when(jdbc.query(contains("SELECT id, created_at, last_used_at FROM user_session WHERE user_id = ?"),
+                any(RowMapper.class), eq(2L))).thenReturn(List.of(
+                new AuthService.SessionInfo(11, java.time.Instant.parse("2026-11-22T01:00:00Z"),
+                        java.time.Instant.parse("2026-11-22T02:00:00Z"))));
+
+        List<AuthService.SessionInfo> rows = newService(true).listSessions(2L);
+
+        assertEquals(1, rows.size());
+        assertEquals(11L, rows.get(0).id());
+        String dumped = String.valueOf(rows);
+        assertTrue(!dumped.contains("token") && !dumped.contains("hash"),
+                "会话视图不得携带令牌/hash：" + dumped);
     }
 
     private static String anyString() {

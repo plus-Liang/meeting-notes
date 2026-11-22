@@ -206,6 +206,9 @@ app:
     # 加人通道：管理员经 POST /api/v1/admin/users 建号（settings.html 成员区）。
     # true = 允许任何人自助注册（仅自用/可信环境临时开启）。配置项改后重启生效，不做运行期热改。
     registration-enabled: ${AUTH_REGISTRATION_ENABLED:false}
+    # T4.71 O-2：单账号最大并存会话数（多设备登录互不踢）。登录/注册的新会话超过上限时
+    # 淘汰 created_at 最旧的会话（info 日志只含数量，令牌明文/hash 不进日志）。改后重启生效。
+    max-sessions: ${AUTH_MAX_SESSIONS:10}
 
   quota:
     minutes-per-day: ${QUOTA_MINUTES_PER_DAY:120}

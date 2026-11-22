@@ -125,9 +125,17 @@ public class ApiTokenFilter extends OncePerRequestFilter {
             return null; // 形状护栏：超长串不做哈希查询
         }
         String hash = sha256Hex(token);
-        List<Long> ids = jdbc.query("SELECT id FROM app_user WHERE token_hash = ?",
+        // T4.71：账号令牌改查 user_session（join app_user = 双保险：令牌必须属于仍存在的账号，
+        // 账号删除经 FK 级联清会话）。role 在此不消费——权限判定仍走 me()/requireAdmin。
+        List<Long> ids = jdbc.query(
+                "SELECT s.user_id FROM user_session s JOIN app_user u ON u.id = s.user_id WHERE s.token_hash = ?",
                 (rs, i) -> rs.getLong(1), hash);
-        return ids.isEmpty() ? null : ids.get(0);
+        if (ids.isEmpty()) {
+            return null;
+        }
+        // 命中即续期（OncePerRequestFilter 保证同请求最多一次）
+        jdbc.update("UPDATE user_session SET last_used_at = now() WHERE token_hash = ?", hash);
+        return ids.get(0);
     }
 
     /** 常量时间比较（长度不同立即假，内容比较不短路）。 */
