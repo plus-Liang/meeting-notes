@@ -228,6 +228,14 @@ docker compose logs app | grep '"taskId":"123"'
 
 想回到人类可读文本：在 `.env` 里加 `LOG_JSON=false`，再 `docker compose up -d app`（环境变量要在 `.env` 里改，命令前内联 `LOG_JSON=false docker compose …` 对 app 不生效）。
 
+**任务队列与重试语义**（Redis 抖动时的行为）：
+
+- 提交任务时队列不可用会**明确失败**（HTTP `503` + `QUEUE_UNAVAILABLE`），不再"假成功"；任务行不会丢，按 5–30s 退避重试即可。
+- 已经建好、但停在 `PENDING` 的任务（提交瞬间 Redis 不可用留下的行），运行期每 **60 秒**自动清扫：把超过 **2 分钟**没动过的 `PENDING` 重新入队——**不需要重启 app，也不需要手动重传**。相关键：`APP_QUEUE_PENDING_SWEEP_ENABLED`（默认 `true`）、`APP_QUEUE_PENDING_SWEEP_INTERVAL_MS`（默认 `60000`）、`APP_QUEUE_PENDING_SWEEP_STALE_MINUTES`（默认 `2`）。
+- worker 转写失败的重试走**队尾**（不抢别的任务的队头位置），等于天然退避、不饿死其他任务；重试次数用尽才进 `DEAD`，可在「任务台账 → 失败」批量重试。
+- 启动时若发现上次崩溃留下的 `RUNNING` 僵尸任务，会自动回收重入队（日志 `"recovered":N`）；`"requeuedPending":N` 表示启动时顺带重投的陈旧 `PENDING`。
+- 这些日志都在 `docker compose logs app` 里，可直接按 `swept` / `requeued` / `recovered` 检索。
+
 **升级**：`git pull && docker compose up -d --build`（Flyway 自动迁移，先备份）。**回滚**：`git checkout <上一个 tag> && docker compose up -d --build`。
 
 ## 常见问题 / 故障排查
@@ -241,9 +249,10 @@ docker compose logs app | grep '"taskId":"123"'
 | minio 镜像拉不下来 | 国内加速源对非 library 镜像常拒绝：在 `.env` 设 `MINIO_IMAGE=<镜像源>/minio/minio:latest`（`.env.example` 顶部有注释示例），再 `docker compose up -d` |
 | 拉镜像 / 构建超时（registry EOF、i/o timeout） | 国内网络到 docker.io 不稳：在 `.env` 设 `REGISTRY_PREFIX=docker.m.daocloud.io/` 后再 `docker compose up -d --build`（把 library 基础镜像换到加速源） |
 | 改了 `APP_PORT` 后打不开 | 已处理：`APP_PORT` 只改宿主映射，容器内固定 8080。若还是不对，`docker compose up -d` 重建容器再试 |
-| 提交后一直 PENDING / 首次任务超时 | ASR 冷启动还没加载完模型：`docker compose restart asr` 等 healthy 再试；或调大 `ASR_TIMEOUT_SEC` |
+| 提交后一直 PENDING / 首次任务超时 | 先看 ASR 是否 healthy（冷启动没加载完模型 → `docker compose restart asr`，等 healthy 再试；或调大 `ASR_TIMEOUT_SEC`）；若是 Redis 抖动留下、`updated_at` 超 2 分钟的 `PENDING`，运行期清扫会自动重投，**不必重启 app** |
 | 云摘要失败但任务成功 | 云 LLM 配错会自动降级到 LOCAL/EXTRACTIVE；查结果里的 `ai_tier` 与 `docker compose logs app` |
 | 上传被拒 | 单文件 >200 MB 或 >60 分钟或格式不在白名单；错误信息会说明原因 |
+| 提交任务返回 `503 QUEUE_UNAVAILABLE` | Redis 不可用（或正在重启）。任务没丢：恢复后按 5–30s 退避重试即可；若已有任务行停在 `PENDING`，周期清扫会在 2 分钟后自动重投，**不用重启 app** |
 | 磁盘满 | 音频在 MinIO 卷里；先备份再清旧任务（删除任务会删对象） |
 | 所有接口 401 | 浏览器登录态过期 → 回登录页；API 调用需 `Authorization: Bearer <API_TOKEN 或账号令牌>` |
 | 首次启动很慢 | 首次要拉镜像 + 加载模型，属正常；之后启动约 20 秒 |
