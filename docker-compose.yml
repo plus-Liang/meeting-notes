@@ -93,6 +93,8 @@ services:
       args:
         # 第三方基础镜像同样走加速前缀（Dockerfile 里的 ARG REGISTRY_PREFIX）
         REGISTRY_PREFIX: ${REGISTRY_PREFIX:-}
+        # T4.72 C3：构建标识短 sha——deploy-main.ps1 注入 $env:GIT_SHA；默认 dev（不影响 CI/手动构建）
+        GIT_SHA: ${GIT_SHA:-dev}
     env_file:
       # 没有 .env 也能起（全部走默认值）
       - path: .env

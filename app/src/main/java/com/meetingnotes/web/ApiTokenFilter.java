@@ -22,7 +22,8 @@ import java.util.List;
  * <ul>
  *   <li>Bearer = {@code API_TOKEN}（常量时间比较）→ userId=1（1 号账号 = 管理员座位，
  *       既有接入契约零破坏）；</li>
- *   <li>否则按**账号令牌**处理：SHA-256 hex 查 {@code app_user.token_hash} → 该用户 id；</li>
+ *   <li>否则按**账号令牌**处理：SHA-256 hex 查 {@code user_session.token_hash}（T4.71 多会话，
+ *       join app_user 校验账号存在）→ 该用户 id，命中即续期 last_used_at；</li>
  *   <li>都不匹配 → 401 UNAUTHORIZED（消息指引两种凭据）。</li>
  * </ul>
  *
