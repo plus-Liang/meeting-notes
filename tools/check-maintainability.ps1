@@ -20,7 +20,10 @@ if ([string]::IsNullOrWhiteSpace($Repo)) {
 # Get-ChildItem 输出恒为反斜杠，而 RelPath 的前缀剥离用 ($Repo + '\')：正斜杠入参会剥离失败，
 # RelPath 退回绝对路径 → M-11/M-12 的 allowlist 相对路径键（正斜杠）全部失配（假提示 4 条）。
 # 入口统一为反斜杠，下游 Join-Path/RelPath/豁免比对全部一致。
-$Repo = $Repo.Replace('/', '\')
+# T4.67 S10：再补两条——相对路径按 PowerShell 位置解析（进程 CWD 可能不同）、去掉尾部分隔符，
+# 否则 RelPath 的前缀剥离（$Repo + '\'）仍会失配 → M-11/M-12 豁免键全部打不中（假提示）。
+if (-not [System.IO.Path]::IsPathRooted($Repo)) { $Repo = Join-Path $PWD.Path $Repo }
+$Repo = [System.IO.Path]::GetFullPath($Repo).TrimEnd('\')
 
 $ErrorActionPreference = 'Stop'
 $src = Join-Path $Repo 'app\src\main\java'
