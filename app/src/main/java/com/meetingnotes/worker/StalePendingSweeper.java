@@ -16,7 +16,8 @@ import java.util.List;
  *
  * <p>判据与 {@link StartupRecovery} 的启动恢复一致：status='PENDING' 且 updated_at 早于
  * stale-minutes（默认 2 分钟，挡住"刚创建还没入队"的行，不与正常提交流程抢）。
- * 重投复用 {@link QueuePublisher#publish(long)}（队头，单一入队实现，不自建第 5 份 leftPush）；
+ * 重投复用 {@link QueuePublisher#publishToTail(long)}（队尾 rightPush，单一入队实现，不自建第 5 份 push；
+ * T4.67-fix F5：恢复任务按「旧→新」追加到队尾——先卡住的先处理且不插队）；
  * 成功入队后刷新 updated_at，下一轮不再重复入队。
  *
  * <p>顺序语义（T4.62 S2，与 StartupRecovery 相反、不许合并）：**先投递成功、再 touch**——
@@ -24,9 +25,14 @@ import java.util.List;
  *
  * <p>开销边界：每轮一条 SELECT（仅 id 列）+ 每条成功重投一条 UPDATE；Redis 长期不可用时
  * 每条投递等待 Lettuce command-timeout（默认 60s）后记 warn 进下一轮——阻塞发生在
- * 调度线程池，不影响 worker 与 HTTP 线程。多实例假设：重投后 updated_at 刷新 +
- * worker 按 status 认领（非 PENDING/RETRYING 直接跳过），重复入队的多余副本会被安全跳过
- * （单实例部署为当前口径，D-061）。
+ * 调度线程池（{@code spring.task.scheduling.pool.size=4}，T4.67 S7），不影响 worker 与 HTTP 线程；
+ * 最坏发现延迟 ≈ stale-minutes（默认 2 分钟）+ interval-ms（默认 60s）。
+ *
+ * <p>多实例口径（T4.67-fix F3，事实化——原注释曾宣称重复入队的多余副本无害，该说法在原子认领落地前不成立）：
+ * 单实例部署为当前口径（D-061），重复入队的副本无害；多实例下靠 worker 侧的原子认领兜底——
+ * TranscriptionWorker 用条件 UPDATE（{@code WHERE id = ? AND status IN ('PENDING','RETRYING')}）
+ * 并校验影响行数，同一任务只有一个实例能把行改成 RUNNING，抢到 0 行的实例直接跳过，
+ * 不会重复处理同一任务。判据/刷新 SQL 见 {@link StalePendingQueries}。
  */
 @Component
 public class StalePendingSweeper {
@@ -58,7 +64,8 @@ public class StalePendingSweeper {
         try {
             stale = stalePendingQueries.findStalePending(StalePendingQueries.cutoff(staleMinutes));
         } catch (DataAccessException e) {
-            /* 空库/测试环境没有表：静默跳过（D-035 口径，同 StartupRecovery），不拖垮调度线程 */
+            /* 空库/测试环境没有表：跳过但不拖垮调度线程（D-035 口径，同 StartupRecovery；T4.67-fix F2 补日志） */
+            log.warn("陈旧 PENDING 清扫跳过（空库/测试环境无表或数据库不可用）：{}", e.getMessage());
             return;
         }
         if (stale.isEmpty()) {
@@ -67,7 +74,7 @@ public class StalePendingSweeper {
         int requeued = 0;
         for (Long id : stale) {
             try {
-                queuePublisher.publish(id);
+                queuePublisher.publishToTail(id);
                 stalePendingQueries.touch(id); /* T4.62 S2：先投递成功、再 touch——失败绝不刷新 */
                 requeued++;
             } catch (RuntimeException e) {

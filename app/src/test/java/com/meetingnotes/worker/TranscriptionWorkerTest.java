@@ -185,6 +185,7 @@ class TranscriptionWorkerTest {
         when(jdbc.queryForMap(contains("FROM task WHERE id = ?"), eq(20L))).thenReturn(java.util.Map.of(
                 "status", "PENDING", "attempts", 0, "source_type", "PASTE",
                 "source_uri", "s3://meetingnotes/tasks/20/paste.txt"));
+        when(jdbc.update(contains("AND status IN ('PENDING','RETRYING')"), eq(20L))).thenReturn(1);
         when(pasteTextReader.read("tasks/20/paste.txt")).thenReturn("粘贴的一段会议文本");
 
         ReflectionTestUtils.invokeMethod(worker, "process", 20L);
@@ -302,5 +303,41 @@ class TranscriptionWorkerTest {
         recovery.run(null);
 
         verify(queuePublisher, org.mockito.Mockito.never()).tryPublish(org.mockito.ArgumentMatchers.anyLong());
+    }
+
+    /* ---- T4.67-fix F4（S12 真修）：认领 = 原子条件 UPDATE + 影响行数校验 ---- */
+
+    /** 影响行数 0（状态已被其它实例/流程改走）：跳过——不读对象、不调结构化、不落库、不置 DONE。 */
+    @Test
+    void claimConflictSkipsProcessingEntirely() throws Exception {
+        TranscriptionWorker worker = newWorker();
+        when(jdbc.queryForMap(contains("FROM task WHERE id = ?"), eq(21L))).thenReturn(java.util.Map.of(
+                "status", "PENDING", "attempts", 0, "source_type", "PASTE",
+                "source_uri", "s3://meetingnotes/tasks/21/paste.txt"));
+        when(jdbc.update(contains("AND status IN ('PENDING','RETRYING')"), eq(21L))).thenReturn(0);
+
+        ReflectionTestUtils.invokeMethod(worker, "process", 21L);
+
+        verify(pasteTextReader, never()).read(anyString());
+        verify(structuringService, never()).structure(anyLong(), anyString());
+        verify(jdbc, never()).update(contains("task_result"), eq(21L), ArgumentMatchers.any(), ArgumentMatchers.any());
+        verify(jdbc, never()).update(contains("'DONE'"), eq(21L));
+    }
+
+    /** 影响行数 1：照旧处理收口 DONE；且认领 SQL 必须带原子条件（A2 变异③落点：去掉条件时本用例必红）。 */
+    @Test
+    void claimSuccessProceedsAndSqlIsConditional() throws Exception {
+        TranscriptionWorker worker = newWorker();
+        when(jdbc.queryForMap(contains("FROM task WHERE id = ?"), eq(22L))).thenReturn(java.util.Map.of(
+                "status", "PENDING", "attempts", 0, "source_type", "PASTE",
+                "source_uri", "s3://meetingnotes/tasks/22/paste.txt"));
+        when(jdbc.update(contains("AND status IN ('PENDING','RETRYING')"), eq(22L))).thenReturn(1);
+        when(pasteTextReader.read("tasks/22/paste.txt")).thenReturn("认领成功后照常处理");
+
+        ReflectionTestUtils.invokeMethod(worker, "process", 22L);
+
+        verify(jdbc).update(contains("AND status IN ('PENDING','RETRYING')"), eq(22L));
+        verify(jdbc).update(contains("task_result"), eq(22L), eq("认领成功后照常处理"), ArgumentMatchers.isNull());
+        verify(jdbc).update(contains("'DONE'"), eq(22L));
     }
 }

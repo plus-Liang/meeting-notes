@@ -35,6 +35,9 @@ public class QueuePublisher {
 
     public QueuePublisher(StringRedisTemplate redis,
                           @Value("${app.worker.queue-key}") String queueKey) {
+        if (queueKey == null || queueKey.isBlank()) {
+            throw new IllegalArgumentException("queueKey 不能为空（检查 app.worker.queue-key 配置）");
+        }
         this.redis = redis;
         this.queueKey = queueKey;
     }
@@ -56,7 +59,7 @@ public class QueuePublisher {
             publish(taskId);
             return true;
         } catch (ApiException e) {
-            log.warn("任务 {} 入队失败（Redis 不可用），交由调用方回退状态", taskId);
+            log.warn("任务 {} 入队失败（Redis 不可用），交由调用方回退状态", taskId, e);
             return false;
         }
     }
@@ -77,7 +80,7 @@ public class QueuePublisher {
             publishToTail(taskId);
             return true;
         } catch (ApiException e) {
-            log.warn("任务 {} 重投失败（Redis 不可用），交由调用方回退状态", taskId);
+            log.warn("任务 {} 重投失败（Redis 不可用），交由调用方回退状态", taskId, e);
             return false;
         }
     }

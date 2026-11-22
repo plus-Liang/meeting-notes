@@ -6,6 +6,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 
 import java.sql.Timestamp;
+import java.time.temporal.ChronoUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -73,5 +74,35 @@ class StalePendingQueriesTest {
 
         assertTrue(ids.contains(exactlyStale), "125s 前（>2min）的行应入选");
         assertTrue(!ids.contains(stillFresh), "90s 前（<2min）的行不得入选");
+    }
+
+    /** T4.67-fix F5（S8 改判）：返回顺序 = updated_at ASC（最旧在前）——真 H2 三行不同 updated_at 钉住方向。
+     *  A2 变异①落点：把 SQL 改回 DESC 时本用例必红（DESC+头插曾被注释成「先来先服务」，真栈实测是新者先）。 */
+    @Test
+    void findStalePendingReturnsOldestFirst() {
+        long newest = insert("PENDING", Timestamp.from(runStart.toInstant().minusSeconds(100)));
+        long middle = insert("PENDING", Timestamp.from(runStart.toInstant().minusSeconds(200)));
+        long oldest = insert("PENDING", Timestamp.from(runStart.toInstant().minusSeconds(300)));
+
+        java.util.List<Long> ids = queries.findStalePending(StalePendingQueries.cutoff(1));
+
+        assertEquals(3, ids.size(), "三行都早于 cutoff（1 分钟），应全部入选");
+        assertEquals(java.util.List.of(oldest, middle, newest), ids, "必须按 updated_at ASC（最旧在前）返回");
+    }
+
+    /** T4.67-fix F6（S1 后半）：阈值 0 的边界反例——cutoff 是严格 <：updated_at 恰等于 cutoff（刚插入=now）
+     *  的行不入选；比 cutoff 旧 1 分钟的行入选。同时证明 cutoff 随参数走（0 分钟也生效，不是恒用默认 2）。 */
+    @Test
+    void zeroMinuteCutoffIsStrictAndParametrized() {
+        /* 阈值 0 分钟：cutoff = now。先截齐到毫秒再当 updated_at 用——H2 TIMESTAMP(6) 对列值截到微秒、
+         * 查询参数保持全精度，不截齐的话「等于」会被存成「严格小于」，用例随机红。 */
+        Timestamp cutoff = Timestamp.from(StalePendingQueries.cutoff(0).toInstant().truncatedTo(ChronoUnit.MILLIS));
+        long justInserted = insert("PENDING", cutoff); /* 刚插入的行：updated_at == cutoff */
+        long oneMinuteOlder = insert("PENDING", Timestamp.from(cutoff.toInstant().minusSeconds(60)));
+
+        java.util.List<Long> ids = queries.findStalePending(cutoff);
+
+        assertTrue(!ids.contains(justInserted), "updated_at == cutoff 的行不得入选（严格 <，阈值 0 也生效）");
+        assertTrue(ids.contains(oneMinuteOlder), "cutoff-1 分钟的行应入选（阈值 0 随参数走）");
     }
 }

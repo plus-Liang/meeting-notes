@@ -9,6 +9,7 @@ import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DataAccessException;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.sql.Timestamp;
@@ -29,8 +30,10 @@ import static org.mockito.Mockito.when;
 /**
  * T4.61/T4.62/T4.67 S1：周期清扫的**编排语义**（判据/刷新 SQL 已收敛到 StalePendingQueries，
  * 其方向语义由 StalePendingQueriesTest 在真 H2 上钉住）：
- * ①陈旧行→先 publish 后 touch（顺序不许反：投递失败绝不刷新）；②空集→零动作；
- * ③enabled=false→连 findStalePending 都不调；④单条投递 503→warn 继续，失败行不 touch。
+ * ①陈旧行→先 publishToTail 后 touch（顺序不许反：投递失败绝不刷新；T4.67-fix F5 改尾插）；
+ * ②空集→零动作；③enabled=false→连 findStalePending 都不调；④单条投递 503→warn 继续，失败行不 touch；
+ * ⑤判据查询抛 DataAccessException→吞掉、零投递（T4.67-fix F2/S6）；⑥同批多行按返回序（ASC=旧→新）
+ * 逐条尾插，touch 各自在对应 publishToTail 之后、绝不头插（T4.67-fix F5，A2 变异②落点）。
  * S1：cutoff 必须随配置的 staleMinutes 走（非默认值 7 也能算对，±60s 容差）；
  *     默认值契约 = 字面量 2 分钟（字段初始化器 + @Value 注解串，变异改 :0 时变红）。
  */
@@ -84,14 +87,15 @@ class StalePendingSweeperTest {
     }
 
     @Test
-    void stalePendingIsPublishedThenTouchedInThatOrder() {
+    void stalePendingIsPublishedToTailThenTouchedInThatOrder() {
         when(stalePendingQueries.findStalePending(org.mockito.ArgumentMatchers.any())).thenReturn(List.of(9L));
 
         newSweeper(true).sweepStalePending();
 
         InOrder order = inOrder(queuePublisher, stalePendingQueries);
-        order.verify(queuePublisher).publish(9L);
+        order.verify(queuePublisher).publishToTail(9L);
         order.verify(stalePendingQueries).touch(9L); /* 先投递成功、再 touch（失败绝不刷新） */
+        verify(queuePublisher, never()).publish(9L); /* T4.67-fix F5：清扫重投绝不走头插通道（不插队） */
     }
 
     @Test
@@ -102,6 +106,7 @@ class StalePendingSweeperTest {
         newSweeper(true).sweepStalePending();
 
         verify(queuePublisher, never()).publish(anyLong());
+        verify(queuePublisher, never()).publishToTail(anyLong());
         verify(stalePendingQueries, never()).touch(anyLong());
     }
 
@@ -112,21 +117,55 @@ class StalePendingSweeperTest {
 
         verify(stalePendingQueries, never()).findStalePending(org.mockito.ArgumentMatchers.any());
         verify(queuePublisher, never()).publish(anyLong());
+        verify(queuePublisher, never()).publishToTail(anyLong());
         verify(stalePendingQueries, never()).touch(anyLong());
     }
 
     /** 单条投递 503：warn 继续，失败行不 touch（下一轮再兜底），其余行照常。 */
     @Test
-    void publishFailureDoesNotCrashAndSkipsTouch() {
+    void tailPublishFailureDoesNotCrashAndSkipsTouch() {
         when(stalePendingQueries.findStalePending(org.mockito.ArgumentMatchers.any())).thenReturn(List.of(7L, 8L));
         doThrow(new ApiException(503, "QUEUE_UNAVAILABLE", "队列暂不可用，请稍后重试"))
-                .when(queuePublisher).publish(7L);
+                .when(queuePublisher).publishToTail(7L);
 
         assertDoesNotThrow(() -> newSweeper(true).sweepStalePending());
 
-        verify(queuePublisher).publish(7L);
-        verify(queuePublisher).publish(8L);
+        verify(queuePublisher).publishToTail(7L);
+        verify(queuePublisher).publishToTail(8L);
         verify(stalePendingQueries, never()).touch(7L);
         verify(stalePendingQueries).touch(8L);
+        verify(queuePublisher, never()).publish(anyLong()); /* 尾插语义不回退到头插 */
+    }
+
+    /* ===== T4.67-fix F2（S6）：判据查询抛 DataAccessException 必须被吞掉——不向上抛、零投递、零 touch ===== */
+
+    @Test
+    void queryFailureIsSwallowedWithoutPublishing() {
+        when(stalePendingQueries.findStalePending(org.mockito.ArgumentMatchers.any()))
+                .thenThrow(new DataAccessException("表不存在（测试环境）") {
+                });
+
+        assertDoesNotThrow(() -> newSweeper(true).sweepStalePending());
+
+        verify(queuePublisher, never()).publish(anyLong());
+        verify(queuePublisher, never()).publishToTail(anyLong());
+        verify(stalePendingQueries, never()).touch(anyLong());
+    }
+
+    /* ===== T4.67-fix F5（S8 改判）：同批按返回序（ASC=旧→新）逐条尾插；touch 各自在其 publishToTail 之后 ===== */
+
+    @Test
+    void batchIsRequeuedOldestFirstViaTailWithoutQueueJumping() {
+        /* findStalePending ASC 返回：7=最旧、8=较新——清扫按返回序逐条追加队尾（旧者先被 worker 取走） */
+        when(stalePendingQueries.findStalePending(org.mockito.ArgumentMatchers.any())).thenReturn(List.of(7L, 8L));
+
+        newSweeper(true).sweepStalePending();
+
+        InOrder order = inOrder(queuePublisher, stalePendingQueries);
+        order.verify(queuePublisher).publishToTail(7L);
+        order.verify(stalePendingQueries).touch(7L);
+        order.verify(queuePublisher).publishToTail(8L);
+        order.verify(stalePendingQueries).touch(8L);
+        verify(queuePublisher, never()).publish(anyLong()); /* 不插队：绝不头插 */
     }
 }

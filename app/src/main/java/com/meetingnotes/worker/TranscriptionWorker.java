@@ -132,15 +132,13 @@ public class TranscriptionWorker implements SmartLifecycle {
     private void process(long taskId) throws Exception {
         Map<String, Object> row = jdbc.queryForMap(
                 "SELECT status, attempts, source_type, COALESCE(source_uri, '') AS source_uri FROM task WHERE id = ?", taskId);
-        String status = (String) row.get("status");
-        if (!"PENDING".equals(status) && !"RETRYING".equals(status)) {
-            log.warn("任务 {} 状态为 {}，跳过（不重复处理）", taskId, status);
+        int claimed = jdbc.update(
+                "UPDATE task SET status = 'RUNNING', updated_at = now() "
+                        + "WHERE id = ? AND status IN ('PENDING','RETRYING')", taskId);
+        if (claimed == 0) {
+            log.warn("任务 {} 已被其它实例认领（状态已变更），跳过", taskId);
             return;
         }
-        // TODO(T4.68) 技术债（T4.67 S12）：认领两步非原子——多实例扩容前必须改成
-        // UPDATE task SET status='RUNNING' WHERE id=? AND status IN ('PENDING','RETRYING')
-        // 并校验影响行数，否则两实例会重复处理同一任务（详见 StalePendingSweeper javadoc）。
-        jdbc.update("UPDATE task SET status = 'RUNNING', updated_at = now() WHERE id = ?", taskId);
         log.info("开始转写（第 {} 次尝试）", ((Number) row.get("attempts")).intValue() + 1);
 
         String sourceUri = (String) row.get("source_uri");

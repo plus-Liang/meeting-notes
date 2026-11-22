@@ -17,13 +17,16 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
  * T4.60 B3：QueuePublisher 的直接测试——此前全仓只 mock 它、DataAccessException→503 分支从未执行。
- * 五条：头插 / 尾插（且不碰头插）/ 头插异常→503 / 两个 tryX 不抛 / 队列 key 为 null 时按现状不抛。
+ * 五条：头插 / 尾插（且不碰头插）/ 头插异常→503 / 两个 tryX 不抛且返回 false（真实行为断言，无恒真）/
+ * 队列 key 为 null/空白时构造器直接拒绝（T4.67-fix F1 的明确契约，不再给未定义行为上锁）。
  * mock 的是依赖（StringRedisTemplate），被测对象 QueuePublisher 是真实实例。
  */
 @ExtendWith(MockitoExtension.class)
@@ -42,7 +45,8 @@ class QueuePublisherTest {
 
     @BeforeEach
     void stubOps() {
-        when(redis.opsForList()).thenReturn(listOps);
+        /* lenient：null-key 用例在构造器就抛异常，消费不到这个共享桩（其余用例仍受严格桩约束） */
+        lenient().when(redis.opsForList()).thenReturn(listOps);
     }
 
     @Test
@@ -77,18 +81,21 @@ class QueuePublisherTest {
                 .thenThrow(new DataAccessResourceFailureException("redis down"));
         when(listOps.rightPush(eq(QUEUE_KEY), anyString()))
                 .thenThrow(new DataAccessResourceFailureException("redis down"));
-        assertFalse(newPublisher(QUEUE_KEY).tryPublish(7L));
-        assertFalse(newPublisher(QUEUE_KEY).tryPublishToTail(7L));
-        assertTrue(true, "两处均未抛出（走到断言即证明）");
+        assertDoesNotThrow(() -> assertFalse(newPublisher(QUEUE_KEY).tryPublish(7L), "tryPublish 失败必须返回 false"),
+                "tryPublish 不得向调用方抛出（T4.67-fix F1：真实行为断言，不用恒真）");
+        assertDoesNotThrow(() -> assertFalse(newPublisher(QUEUE_KEY).tryPublishToTail(7L), "tryPublishToTail 失败必须返回 false"),
+                "tryPublishToTail 不得向调用方抛出");
+        verify(listOps).leftPush(eq(QUEUE_KEY), anyString());
+        verify(listOps).rightPush(eq(QUEUE_KEY), anyString());
     }
 
-    /** 队列 key 为 null/空：构造器允许传入，现状是交给 redis 模板处理（mock 下不抛）——按现状断言，不顺手改。 */
+    /** 队列 key 为 null/空白：构造器直接拒绝（T4.67-fix F1 的明确契约），四个入队方法不再各自处理 null key。 */
     @Test
-    void nullQueueKeyBehavesAsCurrentImplementation() {
-        QueuePublisher nullKey = newPublisher(null);
-        assertDoesNotThrow(() -> nullKey.publish(7L));
-        assertDoesNotThrow(() -> nullKey.publishToTail(7L));
-        verify(listOps).leftPush(null, "7");
-        verify(listOps).rightPush(null, "7");
+    void nullOrBlankQueueKeyIsRejectedByConstructor() {
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, () -> newPublisher(null));
+        assertTrue(ex.getMessage().contains("queueKey"), "异常信息应指明是 queueKey 配置问题：" + ex.getMessage());
+        assertThrows(IllegalArgumentException.class, () -> newPublisher(""));
+        assertThrows(IllegalArgumentException.class, () -> newPublisher("   "));
+        verifyNoInteractions(listOps);
     }
 }

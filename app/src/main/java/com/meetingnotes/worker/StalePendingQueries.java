@@ -32,15 +32,22 @@ public class StalePendingQueries {
     }
 
     /**
-     * 陈旧 PENDING id 列表：status='PENDING' 且 updated_at 早于 cutoff。SQL 与原两处逐字一致。
+     * 陈旧 PENDING id 列表：status='PENDING' 且 updated_at 早于 cutoff，按 updated_at ASC 排序（最旧在前）。
      *
-     * <p>T4.67 S8（出队顺序）：ORDER BY updated_at DESC（最新在前）+ 调用方逐条 leftPush（头插）=
-     * 后压入的排更前 → 最先出队的是 updated_at 最旧的行 → 「先卡住的更早被处理」（先来先服务）。
-     * 若把 DESC 改成 ASC，leftPush 会把最旧的压到队尾、最新的压到队头，处理顺序整体反转。
+     * <p>T4.67-fix F5（出队顺序，S8 改判）：最终处理顺序由「返回顺序 + 推入端方向 + worker 消费速度」
+     * 共同决定（K-132：空闲 worker 会逐条即时取走，单看 SQL 排序方向必误判）——
+     * <ul>
+     *   <li>{@code StalePendingSweeper}（运行期）：按返回序逐条 {@code publishToTail}（rightPush 尾插）
+     *       ⇒ 恢复任务按「旧→新」依次排在队尾，worker 从队头（BLPOP）取出 ⇒ 先卡住的先处理，
+     *       且不插队（不越过清扫期间新提交的任务）；</li>
+     *   <li>{@code StartupRecovery}（启动期）：先 touch 全部、再按返回序逐条 {@code tryPublish}（头插）
+     *       ——启动期没有并发新任务，不构成插队（两调用方顺序语义各自保留，T4.62 S2）。</li>
+     * </ul>
+     * （T4.67 曾用 DESC 并注释为「先来先服务」，真栈实测空闲 worker 下是新者先——判据改 ASC、清扫改尾插。）
      */
     public List<Long> findStalePending(Timestamp cutoff) {
         return jdbc.query("SELECT id FROM task WHERE status = 'PENDING' AND updated_at < ?"
-                        + " ORDER BY updated_at DESC",
+                        + " ORDER BY updated_at ASC",
                 (rs, i) -> rs.getLong(1), cutoff);
     }
 
