@@ -64,6 +64,16 @@ public class AuthController {
         return Map.of("user_id", info.userId(), "username", info.username(), "role", info.role());
     }
 
+    /** T4.70 C2：注册状态（免鉴权——ApiTokenFilter 精确豁免 GET /api/v1/auth/status）。
+     *  只暴露两个布尔：登录页据此决定是否显示「创建账号」入口；不含用户名/哈希等任何用户信息。 */
+    @GetMapping("/status")
+    @ResponseBody
+    public Map<String, Object> status() {
+        return Map.of(
+                "registrationEnabled", authService.registrationEnabled(),
+                "adminClaimed", authService.adminClaimed());
+    }
+
     private static Map<String, Object> sessionView(AuthService.AuthSession session) {
         return Map.of("token", session.token(), "user_id", session.userId(),
                 "username", session.username(), "role", session.role());

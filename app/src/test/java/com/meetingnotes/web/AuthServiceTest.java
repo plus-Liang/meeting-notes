@@ -15,6 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
@@ -211,6 +212,84 @@ class AuthServiceTest {
                 any(RowMapper.class), eq(99L))).thenReturn(List.of());
         ApiException e = assertThrows(ApiException.class, () -> newService(true).me(99L));
         assertEquals(401, e.getStatus());
+    }
+
+    /* ---- T4.70 C2：注册状态 ---- */
+
+    @Test
+    void adminClaimedMirrorsClaimMarker() {
+        // 未认领：查询无行 → false；已认领：查询命中 → true
+        when(jdbc.query(contains("WHERE id = 1 AND password_hash <> ?"),
+                any(ResultSetExtractor.class), eq("!"))).thenReturn(null);
+        assertEquals(false, newService(true).adminClaimed());
+
+        when(jdbc.query(contains("WHERE id = 1 AND password_hash <> ?"),
+                any(ResultSetExtractor.class), eq("!"))).thenReturn(1L);
+        assertEquals(true, newService(true).adminClaimed());
+    }
+
+    /* ---- T4.70 C3：管理员建号 ---- */
+
+    @Test
+    void adminCreateUserInsertsWithoutToken() {
+        when(jdbc.query(contains("WHERE lower(username) = lower(?)"),
+                any(ResultSetExtractor.class), eq("carol"))).thenReturn(null);
+        when(jdbc.queryForObject(contains("INSERT INTO app_user"), eq(Long.class),
+                eq("carol"), anyString(), eq("USER"), org.mockito.ArgumentMatchers.isNull())).thenReturn(7L);
+
+        AuthService.UserInfo info = newService(true).createUserAsAdmin("carol", "password123", "USER");
+
+        assertEquals(7L, info.userId());
+        assertEquals("carol", info.username());
+        assertEquals("USER", info.role());
+        verify(jdbc).queryForObject(contains("INSERT INTO app_user"), eq(Long.class),
+                eq("carol"), anyString(), eq("USER"), org.mockito.ArgumentMatchers.isNull());
+    }
+
+    @Test
+    void adminCreateUserDuplicateIs409() {
+        when(jdbc.query(contains("WHERE lower(username) = lower(?)"),
+                any(ResultSetExtractor.class), eq("carol"))).thenReturn(2L);
+        ofCode(() -> newService(true).createUserAsAdmin("carol", "password123", "USER"), "USERNAME_TAKEN");
+    }
+
+    @Test
+    void adminCreateUserValidatesAndRejectsAdminRole() {
+        AuthService svc = newService(true);
+        ofCode(() -> svc.createUserAsAdmin("ab", "password123", "USER"), "INVALID_PARAM");     // 用户名过短
+        ofCode(() -> svc.createUserAsAdmin("carol", "7chars!", "USER"), "INVALID_PARAM");      // 密码过短（7 位）
+        ofCode(() -> svc.createUserAsAdmin("carol", "password123", "ADMIN"), "INVALID_PARAM"); // 不开放提权
+        ofCode(() -> svc.createUserAsAdmin("carol", "password123", "OWNER"), "INVALID_PARAM"); // 未知角色
+    }
+
+    @Test
+    void adminCreateUserResponseCarriesNoPasswordOrToken() {
+        when(jdbc.query(contains("WHERE lower(username) = lower(?)"),
+                any(ResultSetExtractor.class), eq("carol"))).thenReturn(null);
+        when(jdbc.queryForObject(contains("INSERT INTO app_user"), eq(Long.class),
+                eq("carol"), anyString(), eq("USER"), org.mockito.ArgumentMatchers.isNull())).thenReturn(7L);
+
+        AuthService.UserInfo info = newService(true).createUserAsAdmin("carol", "password123", "USER");
+
+        String dumped = String.valueOf(info);
+        assertTrue(!dumped.contains("password123") && !dumped.contains("token"),
+                "返回体（UserInfo）不得携带密码或令牌：" + dumped);
+    }
+
+    /* ---- T4.70 C3：requireAdmin（权限闸） ---- */
+
+    @Test
+    void requireAdminPassesForAdminAnd403ForUser() {
+        when(jdbc.query(contains("SELECT id, username, role FROM app_user WHERE id = ?"),
+                any(RowMapper.class), eq(1L)))
+                .thenReturn(List.of(new AuthService.UserInfo(1L, "boss", "ADMIN")));
+        newService(true).requireAdmin(1L); // 不抛 = 通过
+
+        when(jdbc.query(contains("SELECT id, username, role FROM app_user WHERE id = ?"),
+                any(RowMapper.class), eq(2L)))
+                .thenReturn(List.of(new AuthService.UserInfo(2L, "carol", "USER")));
+        ApiException e = ofCode(() -> newService(true).requireAdmin(2L), "FORBIDDEN");
+        assertEquals(403, e.getStatus());
     }
 
     private static String anyString() {

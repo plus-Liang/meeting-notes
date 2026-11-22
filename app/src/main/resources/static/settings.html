@@ -33,7 +33,7 @@
     <dl class="meta">
       <div><dt>版本</dt><dd class="big">V0.1.0</dd></div>
       <div><dt>部署方式</dt><dd>私有部署</dd></div>
-      <div><dt>本页性质</dt><dd>只读 · 无按钮化</dd></div>
+      <div><dt>本页性质</dt><dd>只读为主 · 成员区管理员可写</dd></div>
     </dl>
   </section>
 
@@ -68,6 +68,22 @@
       <div class="sechead"><h2>术语表</h2><span class="n">改词回流 · 自动应用</span></div>
       <p class="hint" style="margin:10px 0">改词回流沉淀的词条（按命中次数排序，最多展示 100 条），转写与摘要自动应用。</p>
       <div id="glossary"><div class="skeleton skeleton-block" style="width:100%"></div></div>
+    </div>
+
+    <div class="kv-section" id="membersSection" hidden>
+      <div class="sechead"><h2>成员</h2><span class="n">管理员 · 建号与列表（T4.70）</span></div>
+      <p class="hint" style="margin:10px 0">注册已默认关闭：新成员由管理员在这里建号（用户名 3–32 字符，密码至少 8 位）。密码不回显、不出现在列表。</p>
+      <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;margin:10px 0">
+        <label style="display:flex;flex-direction:column;gap:4px">用户名
+          <input id="memberUsername" maxlength="32" autocomplete="off" spellcheck="false" aria-label="新成员用户名" style="min-width:180px">
+        </label>
+        <label style="display:flex;flex-direction:column;gap:4px">初始密码
+          <input id="memberPassword" type="password" autocomplete="new-password" aria-label="新成员初始密码" style="min-width:180px">
+        </label>
+        <button type="button" id="memberCreateBtn" class="btn">新建成员</button>
+      </div>
+      <p class="error-text" id="memberMsg" hidden></p>
+      <div id="memberList"></div>
     </div>
   </main>
 
@@ -209,6 +225,57 @@
   getJson('api/v1/glossary').then(function (data) {
     renderGlossary(data.__httpStatus === 200 && Array.isArray(data) ? data : []);
   });
+
+  /* ===== T4.70 C3：成员区（仅 ADMIN 渲染——前端隐藏只是第二道，服务端 requireAdmin 为真闸） ===== */
+  var mnUser = null;
+  try { mnUser = JSON.parse(localStorage.getItem('mn_user') || 'null'); } catch (e) { mnUser = null; }
+  if (mnGetToken() && mnUser && mnUser.role === 'ADMIN') {
+    document.getElementById('membersSection').hidden = false;
+    var memberListEl = document.getElementById('memberList');
+    var memberMsg = document.getElementById('memberMsg');
+    function loadMembers() {
+      getJson('api/v1/admin/users').then(function (data) {
+        if (data.__httpStatus !== 200 || !Array.isArray(data)) {
+          memberListEl.innerHTML = '<p class="error-text">成员列表加载失败（HTTP ' + data.__httpStatus +
+            (data.__httpStatus === 403 ? '，需要管理员权限' : '') + '）。请稍后刷新重试。</p>';
+          return;
+        }
+        if (!data.length) { memberListEl.innerHTML = '<p class="hint">还没有成员。</p>'; return; }
+        memberListEl.innerHTML =
+          '<table class="glossary-table"><thead><tr><th>ID</th><th>用户名</th><th>角色</th></tr></thead><tbody>' +
+          data.map(function (u) {
+            return '<tr><td>' + u.user_id + '</td><td>' + escapeHtml(u.username) + '</td><td>' +
+              escapeHtml(u.role) + '</td></tr>';
+          }).join('') + '</tbody></table>';
+      });
+    }
+    loadMembers();
+    document.getElementById('memberCreateBtn').addEventListener('click', function () {
+      var btn = this;
+      var username = document.getElementById('memberUsername').value.trim();
+      var password = document.getElementById('memberPassword').value;
+      memberMsg.hidden = true;
+      btn.disabled = true;
+      sendJson('api/v1/admin/users', 'POST', { username: username, password: password, role: 'USER' })
+        .then(function (resp) {
+          btn.disabled = false;
+          if (resp.__httpStatus === 200 || resp.__httpStatus === 201) {
+            document.getElementById('memberUsername').value = '';
+            document.getElementById('memberPassword').value = '';
+            memberMsg.textContent = '成员 ' + resp.username + '（ID ' + resp.user_id + '）已创建，可用该账号登录。';
+            memberMsg.hidden = false;
+            loadMembers();
+            return;
+          }
+          memberMsg.textContent = resp.message || ('创建失败（HTTP ' + resp.__httpStatus + '）');
+          memberMsg.hidden = false;
+        }, function () {
+          btn.disabled = false;
+          memberMsg.textContent = '服务暂时不可用，请稍后重试';
+          memberMsg.hidden = false;
+        });
+    });
+  }
 })();
 </script>
 </body>

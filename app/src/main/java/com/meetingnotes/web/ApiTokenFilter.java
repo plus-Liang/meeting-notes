@@ -30,7 +30,8 @@ import java.util.List;
  * /v3/api-docs/**、/swagger-ui/**。T4.28（K-46）：/api/v1/share/ 前缀（匿名只读分享）；
  * T4.35b：GET ^/api/v1/tasks/\d+/audio$（自带 HMAC 短时签名验签）；
  * T4.69 C1：GET /api/v1/version（构建标识，version/build 两个非敏感字段）；
- * **T4.37a 只加两条精确路径**：POST /api/v1/auth/login、POST /api/v1/auth/register
+ * **T4.37a 只加两条精确路径**：POST /api/v1/auth/login、POST /api/v1/auth/register；
+ * T4.70 C2：GET /api/v1/auth/status（注册状态，两个布尔，无用户信息）
  * （/auth/logout、/auth/me 仍要认证）。
  *
  * <p>认证成功写 {@link UserContext}（ThreadLocal）→ finally 必须 clear()。
@@ -79,6 +80,9 @@ public class ApiTokenFilter extends OncePerRequestFilter {
         if ("POST".equals(request.getMethod())
                 && ("/api/v1/auth/login".equals(uri) || "/api/v1/auth/register".equals(uri))) {
             return true; // T4.37a：注册/登录入口（其余 /auth/** 仍要认证）
+        }
+        if ("GET".equals(request.getMethod()) && "/api/v1/auth/status".equals(uri)) {
+            return true; // T4.70 C2：注册状态（只含 registrationEnabled/adminClaimed 两个布尔，无用户信息）
         }
         return !uri.startsWith("/api/v1");
     }

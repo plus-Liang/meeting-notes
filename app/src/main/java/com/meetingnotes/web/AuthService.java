@@ -99,17 +99,21 @@ public class AuthService {
     private AuthSession createUser(String username, String password, String role) {
         String token = tokenService.generate();
         String tokenHash = tokenService.sha256Hex(token);
-        String passwordHash = passwordHasher.hash(password);
-        long userId;
+        long userId = insertUser(username, passwordHasher.hash(password), role, tokenHash);
+        return new AuthSession(userId, username, role, token);
+    }
+
+    /** INSERT 共用体：注册路径带 token_hash（注册即登录），管理员建号传 null（首次登录时才轮换令牌）。
+     *  唯一索引为并发最终闸门——撞 ux_app_user_username → 409（不吞其它完整性异常）。 */
+    private long insertUser(String username, String passwordHash, String role, String tokenHash) {
         try {
-            userId = jdbc.queryForObject("""
+            return jdbc.queryForObject("""
                     INSERT INTO app_user (username, password_hash, role, token_hash, token_issued_at)
                     VALUES (?, ?, ?, ?, now()) RETURNING id
                     """, Long.class, username, passwordHash, role, tokenHash);
         } catch (DuplicateKeyException e) {
             throw new ApiException(409, "USERNAME_TAKEN", "用户名已被占用");
         }
-        return new AuthSession(userId, username, role, token);
     }
 
     /* ---- 登录 / 注销 / me ---- */
@@ -152,6 +156,51 @@ public class AuthService {
             throw new ApiException(401, "UNAUTHORIZED", "账号不存在或已被删除");
         }
         return rows.get(0);
+    }
+
+    /* ---- T4.70 C2/C3：注册状态 + 管理员建号 ---- */
+
+    /** T4.70 C2：管理员是否已认领。口径 = id=1 且 password_hash <> '!'（认领条件更新的反向判断）。
+     *  ADMIN 只可能来自 1 号账号的首注册认领（T4.70 不开放提权建号），因此与
+     *  EXISTS(SELECT 1 FROM app_user WHERE role='ADMIN') 等价——用认领标记作准，语义更直接。 */
+    public boolean adminClaimed() {
+        Long claimed = jdbc.query(
+                "SELECT id FROM app_user WHERE id = 1 AND password_hash <> ?",
+                rs -> rs.next() ? rs.getLong(1) : null, UNCLAIMED_MARKER);
+        return claimed != null;
+    }
+
+    /** T4.70 C2：注册开关当前值（@Value 配置项——改后重启生效，不做运行期热改）。 */
+    public boolean registrationEnabled() {
+        return registrationEnabled;
+    }
+
+    /** T4.70 C3：管理员建号（注册默认关闭后的唯一加人通道）。复用注册的校验与哈希；
+     *  role 只接受缺省/USER——ADMIN 由 1 号账号首注册认领产生，不开放提权建号；
+     *  建出的账号不带令牌（首次登录时才轮换），重名 → 409 USERNAME_TAKEN。 */
+    public UserInfo createUserAsAdmin(String rawUsername, String rawPassword, String role) {
+        String username = requireValidUsername(rawUsername);
+        String password = requireValidPassword(rawPassword);
+        if (role != null && !role.isBlank() && !"USER".equals(role)) {
+            throw new ApiException(400, "INVALID_PARAM", "role 仅支持 USER（管理员由首次注册认领产生）");
+        }
+        requireUsernameFree(username);
+        long userId = insertUser(username, passwordHasher.hash(password), "USER", null);
+        return new UserInfo(userId, username, "USER");
+    }
+
+    /** T4.70 C3：成员列表（按 id 序）——不含 password_hash/token_hash 任何形态。 */
+    public List<UserInfo> listUsers() {
+        return jdbc.query("SELECT id, username, role FROM app_user ORDER BY id",
+                (rs, i) -> new UserInfo(rs.getLong(1), rs.getString(2), rs.getString(3)));
+    }
+
+    /** T4.70 C3：当前调用方必须是 ADMIN，否则 403 FORBIDDEN（首个权限失败码，与 400/409 同走 ApiException）。 */
+    public void requireAdmin(long userId) {
+        UserInfo info = me(userId);
+        if (!"ADMIN".equals(info.role())) {
+            throw new ApiException(403, "FORBIDDEN", "需要管理员权限");
+        }
     }
 
     /* ---- 校验 ---- */

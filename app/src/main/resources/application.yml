@@ -201,9 +201,11 @@ app:
     api-token: ${API_TOKEN:change-me-api-token}
 
   auth:
-    # T4.37a：开放注册开关（1 号管理员的首次注册认领不受此开关限制）
-    # false → POST /api/v1/auth/register 对非认领路径回 403 REGISTRATION_DISABLED
-    registration-enabled: ${AUTH_REGISTRATION_ENABLED:true}
+    # T4.70 O-1：开放注册开关，**默认 false**（陌生人不能自助注册、消耗 ASR 配额）——
+    # 首次部署例外：1 号管理员未认领时首次注册仍成功且 role=ADMIN（认领是原子闸，不受本开关限制）。
+    # 加人通道：管理员经 POST /api/v1/admin/users 建号（settings.html 成员区）。
+    # true = 允许任何人自助注册（仅自用/可信环境临时开启）。配置项改后重启生效，不做运行期热改。
+    registration-enabled: ${AUTH_REGISTRATION_ENABLED:false}
 
   quota:
     minutes-per-day: ${QUOTA_MINUTES_PER_DAY:120}
