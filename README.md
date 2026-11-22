@@ -238,6 +238,28 @@ docker compose logs app | grep '"taskId":"123"'
 
 **升级**：`git pull && docker compose up -d --build`（Flyway 自动迁移，先备份）。**回滚**：`git checkout <上一个 tag> && docker compose up -d --build`。
 
+## 一条命令部署（`tools/deploy-main.ps1`）
+
+首次部署与每次升级都可以用同一个脚本（Windows PowerShell；Linux/macOS 需装 PowerShell 7 后用 `pwsh`）：
+
+```powershell
+# 预演：只打印将执行的命令与冒烟期望值，不做任何变更
+powershell -File tools\deploy-main.ps1 -DryRun
+
+# 正式部署（默认部署当前仓库的主栈）
+powershell -File tools\deploy-main.ps1
+```
+
+脚本依次做五件事：
+
+1. **五道守卫**（任一不过即 `exit 2`）：工作区干净、`HEAD == origin/main`、`.env` 必需键齐全、`docker info` 与 `docker ps` 可用、存量四个依赖服务健康；
+2. **构建带构建标识的镜像**：自动传 `GIT_SHA` 与 `REGISTRY_PREFIX`，所以 `/api/v1/version` 的 `build` 字段能直接对到 commit；
+3. **只重建 app**：`up -d --no-deps app`，postgres / redis / minio / asr 不会被重启；
+4. **条件轮询健康**（默认 600 秒预算，超时 `exit 4` 并打印最后 50 行日志）；
+5. **冒烟**（失败 `exit 5`）：`/api/v1/version` 的 build 必须以当前 commit 开头、HTML 是 `no-store`、CSS/JS 是 `no-cache`、`/api/v1/auth/status` 返回两个布尔、部署前后 `task` / `app_user` 计数不变（变了 `exit 6`，首次空库会触发，可加 `-AllowDataChange` 放行）。
+
+失败时脚本只打印上一版镜像 ID 与回滚命令，**不会自动回滚**。参数：`-Repo`、`-ComposeProject`、`-SkipBuild`、`-SkipSmoke`、`-DryRun`、`-AllowDataChange`、`-TimeoutSec`。
+
 ## 常见问题 / 故障排查
 
 | 现象 | 原因与解法 |
