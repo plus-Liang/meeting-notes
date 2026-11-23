@@ -9,6 +9,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.redis.core.ListOperations;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.ZSetOperations;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.ResultSetExtractor;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -60,6 +61,8 @@ class TranscriptionWorkerTest {
     private com.meetingnotes.webhook.WebhookDeliveryService webhookService;
     @Mock
     private ListOperations<String, String> listOps;
+    @Mock
+    private ZSetOperations<String, String> zSetOps;
     @Mock
     private com.meetingnotes.task.QueuePublisher queuePublisher;
     @Mock
@@ -358,6 +361,7 @@ class TranscriptionWorkerTest {
     @Test
     void claimExceptionDoesNotKillWorkerAndNextTaskProceeds() {
         TranscriptionWorker worker = newWorker();
+        when(redis.opsForZSet()).thenReturn(zSetOps); // T4.79：handleOne finally 会 ZREM 回执
         when(jdbc.queryForMap(contains("FROM task WHERE id = ?"), eq(999999L)))
                 .thenThrow(new org.springframework.dao.EmptyResultDataAccessException(1));
         java.util.Map<String, Object> row = java.util.Map.of(
@@ -384,5 +388,58 @@ class TranscriptionWorkerTest {
         verify(jdbc).update(contains("'DONE'"), eq(1L));
         verify(session).close();
         org.junit.jupiter.api.Assertions.assertNull(org.slf4j.MDC.get("taskId"), "handleOne 结束必须清理 MDC");
+    }
+
+    /* ---- T4.79/P-02：取出即 ZADD「处理中」回执、结束 ZREM ---- */
+
+    /** ① ZADD 失败（Redis 抖动）→ 回执不残留、任务退回队尾（tryPublishToTail），绝不「既没回执又不在队列」。 */
+    @Test
+    void zaddFailureRollsTaskBackToTail() {
+        TranscriptionWorker worker = newWorker();
+        when(redis.opsForZSet()).thenReturn(zSetOps);
+        when(zSetOps.add(anyString(), anyString(), ArgumentMatchers.anyDouble()))
+                .thenThrow(new org.springframework.dao.DataAccessResourceFailureException("redis down"));
+        when(queuePublisher.tryPublishToTail(7L)).thenReturn(true);
+
+        worker.markProcessing("7");
+
+        verify(zSetOps).add(eq("meetingnotes:worker-processing"), eq("7"), ArgumentMatchers.anyDouble());
+        verify(queuePublisher).tryPublishToTail(7L);
+        verify(zSetOps, never()).remove(anyString(), anyString());
+    }
+
+    /** ② 正常处理走完 handleOne 全路径（含 finally）→ 回执 ZREM 被调用、任务置 DONE。 */
+    @Test
+    void normalProcessingRemovesReceipt() {
+        TranscriptionWorker worker = newWorker();
+        when(redis.opsForZSet()).thenReturn(zSetOps);
+        when(jdbc.queryForMap(contains("FROM task WHERE id = ?"), eq(1L))).thenReturn(java.util.Map.of(
+                "status", "PENDING", "attempts", 0, "source_type", "PASTE",
+                "source_uri", "s3://meetingnotes/tasks/1/paste.txt"));
+        when(jdbc.update(contains("AND status IN ('PENDING','RETRYING')"), eq(1L))).thenReturn(1);
+        TaskHeartbeat.Session session = org.mockito.Mockito.mock(TaskHeartbeat.Session.class);
+        when(taskHeartbeat.start(1L)).thenReturn(session);
+        when(pasteTextReader.read("tasks/1/paste.txt")).thenReturn("回执测试内容");
+
+        worker.handleOne("1");
+
+        verify(zSetOps).remove("meetingnotes:worker-processing", "1");
+        verify(jdbc).update(contains("'DONE'"), eq(1L));
+    }
+
+    /** ③ 认领失败（claimed=null，别人已认领）→ 也必须 ZREM（否则僵尸回执堆积），且不启动心跳。 */
+    @Test
+    void claimConflictStillRemovesReceipt() {
+        TranscriptionWorker worker = newWorker();
+        when(redis.opsForZSet()).thenReturn(zSetOps);
+        when(jdbc.queryForMap(contains("FROM task WHERE id = ?"), eq(21L))).thenReturn(java.util.Map.of(
+                "status", "PENDING", "attempts", 0, "source_type", "PASTE",
+                "source_uri", "s3://meetingnotes/tasks/21/paste.txt"));
+        when(jdbc.update(contains("AND status IN ('PENDING','RETRYING')"), eq(21L))).thenReturn(0);
+
+        worker.handleOne("21");
+
+        verify(zSetOps).remove("meetingnotes:worker-processing", "21");
+        verify(taskHeartbeat, never()).start(21L);
     }
 }

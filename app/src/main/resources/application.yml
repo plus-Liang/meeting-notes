@@ -174,6 +174,12 @@ app:
     drain-timeout-sec: ${WORKER_DRAIN_TIMEOUT_SEC:60}
     # T4.77/P-06：转写期间刷新本任务 updated_at 的间隔（秒）——必须小于 P-01 的僵尸判定阈值，
     # 否则正常长任务会被误判僵尸回收；只刷认领的那个 id，不做全局扫表
+    # T4.79/P-02：处理中回执 ZSET 键——worker 取出任务即 ZADD（score=取出毫秒）、结束 ZREM；
+    # SIGKILL/OOM 后残留回执由清扫器按可见性超时回收。Redis 重启后回执会丢，靠启动恢复兜底
+    processing-key: ${WORKER_PROCESSING_KEY:meetingnotes:worker-processing}
+    # T4.79/P-02：可见性超时（秒）——回执超过该时长没有进展即查 DB 判定消费者死活并回收重投；
+    # 必须远大于 heartbeat-sec（心跳×3 内的 RUNNING 一律跳过）；0/负值属误配，WARN 并回退 180
+    visibility-timeout-sec: ${WORKER_VISIBILITY_TIMEOUT_SEC:180}
     heartbeat-sec: ${WORKER_HEARTBEAT_SEC:20}
 
   recovery:

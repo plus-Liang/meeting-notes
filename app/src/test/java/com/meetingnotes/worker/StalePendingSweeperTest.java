@@ -10,16 +10,23 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataAccessException;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.ZSetOperations;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.sql.Timestamp;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyDouble;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
@@ -44,9 +51,13 @@ class StalePendingSweeperTest {
     private QueuePublisher queuePublisher;
     @Mock
     private StalePendingQueries stalePendingQueries;
+    @Mock
+    private StringRedisTemplate redis;
+    @Mock
+    private ZSetOperations<String, String> zSetOps;
 
     private StalePendingSweeper newSweeper(boolean enabled) {
-        StalePendingSweeper sweeper = new StalePendingSweeper(queuePublisher, stalePendingQueries);
+        StalePendingSweeper sweeper = new StalePendingSweeper(queuePublisher, stalePendingQueries, redis);
         ReflectionTestUtils.setField(sweeper, "enabled", enabled);
         ReflectionTestUtils.setField(sweeper, "staleMinutes", 2L);
         return sweeper;
@@ -76,7 +87,7 @@ class StalePendingSweeperTest {
     /** 默认值字面量契约：字段初始化器 = 2；@Value 注解串默认 = 2 分钟（变异改 :0 时此断言变红）。 */
     @Test
     void staleMinutesDefaultsToTwoMinutes() throws Exception {
-        StalePendingSweeper fresh = new StalePendingSweeper(queuePublisher, stalePendingQueries);
+        StalePendingSweeper fresh = new StalePendingSweeper(queuePublisher, stalePendingQueries, redis);
         assertEquals(2L, (Long) ReflectionTestUtils.getField(fresh, "staleMinutes"),
                 "字段声明处默认值必须是 2 分钟（S4：与 StartupRecovery 共用单一来源）");
 
@@ -167,5 +178,112 @@ class StalePendingSweeperTest {
         order.verify(queuePublisher).publishToTail(8L);
         order.verify(stalePendingQueries).touch(8L);
         verify(queuePublisher, never()).publish(anyLong()); /* 不插队：绝不头插 */
+    }
+
+    /* ===== T4.79/P-02：僵尸回执清扫（可见性超时 + DB 状态分派） ===== */
+
+    /** 带 T4.79 配置的构造：visibility=20s、heartbeat=20s（心跳×3=60s 新鲜窗）。 */
+    private StalePendingSweeper newSweeperWithReceiptConfig() {
+        StalePendingSweeper sweeper = new StalePendingSweeper(queuePublisher, stalePendingQueries, redis);
+        ReflectionTestUtils.setField(sweeper, "enabled", true);
+        ReflectionTestUtils.setField(sweeper, "staleMinutes", 2L);
+        ReflectionTestUtils.setField(sweeper, "visibilityTimeoutSec", 20L);
+        ReflectionTestUtils.setField(sweeper, "heartbeatSec", 20L);
+        ReflectionTestUtils.setField(sweeper, "processingKey", "meetingnotes:worker-processing");
+        return sweeper;
+    }
+
+    private void stubEmptyPendingSweep() {
+        when(stalePendingQueries.findStalePending(org.mockito.ArgumentMatchers.any())).thenReturn(Collections.emptyList());
+        when(redis.opsForZSet()).thenReturn(zSetOps);
+    }
+
+    /** ④ 可见性超时 + 心跳新鲜（updated_at 在 heartbeat×3 内）→ 跳过：不回收、不重投、不删回执。 */
+    @Test
+    void freshHeartbeatRunningIsNotRecovered() {
+        StalePendingSweeper sweeper = newSweeperWithReceiptConfig();
+        stubEmptyPendingSweep();
+        when(zSetOps.rangeByScore(eq("meetingnotes:worker-processing"), eq(0.0), anyDouble(), eq(0L), eq(50L)))
+                .thenReturn(Set.of("5"));
+        when(stalePendingQueries.findTaskStatus(5L)).thenReturn(Map.of(
+                "status", "RUNNING", "updated_at", new Timestamp(System.currentTimeMillis() - 1000L)));
+
+        sweeper.sweepStalePending();
+
+        verify(stalePendingQueries, never()).reclaimZombieRunning(anyLong());
+        verify(queuePublisher, never()).publishToTail(anyLong());
+        verify(zSetOps, never()).remove(anyString(), anyString());
+    }
+
+    /** ⑤ 可见性超时 + 心跳陈旧（updated_at 超 heartbeat×3）→ 原子抢回收成功 → publishToTail + ZREM。 */
+    @Test
+    void zombieReceiptReclaimsStaleRunningAndRequeues() {
+        StalePendingSweeper sweeper = newSweeperWithReceiptConfig();
+        stubEmptyPendingSweep();
+        when(zSetOps.rangeByScore(eq("meetingnotes:worker-processing"), eq(0.0), anyDouble(), eq(0L), eq(50L)))
+                .thenReturn(Set.of("5"));
+        when(stalePendingQueries.findTaskStatus(5L)).thenReturn(Map.of(
+                "status", "RUNNING", "updated_at", new Timestamp(System.currentTimeMillis() - 600_000L)));
+        when(stalePendingQueries.reclaimZombieRunning(5L)).thenReturn(1);
+        when(queuePublisher.tryPublishToTail(5L)).thenReturn(true);
+
+        sweeper.sweepStalePending();
+
+        verify(stalePendingQueries).reclaimZombieRunning(5L);
+        verify(queuePublisher).tryPublishToTail(5L);
+        verify(zSetOps).remove("meetingnotes:worker-processing", "5");
+    }
+
+    /** ⑥ 任务行已被删 → 只 ZREM，绝不重投、绝不回收。 */
+    @Test
+    void deletedTaskReceiptIsOnlyRemoved() {
+        StalePendingSweeper sweeper = newSweeperWithReceiptConfig();
+        stubEmptyPendingSweep();
+        when(zSetOps.rangeByScore(eq("meetingnotes:worker-processing"), eq(0.0), anyDouble(), eq(0L), eq(50L)))
+                .thenReturn(Set.of("5"));
+        when(stalePendingQueries.findTaskStatus(5L)).thenReturn(null);
+
+        sweeper.sweepStalePending();
+
+        verify(zSetOps).remove("meetingnotes:worker-processing", "5");
+        verify(stalePendingQueries, never()).reclaimZombieRunning(anyLong());
+        verify(queuePublisher, never()).publishToTail(anyLong());
+    }
+
+    /** ⑦ 回收条件 UPDATE 影响行数 0（别人先动）→ 不重复投递，只清回执。 */
+    @Test
+    void lostReclaimRaceDoesNotRequeueAgain() {
+        StalePendingSweeper sweeper = newSweeperWithReceiptConfig();
+        stubEmptyPendingSweep();
+        when(zSetOps.rangeByScore(eq("meetingnotes:worker-processing"), eq(0.0), anyDouble(), eq(0L), eq(50L)))
+                .thenReturn(Set.of("5"));
+        when(stalePendingQueries.findTaskStatus(5L)).thenReturn(Map.of(
+                "status", "RUNNING", "updated_at", new Timestamp(System.currentTimeMillis() - 600_000L)));
+        when(stalePendingQueries.reclaimZombieRunning(5L)).thenReturn(0);
+
+        sweeper.sweepStalePending();
+
+        verify(stalePendingQueries).reclaimZombieRunning(5L);
+        verify(queuePublisher, never()).publishToTail(anyLong());
+        verify(zSetOps).remove("meetingnotes:worker-processing", "5");
+    }
+
+    /** A5 负控（单测层）：visibility ≤0 属误配 → 回退默认 180s（cutoff ≈ now-180s），绝无 0 值全量回收。 */
+    @Test
+    void nonPositiveVisibilityTimeoutFallsBackToDefault() {
+        StalePendingSweeper sweeper = newSweeperWithReceiptConfig();
+        ReflectionTestUtils.setField(sweeper, "visibilityTimeoutSec", 0L);
+        stubEmptyPendingSweep();
+        ArgumentCaptor<Double> maxCaptor = ArgumentCaptor.forClass(Double.class);
+        when(zSetOps.rangeByScore(eq("meetingnotes:worker-processing"), eq(0.0), maxCaptor.capture(), eq(0L), eq(50L)))
+                .thenReturn(Set.of());
+
+        sweeper.sweepStalePending();
+
+        long now = System.currentTimeMillis();
+        double max = maxCaptor.getValue();
+        assertTrue(max >= now - 181_000 && max <= now - 179_000,
+                "≤0 应回退 180s（cutoff ≈ now-180s），实测 " + max + " vs now=" + now);
+        verify(stalePendingQueries, never()).reclaimZombieRunning(anyLong());
     }
 }

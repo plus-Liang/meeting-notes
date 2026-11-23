@@ -305,6 +305,8 @@ powershell -File tools\deploy-main.ps1
 | `APP_PORT` | 8080 | Web 端口 |
 | `WORKER_HEARTBEAT_SEC` | 20 | 转写期间刷新本任务 `updated_at` 的间隔（T4.77/P-06 心跳）；必须小于 P-01 的僵尸判定阈值。只刷认领的那个 id，不做全局扫表 |
 | `RECOVERY_STALE_RUNNING_MINUTES` | 5 | 启动恢复只回收心跳停止超过该时长的 RUNNING（T4.78/P-01 僵尸判据）；必须远大于 `WORKER_HEARTBEAT_SEC`，0/负值启动时 WARN 并回退 5 |
+| `WORKER_PROCESSING_KEY` | `meetingnotes:worker-processing` | 「处理中」回执 ZSET 键（T4.79/P-02）：worker 取出任务即 ZADD（score=取出时刻）、结束 ZREM；SIGKILL/OOM 后残留回执由清扫器按可见性超时回收重投。Redis 重启后回执会丢，靠启动恢复兜底 |
+| `WORKER_VISIBILITY_TIMEOUT_SEC` | 180 | 可见性超时（秒）：回执超过该时长即查 DB 判消费者死活——心跳新鲜跳过、心跳陈旧原子抢回收重投、已终态只清回执；必须远大于 `WORKER_HEARTBEAT_SEC`，0/负值 WARN 并回退 180 |
 | `API_TOKEN` | 必填 | 全局接入令牌（≡ 1 号管理员账号）；**必填 ≥32 位随机串**（生成：`openssl rand -hex 32`）；留空 / 默认值 / 短于 32 位会**拒绝启动**（T4.73）。首次部署走 `scripts/first-run.*` 会自动生成 |
 | `ASR_MODEL_NAME` | small | small / medium / large-v3…（需对应模型文件） |
 | `ASR_COMPUTE_TYPE` | int8 | CPU 用 int8；有 GPU 可改 float16 |

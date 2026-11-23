@@ -7,6 +7,7 @@ import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 
 /**
  * T4.62 S2：陈旧 PENDING 判据与刷新语句的单一实现（此前 StartupRecovery 与 StalePendingSweeper 各一份，R4）。
@@ -59,5 +60,18 @@ public class StalePendingQueries {
     /** 分钟数 → cutoff 时间戳（JVM 侧时钟）。 */
     public static Timestamp cutoff(long minutes) {
         return Timestamp.from(Instant.now().minus(Duration.ofMinutes(minutes)));
+    }
+
+    /** T4.79/P-02：按 id 取任务状态与 updated_at（僵尸回执清扫用）；行不存在返回 null。
+     *  参数化 Timestamp（无 to_char 等 PG 字面量），H2 真库可跑。 */
+    public Map<String, Object> findTaskStatus(long id) {
+        List<Map<String, Object>> rows = jdbc.query("SELECT status, updated_at FROM task WHERE id = ?",
+                (rs, i) -> Map.of("status", rs.getString("status"), "updated_at", rs.getTimestamp("updated_at")), id);
+        return rows.isEmpty() ? null : rows.get(0);
+    }
+
+    /** T4.79/P-02：原子抢占僵尸 RUNNING → PENDING（条件 UPDATE 防多实例双抢，T4.77-fix B1 语义同源）；影响行数 1 = 抢到。 */
+    public int reclaimZombieRunning(long id) {
+        return jdbc.update("UPDATE task SET status = 'PENDING', updated_at = now() WHERE id = ? AND status = 'RUNNING'", id);
     }
 }
