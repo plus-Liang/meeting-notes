@@ -129,6 +129,8 @@ app:
     ffprobe-bin: ${FFPROBE_BIN:ffprobe}
     # worker 抽音轨用（容器内 ffmpeg 8.0.1）
     ffmpeg-bin: ${FFMPEG_BIN:ffmpeg}
+    # T4.76/P-04：ffmpeg 抽音轨看门狗预算（进程启动起算，到点 destroyForcibly）；默认 600s = 旧 10 分钟语义不降级
+    ffmpeg-timeout-sec: ${FFMPEG_TIMEOUT_SEC:600}
 
   share:
     # T4.28：只读分享链接有效期（天）；token 明文永不落库（DB 只存 SHA256 hex）
