@@ -176,6 +176,12 @@ app:
     # 否则正常长任务会被误判僵尸回收；只刷认领的那个 id，不做全局扫表
     heartbeat-sec: ${WORKER_HEARTBEAT_SEC:20}
 
+  recovery:
+    # T4.78/P-01：启动恢复只回收「僵尸 RUNNING」（updated_at 早于该阈值的行）。
+    # 必须远大于 app.worker.heartbeat-sec（20s）——心跳活着=updated_at 新，就不会被误回收；
+    # 0/负值属误配（等于全表回收），应用启动时 WARN 并回退 5
+    stale-running-minutes: ${RECOVERY_STALE_RUNNING_MINUTES:5}
+
   asr:
     max-concurrency: ${ASR_MAX_CONCURRENCY:2}
     timeout-sec: ${ASR_TIMEOUT_SEC:900}

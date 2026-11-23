@@ -10,6 +10,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.DriverManagerDataSource;
 
 import java.sql.Timestamp;
+import java.time.Instant;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -21,6 +22,8 @@ import static org.mockito.Mockito.when;
  * 真实 H2（MODE=PostgreSQL）建 task 表跑 StartupRecovery.run：① RUNNING 回收重投；
  * ② 陈旧 PENDING（>2 分钟）重投且 updated_at 刷新（经 StalePendingQueries.touch）；③ 新鲜 PENDING 不动。
  * redis 侧（QueuePublisher）mock——本测试验证的是 SQL 行为，不是 Redis。
+ * T4.78/P-01：RUNNING 回收判据改为「僵尸 RUNNING」（updated_at 早于 stale-running-minutes）——
+ * 新鲜 RUNNING（心跳活着）不回收，这正是 mock 测试证不了的 SQL 语义，必须真 H2。
  */
 @ExtendWith(MockitoExtension.class)
 class StartupRecoveryDbTest {
@@ -49,7 +52,8 @@ class StartupRecoveryDbTest {
     @Test
     void pendingSweepSqlReallyRunsAndRequeuesOnlyStaleRows() {
         Timestamp runStart = new Timestamp(System.currentTimeMillis() - 1000L);
-        long runningId = insert("RUNNING", runStart);
+        // T4.78：判据改僵尸 RUNNING 后，被回收的 RUNNING 行必须足够旧（10 分钟前，远超默认阈值 5 分钟）
+        long runningId = insert("RUNNING", Timestamp.from(runStart.toInstant().minusSeconds(600)));
         long staleId = insert("PENDING", Timestamp.from(runStart.toInstant().minusSeconds(180)));
         long freshId = insert("PENDING", runStart);
         when(queuePublisher.tryPublish(org.mockito.ArgumentMatchers.anyLong())).thenReturn(true);
@@ -69,5 +73,56 @@ class StartupRecoveryDbTest {
         Integer untouched = jdbc.queryForObject(
                 "SELECT COUNT(*) FROM task WHERE id = ? AND updated_at <= ?", Integer.class, freshId, runStart);
         assertTrue(untouched == 1, "新鲜 PENDING 不得被 sweep 碰");
+    }
+
+    /** T4.78/P-01 用例1：心跳活着（updated_at=now）的 RUNNING 不回收——多实例下可能是别的实例正在跑。 */
+    @Test
+    void freshRunningRowIsNotRecovered() {
+        Timestamp runStart = new Timestamp(System.currentTimeMillis());
+        long freshRunningId = insert("RUNNING", runStart);
+
+        new StartupRecovery(jdbc, queuePublisher, new StalePendingQueries(jdbc)).run(null);
+
+        verify(queuePublisher, org.mockito.Mockito.never()).tryPublish(freshRunningId);
+        Integer stillRunning = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM task WHERE id = ? AND status = 'RUNNING'", Integer.class, freshRunningId);
+        assertEquals(1, stillRunning, "新鲜 RUNNING 不得被启动恢复回收");
+        Integer untouched = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM task WHERE id = ? AND updated_at = ?", Integer.class, freshRunningId, runStart);
+        assertEquals(1, untouched, "新鲜 RUNNING 的 updated_at 不得被改写");
+    }
+
+    /** T4.78/P-01 用例2：僵尸 RUNNING（updated_at 超阈值 10 分钟 > 默认 5 分钟）被回收重投、行变 PENDING。 */
+    @Test
+    void zombieRunningRowIsRecoveredAndRequeued() {
+        long zombieId = insert("RUNNING", Timestamp.from(Instant.now().minusSeconds(600)));
+        when(queuePublisher.tryPublish(org.mockito.ArgumentMatchers.anyLong())).thenReturn(true);
+
+        new StartupRecovery(jdbc, queuePublisher, new StalePendingQueries(jdbc)).run(null);
+
+        verify(queuePublisher).tryPublish(zombieId);
+        Integer pending = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM task WHERE id = ? AND status = 'PENDING'", Integer.class, zombieId);
+        assertEquals(1, pending, "僵尸 RUNNING 应被回收为 PENDING 并重投");
+    }
+
+    /** T4.78/P-01 用例3：混合——新鲜 + 僵尸并存，只有僵尸被回收重投，新鲜行原样不动。 */
+    @Test
+    void mixedRunningRowsOnlyZombieRecovered() {
+        Timestamp now = new Timestamp(System.currentTimeMillis());
+        long freshId = insert("RUNNING", now);
+        long zombieId = insert("RUNNING", Timestamp.from(now.toInstant().minusSeconds(600)));
+        when(queuePublisher.tryPublish(org.mockito.ArgumentMatchers.anyLong())).thenReturn(true);
+
+        new StartupRecovery(jdbc, queuePublisher, new StalePendingQueries(jdbc)).run(null);
+
+        verify(queuePublisher).tryPublish(zombieId);
+        verify(queuePublisher, org.mockito.Mockito.never()).tryPublish(freshId);
+        Integer freshRunning = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM task WHERE id = ? AND status = 'RUNNING'", Integer.class, freshId);
+        assertEquals(1, freshRunning, "混合场景下新鲜 RUNNING 仍 RUNNING");
+        Integer zombiePending = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM task WHERE id = ? AND status = 'PENDING'", Integer.class, zombieId);
+        assertEquals(1, zombiePending, "混合场景下僵尸 RUNNING 变 PENDING");
     }
 }

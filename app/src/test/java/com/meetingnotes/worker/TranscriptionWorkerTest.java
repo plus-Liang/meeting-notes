@@ -285,13 +285,14 @@ class TranscriptionWorkerTest {
     void startupRecoveryRequeuesRunningTasksAsPending() {
         com.meetingnotes.worker.StartupRecovery recovery = new com.meetingnotes.worker.StartupRecovery(
                 jdbc, queuePublisher, stalePendingQueries);
+        // T4.78：启动恢复 SELECT 带僵尸判据 cutoff 参数（query(String, RowMapper, Object...) 重载）
         doReturn(List.of(5L, 7L)).when(jdbc).query(contains("WHERE status = 'RUNNING'"),
-                ArgumentMatchers.<org.springframework.jdbc.core.RowMapper<Long>>any());
+                ArgumentMatchers.<org.springframework.jdbc.core.RowMapper<Long>>any(), ArgumentMatchers.any());
 
         recovery.run(null);
 
         verify(jdbc).query(contains("WHERE status = 'RUNNING'"),
-                ArgumentMatchers.<org.springframework.jdbc.core.RowMapper<Long>>any());
+                ArgumentMatchers.<org.springframework.jdbc.core.RowMapper<Long>>any(), ArgumentMatchers.any());
         verify(queuePublisher).tryPublish(5L);
         verify(queuePublisher).tryPublish(7L);
     }
@@ -301,7 +302,7 @@ class TranscriptionWorkerTest {
         com.meetingnotes.worker.StartupRecovery recovery = new com.meetingnotes.worker.StartupRecovery(
                 jdbc, queuePublisher, stalePendingQueries);
         doReturn(List.of()).when(jdbc).query(contains("WHERE status = 'RUNNING'"),
-                ArgumentMatchers.<org.springframework.jdbc.core.RowMapper<Long>>any());
+                ArgumentMatchers.<org.springframework.jdbc.core.RowMapper<Long>>any(), ArgumentMatchers.any());
 
         recovery.run(null);
 

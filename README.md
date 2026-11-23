@@ -304,6 +304,7 @@ powershell -File tools\deploy-main.ps1
 |---|---|---|
 | `APP_PORT` | 8080 | Web 端口 |
 | `WORKER_HEARTBEAT_SEC` | 20 | 转写期间刷新本任务 `updated_at` 的间隔（T4.77/P-06 心跳）；必须小于 P-01 的僵尸判定阈值。只刷认领的那个 id，不做全局扫表 |
+| `RECOVERY_STALE_RUNNING_MINUTES` | 5 | 启动恢复只回收心跳停止超过该时长的 RUNNING（T4.78/P-01 僵尸判据）；必须远大于 `WORKER_HEARTBEAT_SEC`，0/负值启动时 WARN 并回退 5 |
 | `API_TOKEN` | 必填 | 全局接入令牌（≡ 1 号管理员账号）；**必填 ≥32 位随机串**（生成：`openssl rand -hex 32`）；留空 / 默认值 / 短于 32 位会**拒绝启动**（T4.73）。首次部署走 `scripts/first-run.*` 会自动生成 |
 | `ASR_MODEL_NAME` | small | small / medium / large-v3…（需对应模型文件） |
 | `ASR_COMPUTE_TYPE` | int8 | CPU 用 int8；有 GPU 可改 float16 |
