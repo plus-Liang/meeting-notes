@@ -349,4 +349,39 @@ class TranscriptionWorkerTest {
         verify(jdbc).update(contains("AND status IN ('PENDING','RETRYING')"), eq(22L));
         verify(taskHeartbeat).start(22L);
     }
+
+    /* ---- T4.77-fix B1：认领抛异常（毒丸：任务行不存在/DB 瞬时故障）→ worker 不死、不 markFailure，下一条照常处理 ---- */
+
+    /** 队列里出现库里已不存在的 task id 时：handleOne 必须 catch 住认领异常只记 error（绝不 markFailure——
+     *  行不存在时 UPDATE…RETURNING 返回空会 NPE），worker 存活，下一条任务照常认领并走完管线置 DONE。 */
+    @Test
+    void claimExceptionDoesNotKillWorkerAndNextTaskProceeds() {
+        TranscriptionWorker worker = newWorker();
+        when(jdbc.queryForMap(contains("FROM task WHERE id = ?"), eq(999999L)))
+                .thenThrow(new org.springframework.dao.EmptyResultDataAccessException(1));
+        java.util.Map<String, Object> row = java.util.Map.of(
+                "status", "PENDING", "attempts", 0, "source_type", "PASTE",
+                "source_uri", "s3://meetingnotes/tasks/1/paste.txt");
+        when(jdbc.queryForMap(contains("FROM task WHERE id = ?"), eq(1L))).thenReturn(row);
+        when(jdbc.update(contains("AND status IN ('PENDING','RETRYING')"), eq(1L))).thenReturn(1);
+        TaskHeartbeat.Session session = org.mockito.Mockito.mock(TaskHeartbeat.Session.class);
+        when(taskHeartbeat.start(1L)).thenReturn(session);
+        when(pasteTextReader.read("tasks/1/paste.txt")).thenReturn("第二条任务的内容");
+
+        worker.handleOne("999999");
+        worker.handleOne("1");
+
+        // 毒丸路径：绝不触发 markFailure（无 attempts 回写/RETRYING/DEAD），也绝无心跳会话
+        verify(jdbc, never()).query(contains("RETURNING attempts"),
+                ArgumentMatchers.<ResultSetExtractor<Integer>>any(), eq(999999L));
+        verify(jdbc, never()).update(contains("'RETRYING'"), ArgumentMatchers.any(), eq(999999L));
+        verify(jdbc, never()).update(contains("'DEAD'"), ArgumentMatchers.any(), eq(999999L));
+        verify(taskHeartbeat, never()).start(999999L);
+        // 下一条照常：认领 → 心跳启动 → PASTE 管线 → DONE → 心跳关闭 → MDC 清理
+        verify(taskHeartbeat).start(1L);
+        verify(pasteTextReader).read("tasks/1/paste.txt");
+        verify(jdbc).update(contains("'DONE'"), eq(1L));
+        verify(session).close();
+        org.junit.jupiter.api.Assertions.assertNull(org.slf4j.MDC.get("taskId"), "handleOne 结束必须清理 MDC");
+    }
 }

@@ -110,25 +110,30 @@ public class TranscriptionWorker implements SmartLifecycle {
                 sleepQuietly();
                 continue;
             }
-            if (taskId == null) {
-                continue; // BLPOP 超时，回到阻塞等待（无空转轮询）
-            }
-            // T2.7：MDC 防线程复用串号；T4.77：认领/在飞/心跳收敛在 claim()，Session 在 finally 关（异常路径也要停）
-            org.slf4j.MDC.put("taskId", taskId.trim());
-            var claimed = claim(Long.parseLong(taskId.trim()));
-            try {
-                if (claimed != null) {
-                    try { process(claimed.row(), Long.parseLong(taskId.trim())); } catch (Exception e) { log.error("处理异常", e); markFailure(Long.parseLong(taskId.trim()), e); }
-                }
-            } finally {
-                if (claimed != null) { claimed.hb().close(); }
-                org.slf4j.MDC.remove("taskId");
-                inflightTaskId = 0; // T4.74：成功/失败/异常退出都要把「在跑」标记归零
-            }
+            if (taskId != null) { handleOne(taskId); } // BLPOP 超时（null）回到阻塞等待，无空转轮询
         }
         log.info("worker 已停止");
     }
 
+    /** 取一条 → 认领 → 处理（包级可见供 T4.77-fix 回归测试驱动）。认领纳入保护伞：行不存在/DB 瞬时故障只
+     *  error 后跳过该条（不 markFailure——行不存在时 UPDATE…RETURNING 返回空会 NPE），worker 绝不停摆；
+     *  已认领后 process 异常仍走既有 log.error + markFailure。 */
+    void handleOne(String taskId) {
+        long id = Long.parseLong(taskId.trim());
+        org.slf4j.MDC.put("taskId", taskId.trim()); // T2.7：MDC 防线程复用串号
+        Claimed claimed = null;
+        try {
+            claimed = claim(id);
+            if (claimed == null) { log.warn("任务 {} 已被其它实例认领（状态已变更），跳过", id); }
+            else { try { process(claimed.row(), id); } catch (Exception e) { log.error("处理异常", e); markFailure(id, e); } }
+        } catch (Exception e) { // T4.77-fix B1：认领抛异常（任务在 BLPOP 与认领之间被删/DB 抖动）→ worker 不死
+            log.error("认领异常，跳过该条继续（worker 不停）", e);
+        } finally {
+            if (claimed != null) { claimed.hb().close(); } // T4.77：Session 在 finally 关（异常路径也要停）
+            org.slf4j.MDC.remove("taskId");
+            inflightTaskId = 0; // T4.74：成功/失败/异常退出都要把「在跑」标记归零
+        }
+    }
     /** 认领结果（非 null = 成功，hb 已启动）；row 供管线读 source_uri/source_type/attempts。 */
     private record Claimed(TaskHeartbeat.Session hb, Map<String, Object> row) {}
 
@@ -150,7 +155,6 @@ public class TranscriptionWorker implements SmartLifecycle {
             throw new ProcessingException("STORAGE_ERROR", "source_uri 非法：" + sourceUri, null);
         }
         String key = sourceUri.substring(("s3://" + bucket + "/").length());
-
         // T3.7：PASTE/字幕任务——直接读文本对象，跳过 ffmpeg/ASR（管线仍守 F-1/D-069：transcript → 结构化 → DONE）
         if ("PASTE".equals(row.get("source_type"))) {
             String text;
@@ -163,7 +167,6 @@ public class TranscriptionWorker implements SmartLifecycle {
             finalizeResult(taskId, text, null); // PASTE 无音频，segments 恒 null（不是 []）
             return;
         }
-
         Path dir = null;
         Path wav = null;
         try {
@@ -177,12 +180,10 @@ public class TranscriptionWorker implements SmartLifecycle {
                 throw new ProcessingException("STORAGE_ERROR", "从对象存储拉取文件失败：" + e.getMessage(), e);
             }
             log.info("拉取媒体对象完成（{} bytes）", Files.size(input));
-
             // 2) ffmpeg 抽 16k 单声道 wav（卡片指定参数）
             wav = Files.createTempFile("mn-wav-", ".wav");
             monoWavExtractor.extract(input, wav);
             log.info("ffmpeg 抽音轨完成（16k 单声道 wav）");
-
             // 3) ASR 转写（T4.35a：AsrClient 一次调用同时拿 text + segments，绝不二次调 ASR；
             //    失败语义不变：RuntimeException → ProcessingException("ASR_ERROR") 走既有重试/死信）
             String text;
@@ -196,7 +197,6 @@ public class TranscriptionWorker implements SmartLifecycle {
             }
             log.info("ASR 转写完成（{} 字，{} 段）", text == null ? 0 : text.length(),
                     segments == null ? 0 : segments.size());
-
             // 4) 收口（finalizeResult）：写 transcript + segments → 摘要/待办（AI 失败只 WARN 留空，T3.3 接管）→ 最后置 DONE；空文本照常（D-048）
             finalizeResult(taskId, text, segments);
         } finally {
