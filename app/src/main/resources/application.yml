@@ -172,6 +172,9 @@ app:
     poll-timeout-sec: ${WORKER_POLL_TIMEOUT_SEC:10}
     # T4.74/P-19：停机时等待"正在转写的那个任务"完成的上限；0 = 不等待（只用于测试）
     drain-timeout-sec: ${WORKER_DRAIN_TIMEOUT_SEC:60}
+    # T4.77/P-06：转写期间刷新本任务 updated_at 的间隔（秒）——必须小于 P-01 的僵尸判定阈值，
+    # 否则正常长任务会被误判僵尸回收；只刷认领的那个 id，不做全局扫表
+    heartbeat-sec: ${WORKER_HEARTBEAT_SEC:20}
 
   asr:
     max-concurrency: ${ASR_MAX_CONCURRENCY:2}

@@ -50,6 +50,8 @@ class TranscriptionWorkerDrainTest {
     private com.meetingnotes.webhook.WebhookDeliveryService webhookService;
     @Mock
     private com.meetingnotes.task.QueuePublisher queuePublisher;
+    @Mock
+    private TaskHeartbeat taskHeartbeat;
 
     private ListAppender<ILoggingEvent> appender;
     private Logger logger;
@@ -72,10 +74,10 @@ class TranscriptionWorkerDrainTest {
     }
 
     private TranscriptionWorker newWorker() {
-        // 14 参构造器（drain 字段默认 60）；需要自定义 drain 的用例直接 ReflectionTestUtils.setField
+        // T4.77：15 参构造器（TaskHeartbeat 为 mock，本类不触发 claim）；drain 用例用 ReflectionTestUtils.setField
         return new TranscriptionWorker(redis, jdbc, s3, asrClient,
                 structuringService, punctuator, webhookService, pasteTextReader, monoWavExtractor,
-                queuePublisher, "meetingnotes:task-queue", 10, "meetingnotes", 3);
+                queuePublisher, taskHeartbeat, "meetingnotes:task-queue", 10, "meetingnotes", 3);
     }
 
     private long stopAndMeasure(TranscriptionWorker worker) {

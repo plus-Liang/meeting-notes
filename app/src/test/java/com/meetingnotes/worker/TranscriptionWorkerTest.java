@@ -63,12 +63,14 @@ class TranscriptionWorkerTest {
     @Mock
     private com.meetingnotes.task.QueuePublisher queuePublisher;
     @Mock
+    private TaskHeartbeat taskHeartbeat;
+    @Mock
     private StalePendingQueries stalePendingQueries;
 
     private TranscriptionWorker newWorker() {
         return new TranscriptionWorker(redis, jdbc, s3, asrClient,
                 structuringService, punctuator, webhookService, pasteTextReader, monoWavExtractor,
-                queuePublisher, "meetingnotes:task-queue", 10, "meetingnotes", 3);
+                queuePublisher, taskHeartbeat, "meetingnotes:task-queue", 10, "meetingnotes", 3);
     }
 
     @Test
@@ -182,13 +184,14 @@ class TranscriptionWorkerTest {
     @Test
     void pasteTaskSkipsAsrAndFfmpegAndFinalizesDirectly() throws Exception {
         TranscriptionWorker worker = newWorker();
-        when(jdbc.queryForMap(contains("FROM task WHERE id = ?"), eq(20L))).thenReturn(java.util.Map.of(
+        // T4.77：认领（SELECT/UPDATE）挪进 claim()，本用例直接调 process() 不再需要认领 stub；
+        // process 现签名收认领时的 row（管线只读 source_uri/source_type）
+        java.util.Map<String, Object> row = java.util.Map.of(
                 "status", "PENDING", "attempts", 0, "source_type", "PASTE",
-                "source_uri", "s3://meetingnotes/tasks/20/paste.txt"));
-        when(jdbc.update(contains("AND status IN ('PENDING','RETRYING')"), eq(20L))).thenReturn(1);
+                "source_uri", "s3://meetingnotes/tasks/20/paste.txt");
         when(pasteTextReader.read("tasks/20/paste.txt")).thenReturn("粘贴的一段会议文本");
 
-        ReflectionTestUtils.invokeMethod(worker, "process", 20L);
+        ReflectionTestUtils.invokeMethod(worker, "process", row, 20L);
 
         verify(asrClient, never()).transcribe(ArgumentMatchers.any());
         verify(monoWavExtractor, never()).extract(ArgumentMatchers.any(), ArgumentMatchers.any());
@@ -307,37 +310,43 @@ class TranscriptionWorkerTest {
 
     /* ---- T4.67-fix F4（S12 真修）：认领 = 原子条件 UPDATE + 影响行数校验 ---- */
 
-    /** 影响行数 0（状态已被其它实例/流程改走）：跳过——不读对象、不调结构化、不落库、不置 DONE。 */
+    /** 影响行数 0（状态已被其它实例/流程改走）：跳过——不读对象、不调结构化、不落库、不置 DONE。
+     *  T4.77：认领行为收口在 claim()（返回 null 即跳过），本用例直接测 claim。 */
     @Test
-    void claimConflictSkipsProcessingEntirely() throws Exception {
+    void claimConflictSkipsProcessingEntirely() {
         TranscriptionWorker worker = newWorker();
         when(jdbc.queryForMap(contains("FROM task WHERE id = ?"), eq(21L))).thenReturn(java.util.Map.of(
                 "status", "PENDING", "attempts", 0, "source_type", "PASTE",
                 "source_uri", "s3://meetingnotes/tasks/21/paste.txt"));
         when(jdbc.update(contains("AND status IN ('PENDING','RETRYING')"), eq(21L))).thenReturn(0);
 
-        ReflectionTestUtils.invokeMethod(worker, "process", 21L);
+        Object claimed = ReflectionTestUtils.invokeMethod(worker, "claim", 21L);
 
+        org.junit.jupiter.api.Assertions.assertNull(claimed, "认领冲突必须返回 null（跳过）");
+        verify(taskHeartbeat, never()).start(21L);
         verify(pasteTextReader, never()).read(anyString());
         verify(structuringService, never()).structure(anyLong(), anyString());
         verify(jdbc, never()).update(contains("task_result"), eq(21L), ArgumentMatchers.any(), ArgumentMatchers.any());
         verify(jdbc, never()).update(contains("'DONE'"), eq(21L));
     }
 
-    /** 影响行数 1：照旧处理收口 DONE；且认领 SQL 必须带原子条件（A2 变异③落点：去掉条件时本用例必红）。 */
+    /** 影响行数 1：claim 启动心跳并返回会话；认领 SQL 必须带原子条件（A2 变异③落点：去掉条件时本用例必红）。 */
     @Test
-    void claimSuccessProceedsAndSqlIsConditional() throws Exception {
+    void claimSuccessProceedsAndSqlIsConditional() {
         TranscriptionWorker worker = newWorker();
+        TaskHeartbeat.Session session = new TaskHeartbeat.Session() {
+            @Override public void close() { }
+        };
         when(jdbc.queryForMap(contains("FROM task WHERE id = ?"), eq(22L))).thenReturn(java.util.Map.of(
                 "status", "PENDING", "attempts", 0, "source_type", "PASTE",
                 "source_uri", "s3://meetingnotes/tasks/22/paste.txt"));
         when(jdbc.update(contains("AND status IN ('PENDING','RETRYING')"), eq(22L))).thenReturn(1);
-        when(pasteTextReader.read("tasks/22/paste.txt")).thenReturn("认领成功后照常处理");
+        when(taskHeartbeat.start(22L)).thenReturn(session);
 
-        ReflectionTestUtils.invokeMethod(worker, "process", 22L);
+        Object claimed = ReflectionTestUtils.invokeMethod(worker, "claim", 22L);
 
+        org.junit.jupiter.api.Assertions.assertNotNull(claimed, "认领成功必须返回会话");
         verify(jdbc).update(contains("AND status IN ('PENDING','RETRYING')"), eq(22L));
-        verify(jdbc).update(contains("task_result"), eq(22L), eq("认领成功后照常处理"), ArgumentMatchers.isNull());
-        verify(jdbc).update(contains("'DONE'"), eq(22L));
+        verify(taskHeartbeat).start(22L);
     }
 }

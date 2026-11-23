@@ -41,6 +41,7 @@ public class TranscriptionWorker implements SmartLifecycle {
     private final PasteTextReader pasteTextReader;
     private final MonoWavExtractor monoWavExtractor;
     private final com.meetingnotes.task.QueuePublisher queuePublisher;
+    private final TaskHeartbeat taskHeartbeat;
     private final String queueKey;
     private final Duration pollTimeout;
     private final String bucket;
@@ -50,19 +51,19 @@ public class TranscriptionWorker implements SmartLifecycle {
     private Thread workerThread;
     @Value("${app.worker.drain-timeout-sec:60}")
     private long drainTimeoutSec = 60; // T4.74/P-19：排空上限；纯 new（测试）走 60 默认，Spring 经 @Value 注入 yml 值
-    /** 正在处理的任务 id（0 = 空闲）；stop() 排空依据：非 0 时等待其归 0 再退出。 */
-    private volatile long inflightTaskId;
+    private volatile long inflightTaskId; // T4.74：在飞任务 id（0 = 空闲），stop() 依此排空
 
     public TranscriptionWorker(StringRedisTemplate redis, JdbcTemplate jdbc, S3Client s3,
             com.meetingnotes.asr.AsrClient asrClient, com.meetingnotes.ai.StructuringService structuringService,
             com.meetingnotes.ai.TranscriptPunctuator punctuator, com.meetingnotes.webhook.WebhookDeliveryService webhookService,
             PasteTextReader pasteTextReader, MonoWavExtractor monoWavExtractor, com.meetingnotes.task.QueuePublisher queuePublisher,
-            @Value("${app.worker.queue-key}") String queueKey, @Value("${app.worker.poll-timeout-sec}") long pollTimeoutSec,
+            TaskHeartbeat taskHeartbeat, @Value("${app.worker.queue-key}") String queueKey,
+            @Value("${app.worker.poll-timeout-sec}") long pollTimeoutSec,
             @Value("${app.storage.bucket}") String bucket, @Value("${app.task.max-retries}") int maxRetries) {
         this.redis = redis; this.jdbc = jdbc; this.s3 = s3; this.asrClient = asrClient;
         this.structuringService = structuringService; this.punctuator = punctuator; this.webhookService = webhookService;
         this.pasteTextReader = pasteTextReader; this.monoWavExtractor = monoWavExtractor; this.queuePublisher = queuePublisher;
-        this.queueKey = queueKey; this.pollTimeout = Duration.ofSeconds(pollTimeoutSec);
+        this.taskHeartbeat = taskHeartbeat; this.queueKey = queueKey; this.pollTimeout = Duration.ofSeconds(pollTimeoutSec);
         this.bucket = bucket; this.maxRetries = maxRetries;
     }
 
@@ -112,36 +113,38 @@ public class TranscriptionWorker implements SmartLifecycle {
             if (taskId == null) {
                 continue; // BLPOP 超时，回到阻塞等待（无空转轮询）
             }
-            // T2.7：taskId 放 MDC（结构化日志的独立字段），处理/失败全程贯穿，finally 清防止线程复用串号
+            // T2.7：MDC 防线程复用串号；T4.77：认领/在飞/心跳收敛在 claim()，Session 在 finally 关（异常路径也要停）
             org.slf4j.MDC.put("taskId", taskId.trim());
+            var claimed = claim(Long.parseLong(taskId.trim()));
             try {
-                try {
-                    process(Long.parseLong(taskId.trim()));
-                } catch (Exception e) {
-                    log.error("处理异常", e);
-                    markFailure(Long.parseLong(taskId.trim()), e);
+                if (claimed != null) {
+                    try { process(claimed.row(), Long.parseLong(taskId.trim())); } catch (Exception e) { log.error("处理异常", e); markFailure(Long.parseLong(taskId.trim()), e); }
                 }
             } finally {
+                if (claimed != null) { claimed.hb().close(); }
                 org.slf4j.MDC.remove("taskId");
-                inflightTaskId = 0; // T4.74：与 MDC 同层清理——成功/失败/异常退出都要把「在跑」标记归零
+                inflightTaskId = 0; // T4.74：成功/失败/异常退出都要把「在跑」标记归零
             }
         }
         log.info("worker 已停止");
     }
 
-    private void process(long taskId) throws Exception {
+    /** 认领结果（非 null = 成功，hb 已启动）；row 供管线读 source_uri/source_type/attempts。 */
+    private record Claimed(TaskHeartbeat.Session hb, Map<String, Object> row) {}
+
+    /** T4.77/P-06：原子认领（SQL 语义不变）+ 在飞标记 + 心跳启动；返回 null = 已被其它实例认领（跳过）。 */
+    private Claimed claim(long taskId) {
         Map<String, Object> row = jdbc.queryForMap(
                 "SELECT status, attempts, source_type, COALESCE(source_uri, '') AS source_uri FROM task WHERE id = ?", taskId);
-        int claimed = jdbc.update(
-                "UPDATE task SET status = 'RUNNING', updated_at = now() "
-                        + "WHERE id = ? AND status IN ('PENDING','RETRYING')", taskId);
-        if (claimed == 0) {
-            log.warn("任务 {} 已被其它实例认领（状态已变更），跳过", taskId);
-            return;
-        }
+        int claimed = jdbc.update("UPDATE task SET status = 'RUNNING', updated_at = now() WHERE id = ? "
+                + "AND status IN ('PENDING','RETRYING')", taskId);
+        if (claimed == 0) { return null; }
         inflightTaskId = taskId; // T4.74：认领成功即标记在飞，stop() 依此排空
         log.info("开始转写（第 {} 次尝试）", ((Number) row.get("attempts")).intValue() + 1);
+        return new Claimed(taskHeartbeat.start(taskId), row);
+    }
 
+    private void process(Map<String, Object> row, long taskId) throws Exception {
         String sourceUri = (String) row.get("source_uri");
         if (!sourceUri.startsWith("s3://" + bucket + "/")) {
             throw new ProcessingException("STORAGE_ERROR", "source_uri 非法：" + sourceUri, null);
@@ -202,9 +205,8 @@ public class TranscriptionWorker implements SmartLifecycle {
         }
     }
 
-    /** 结果收口（F-1/T3.2，D-069）：先写 transcript + segments → 结构化（一次调用）→ 标点（T4.18，结构化成功才做）→
-     * **最后**置 DONE（AI 失败也 DONE）；外部读到 DONE 时结果必已落库，不存在 DONE+null 窗口。
-     * T4.35a：segments 与 transcript 同一语句写入（无音频/PASTE 传 null——旧任务与无音频任务都是 null，不是 []）。 */
+    /** 结果收口（F-1/T3.2，D-069）：transcript+segments → 结构化 → 标点 → **最后**置 DONE；外部读到 DONE 时结果必已落库。
+     *  T4.35a：segments 与 transcript 同一语句写入（无音频/PASTE 传 null——旧任务与无音频任务都是 null，不是 []）。 */
     void finalizeResult(long taskId, String text,
                         java.util.List<com.meetingnotes.asr.AsrResponseParser.Segment> segments) {
         saveTranscript(taskId, text, segments);
@@ -241,10 +243,8 @@ public class TranscriptionWorker implements SmartLifecycle {
         }
     }
 
-    /**
-     * 失败兜底：不永久卡 RUNNING。重试未耗尽 → RETRYING + 重新入队；重投失败 → 退回 PENDING（T4.52 S6：
-     * RETRYING 无任何机制回收）；耗尽 → DEAD + dead_letter。error_code 只存稳定码（列宽 64），原因写 dead_letter。
-     */
+    /** 失败兜底：不永久卡 RUNNING。重试未耗尽 → RETRYING + 重新入队；重投失败 → 退回 PENDING（T4.52 S6：
+     *  RETRYING 无机制回收）；耗尽 → DEAD + dead_letter。error_code 只存稳定码（列宽 64），原因写 dead_letter。 */
     private void markFailure(long taskId, Exception cause) {
         String code = cause instanceof ProcessingException pe ? pe.code : "UNKNOWN_ERROR";
         String reason = abbreviate(cause.getMessage());
