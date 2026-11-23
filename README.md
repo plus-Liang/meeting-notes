@@ -188,6 +188,14 @@ docker compose -f docker-compose.yml -f docker-compose.ghcr.yml up -d
 
 ## 运维：备份 / 恢复 / 日志 / 升级
 
+**容器自愈**（T4.75/P-20）：五个常驻服务（`app` / `postgres` / `redis` / `minio` / `asr`）都是 `restart: unless-stopped`——进程崩溃、宿主机重启、容器被 OOM 杀掉后 Docker 会自动拉起，不需要人肉 `up -d`。自查：
+
+```bash
+docker inspect -f '{{.HostConfig.RestartPolicy.Name}}' meeting-notes-app-1   # 预期 unless-stopped
+```
+
+两点边界：`docker compose stop` 是**人工停止**，之后容器不会被自动拉起（Docker 既定语义，不是 bug；重新 `up -d` 即恢复）；若某服务反复重启，先看原因再谈自愈——`docker logs --tail 100 <容器名>` 看报错，`docker inspect -f '{{.RestartCount}}' <容器名>` 看重启次数。
+
 **备份**（DB + MinIO 音频 + 带 sha256 清单，默认保留 7 份）：
 
 ```bash

@@ -21,6 +21,8 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
+    # T4.75/P-20：容器级自愈——崩溃/宿主机重启/OOM 后自动拉起（人工 stop 不复活，Docker 既定语义）
+    restart: unless-stopped
 
   redis:
     image: ${REGISTRY_PREFIX:-}library/redis:7-alpine
@@ -31,6 +33,7 @@ services:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       retries: 20
+    restart: unless-stopped
 
   minio:
     # 多数国内加速源对非 library 镜像拒之门外；MINIO_IMAGE 可整体覆盖来源
@@ -50,6 +53,7 @@ services:
       interval: 5s
       timeout: 3s
       retries: 30
+    restart: unless-stopped
 
   # ASR 服务：自建 OpenAI 兼容服务（不用远程镜像 —— Hub 不通 / 加速源白名单拒绝）
   # 模型不进镜像：宿主机目录挂载到 /models（只读）；容器内固定监听 8000
@@ -134,6 +138,8 @@ services:
     volumes:
       # P2：inbox 目录监控（宿主目录放文件即处理）
       - ${INBOX_HOST_DIR:-./inbox}:/inbox:ro
+    # T4.75/P-20：与 asr 同款自愈策略；宽限期 stop_grace_period: 180s（T4.74）不受影响
+    restart: unless-stopped
 
 volumes:
   pgdata:
