@@ -260,6 +260,8 @@ powershell -File tools\deploy-main.ps1
 
 失败时脚本只打印上一版镜像 ID 与回滚命令，**不会自动回滚**。参数：`-Repo`、`-ComposeProject`、`-SkipBuild`、`-SkipSmoke`、`-DryRun`、`-AllowDataChange`、`-TimeoutSec`。
 
+> **升级提示（T4.73 起）**：应用新增启动期弱口令守卫——`API_TOKEN` 留空、仍是默认值 `change-me-api-token`、或短于 32 位时，应用会**拒绝启动**并在日志里给出生成命令（`openssl rand -hex 32`）。已有部署升级前先改 `.env` 里的 `API_TOKEN` 为 64 位随机值，再 `docker compose up -d`；全新部署走 `scripts/first-run.ps1` / `scripts/first-run.sh` 会自动生成 64 位随机值，无需手改。
+
 ## 常见问题 / 故障排查
 
 | 现象 | 原因与解法 |
@@ -292,7 +294,7 @@ powershell -File tools\deploy-main.ps1
 | 键 | 默认 | 说明 |
 |---|---|---|
 | `APP_PORT` | 8080 | Web 端口 |
-| `API_TOKEN` | 必改 | 全局接入令牌（≡ 1 号管理员账号）；**部署后请立刻改掉** |
+| `API_TOKEN` | 必填 | 全局接入令牌（≡ 1 号管理员账号）；**必填 ≥32 位随机串**（生成：`openssl rand -hex 32`）；留空 / 默认值 / 短于 32 位会**拒绝启动**（T4.73）。首次部署走 `scripts/first-run.*` 会自动生成 |
 | `ASR_MODEL_NAME` | small | small / medium / large-v3…（需对应模型文件） |
 | `ASR_COMPUTE_TYPE` | int8 | CPU 用 int8；有 GPU 可改 float16 |
 | `TASK_MAX_DURATION_SEC` / `TASK_MAX_SIZE_BYTES` | 3600 / 200 MB | 单任务上限 |

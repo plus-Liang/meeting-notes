@@ -35,6 +35,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @SpringBootTest(classes = MeetingNotesApplication.class,
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
         properties = {
+                // T4.73：弱口令守卫逃生口——本上下文不起真实 token，不跳过守卫会启动失败（测试红）
+                "app.security.allow-weak-api-token=true",
                 "LLM_ENABLED=",
                 "LLM_BASE_URL=",
                 "LLM_API_KEY=",

@@ -9,7 +9,28 @@ cd "$(dirname "$0")/.." || exit 2
 # 1) .env
 if [ ! -f .env ]; then
   cp .env.example .env
-  echo '[first-run] 已从 .env.example 生成 .env。部署后请修改：API_TOKEN / MINIO 密钥（S3_ACCESS_KEY、S3_SECRET_KEY）/ 数据库密码（POSTGRES_PASSWORD）等敏感项。'
+  echo '[first-run] 已从 .env.example 生成 .env。部署后请修改：MINIO 密钥（S3_ACCESS_KEY、S3_SECRET_KEY）/ 数据库密码（POSTGRES_PASSWORD）等敏感项。'
+fi
+
+# 1.1) API_TOKEN（T4.73）：为空则生成 32 字节随机 -> 64 位 hex 写入；已有非空值不覆盖。
+#      应用侧守卫（WeakApiTokenGuard）会拒绝空/默认/短于 32 位的 API_TOKEN——首启必须在这里补齐，
+#      否则陌生人一键启动会被守卫打断（T4.73 C3，C2 的连带必要项）。
+CUR_TOKEN=$(grep -E '^[[:space:]]*API_TOKEN=' .env | head -1 | cut -d= -f2 | tr -d '"' | tr -d '\r')
+if [ -z "$CUR_TOKEN" ]; then
+  if command -v openssl >/dev/null 2>&1; then
+    GEN_TOKEN=$(openssl rand -hex 32)
+    GEN_WAY='openssl rand -hex 32'
+  else
+    GEN_TOKEN=$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')
+    GEN_WAY='/dev/urandom | od'
+  fi
+  if grep -qE '^[[:space:]]*API_TOKEN=' .env; then
+    # 只精确替换 API_TOKEN 这一行（sed -i.bak 兼容 GNU/macOS）；hex 只含 [0-9a-f]，无 sed 特殊字符
+    sed -i.bak "s|^[[:space:]]*API_TOKEN=.*|API_TOKEN=${GEN_TOKEN}|" .env && rm -f .env.bak
+  else
+    printf 'API_TOKEN=%s\n' "$GEN_TOKEN" >> .env
+  fi
+  echo "[first-run] 已生成随机 API_TOKEN（64 位，来源 ${GEN_WAY}），接入外部系统时复用该值。"
 fi
 
 # 2) 模型（缺则用 asr 镜像自带 python 下载，宿主机无需 Python；国内可设 HF_ENDPOINT=https://hf-mirror.com）

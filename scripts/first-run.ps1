@@ -11,11 +11,37 @@ Set-Location $repo
 # 1) .env
 if (-not (Test-Path (Join-Path $repo '.env'))) {
     Copy-Item (Join-Path $repo '.env.example') (Join-Path $repo '.env')
-    Write-Host '[first-run] 已从 .env.example 生成 .env。部署后请修改：API_TOKEN / MINIO 密钥（S3_ACCESS_KEY、S3_SECRET_KEY）/ 数据库密码（POSTGRES_PASSWORD）等敏感项。'
+    Write-Host '[first-run] 已从 .env.example 生成 .env。部署后请修改：MINIO 密钥（S3_ACCESS_KEY、S3_SECRET_KEY）/ 数据库密码（POSTGRES_PASSWORD）等敏感项。'
+}
+
+# 1.1) API_TOKEN（T4.73）：.env 里为空则生成 32 字节随机 -> 64 位 hex 写入；已有非空值不覆盖。
+#      应用侧守卫（WeakApiTokenGuard）会拒绝空/默认/短于 32 位的 API_TOKEN——首启必须在这里补齐，
+#      否则陌生人一键启动会被守卫打断（T4.73 C3，C2 的连带必要项）。
+#      编码纪律：必须 [IO.File] 读写 + UTF8Encoding($false)——Get-Content|Set-Content -Encoding UTF8
+#      会写出 BOM（239,187,191），docker compose 解析 .env 首行即坏（T4.9 同款坑）。
+#      RNG 纪律：PS 5.1 无 [System.RandomNumberGenerator]::Fill 静态方法（实测抛 RuntimeException），
+#      必须 Create()+GetBytes()；禁止 Get-Random（密码学上不合格）。
+$envFile = Join-Path $repo '.env'
+$tokenLines = [System.IO.File]::ReadAllLines($envFile)
+$tokenIdx = -1
+for ($i = 0; $i -lt $tokenLines.Count; $i++) {
+    if ($tokenLines[$i] -match '^\s*API_TOKEN\s*=') { $tokenIdx = $i; break }
+}
+if ($tokenIdx -ge 0) {
+    $curToken = ($tokenLines[$tokenIdx] -split '=', 2)[1].Trim()
+    if ([string]::IsNullOrWhiteSpace($curToken)) {
+        $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+        $tokenBytes = New-Object byte[] 32
+        $rng.GetBytes($tokenBytes)
+        $rng.Dispose()
+        $newToken = -join ($tokenBytes | ForEach-Object { $_.ToString('x2') })
+        $tokenLines[$tokenIdx] = 'API_TOKEN=' + $newToken
+        [System.IO.File]::WriteAllLines($envFile, $tokenLines, (New-Object System.Text.UTF8Encoding($false)))
+        Write-Host '[first-run] 已生成随机 API_TOKEN（64 位），接入外部系统时复用该值。'
+    }
 }
 
 # 2) 模型
-$envFile = Join-Path $repo '.env'
 $modelLine = (Get-Content $envFile | Where-Object { $_ -match '^\s*ASR_MODEL_NAME\s*=' } | Select-Object -First 1)
 $modelName = if ($modelLine) { ($modelLine -split '=', 2)[1].Trim() } else { 'small' }
 # 完整性判断与 download-model.ps1 内联同款（T4.14b 修 F1「下载假完成」）：关键文件存在且非空才算完整，
