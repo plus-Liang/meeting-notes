@@ -48,35 +48,22 @@ public class TranscriptionWorker implements SmartLifecycle {
 
     private volatile boolean running;
     private Thread workerThread;
+    @Value("${app.worker.drain-timeout-sec:60}")
+    private long drainTimeoutSec = 60; // T4.74/P-19：排空上限；纯 new（测试）走 60 默认，Spring 经 @Value 注入 yml 值
+    /** 正在处理的任务 id（0 = 空闲）；stop() 排空依据：非 0 时等待其归 0 再退出。 */
+    private volatile long inflightTaskId;
 
-    public TranscriptionWorker(StringRedisTemplate redis,
-                               JdbcTemplate jdbc,
-                               S3Client s3,
-                               com.meetingnotes.asr.AsrClient asrClient,
-                               com.meetingnotes.ai.StructuringService structuringService,
-                               com.meetingnotes.ai.TranscriptPunctuator punctuator,
-                               com.meetingnotes.webhook.WebhookDeliveryService webhookService,
-                               PasteTextReader pasteTextReader,
-                               MonoWavExtractor monoWavExtractor,
-                               com.meetingnotes.task.QueuePublisher queuePublisher,
-                               @Value("${app.worker.queue-key}") String queueKey,
-                               @Value("${app.worker.poll-timeout-sec}") long pollTimeoutSec,
-                               @Value("${app.storage.bucket}") String bucket,
-                               @Value("${app.task.max-retries}") int maxRetries) {
-        this.redis = redis;
-        this.jdbc = jdbc;
-        this.s3 = s3;
-        this.asrClient = asrClient;
-        this.structuringService = structuringService;
-        this.punctuator = punctuator;
-        this.webhookService = webhookService;
-        this.pasteTextReader = pasteTextReader;
-        this.monoWavExtractor = monoWavExtractor;
-        this.queuePublisher = queuePublisher;
-        this.queueKey = queueKey;
-        this.pollTimeout = Duration.ofSeconds(pollTimeoutSec);
-        this.bucket = bucket;
-        this.maxRetries = maxRetries;
+    public TranscriptionWorker(StringRedisTemplate redis, JdbcTemplate jdbc, S3Client s3,
+            com.meetingnotes.asr.AsrClient asrClient, com.meetingnotes.ai.StructuringService structuringService,
+            com.meetingnotes.ai.TranscriptPunctuator punctuator, com.meetingnotes.webhook.WebhookDeliveryService webhookService,
+            PasteTextReader pasteTextReader, MonoWavExtractor monoWavExtractor, com.meetingnotes.task.QueuePublisher queuePublisher,
+            @Value("${app.worker.queue-key}") String queueKey, @Value("${app.worker.poll-timeout-sec}") long pollTimeoutSec,
+            @Value("${app.storage.bucket}") String bucket, @Value("${app.task.max-retries}") int maxRetries) {
+        this.redis = redis; this.jdbc = jdbc; this.s3 = s3; this.asrClient = asrClient;
+        this.structuringService = structuringService; this.punctuator = punctuator; this.webhookService = webhookService;
+        this.pasteTextReader = pasteTextReader; this.monoWavExtractor = monoWavExtractor; this.queuePublisher = queuePublisher;
+        this.queueKey = queueKey; this.pollTimeout = Duration.ofSeconds(pollTimeoutSec);
+        this.bucket = bucket; this.maxRetries = maxRetries;
     }
 
     @Override
@@ -88,10 +75,22 @@ public class TranscriptionWorker implements SmartLifecycle {
         log.info("worker 已启动：queue={}（BLPOP 阻塞取，超时 {}s 仅用于优雅停机）", queueKey, pollTimeout.getSeconds());
     }
 
+    /** T4.74/P-19 三段式：空闲立即中断；在跑排空（上限 drainTimeoutSec）；到点中断交启动恢复。50ms 轮询而非 join（interrupt 时 join 提前返回语义不清）。 */
     @Override
     public void stop() {
         running = false;
-        if (workerThread != null) { workerThread.interrupt(); }
+        if (inflightTaskId == 0) {
+            log.info("优雅停机：无在跑任务，立即中断"); if (workerThread != null) workerThread.interrupt(); return;
+        }
+        log.info("优雅停机：等待任务 {} 完成（最长 {}s）", inflightTaskId, drainTimeoutSec);
+        long deadline = System.currentTimeMillis() + drainTimeoutSec * 1000L;
+        while (inflightTaskId != 0 && System.currentTimeMillis() < deadline) {
+            try { Thread.sleep(50); } catch (InterruptedException e) { Thread.currentThread().interrupt(); break; }
+        }
+        if (inflightTaskId != 0) {
+            log.warn("优雅停机：任务 {} 超过 {}s 未完成，中断并交启动恢复", inflightTaskId, drainTimeoutSec);
+            if (workerThread != null) workerThread.interrupt();
+        }
     }
 
     @Override
@@ -124,6 +123,7 @@ public class TranscriptionWorker implements SmartLifecycle {
                 }
             } finally {
                 org.slf4j.MDC.remove("taskId");
+                inflightTaskId = 0; // T4.74：与 MDC 同层清理——成功/失败/异常退出都要把「在跑」标记归零
             }
         }
         log.info("worker 已停止");
@@ -139,6 +139,7 @@ public class TranscriptionWorker implements SmartLifecycle {
             log.warn("任务 {} 已被其它实例认领（状态已变更），跳过", taskId);
             return;
         }
+        inflightTaskId = taskId; // T4.74：认领成功即标记在飞，stop() 依此排空
         log.info("开始转写（第 {} 次尝试）", ((Number) row.get("attempts")).intValue() + 1);
 
         String sourceUri = (String) row.get("source_uri");

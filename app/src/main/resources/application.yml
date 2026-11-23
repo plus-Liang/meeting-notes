@@ -3,10 +3,19 @@
 
 server:
   port: ${APP_PORT:8080}
+  # T4.74/P-19：HTTP 层优雅停机——先等在处理的请求完成、再关端口；worker 排空见 spring.lifecycle 与
+  # app.worker.drain-timeout-sec 的分工注释
+  shutdown: graceful
 
 spring:
   application:
     name: meeting-notes
+
+  lifecycle:
+    # T4.74/P-19：优雅停机每个 phase 的预算。app.worker.drain-timeout-sec（60s）管「正在转写的任务」排空，
+    # 本值（120s）管 HTTP 请求完成 + Bean 关闭：必须 > drain-timeout-sec，给排空后的收尾留余量；
+    # compose 的 app stop_grace_period=180s 再包住两者（60 排空 + 120 收尾）。
+    timeout-per-shutdown-phase: 120s
 
   jackson:
     # D-041：对外 JSON 一律 snake_case（task_id / content_hash / duration_sec / size_bytes / reused），
@@ -159,6 +168,8 @@ app:
     queue-key: ${TASK_QUEUE_KEY:meetingnotes:task-queue}
     # BLPOP 阻塞超时，仅用于优雅停机响应；不是轮询间隔
     poll-timeout-sec: ${WORKER_POLL_TIMEOUT_SEC:10}
+    # T4.74/P-19：停机时等待"正在转写的那个任务"完成的上限；0 = 不等待（只用于测试）
+    drain-timeout-sec: ${WORKER_DRAIN_TIMEOUT_SEC:60}
 
   asr:
     max-concurrency: ${ASR_MAX_CONCURRENCY:2}
