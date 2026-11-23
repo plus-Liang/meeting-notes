@@ -199,9 +199,6 @@ app:
 
   security:
     api-token: ${API_TOKEN:change-me-api-token}
-    # T4.73：弱口令守卫（WeakApiTokenGuard）的逃生口——仅测试上下文使用（如 NoKeyStartupTest
-    # 这类不起真实 token 的 Spring 上下文测试）；生产禁止打开。.env.example 不提供此键。
-    allow-weak-api-token: ${ALLOW_WEAK_API_TOKEN:false}
 
   auth:
     # T4.70 O-1：开放注册开关，**默认 false**（陌生人不能自助注册、消耗 ASR 配额）——

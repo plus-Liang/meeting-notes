@@ -24,6 +24,11 @@ import org.springframework.stereotype.Component;
  * <p>日志纪律：失败信息只允许出现「未设置 / 是否默认值 / 长度」三类事实，
  * <b>绝不打印 token 明文</b>（含 DEBUG 级）——弱口令之所以要换，就是因为它是公开的，
  * 日志再印一遍等于白换。
+ *
+ * <p>本类刻意<b>不在 application.yml 声明 app.security.allow-weak-api-token</b>：该键只用于测试
+ * 上下文（NoKeyStartupTest 用 properties 覆盖）与极端运维应急（--app.security.allow-weak-api-token=true）；
+ * 若写进 yml，门禁 M2 会要求它同时进 .env.example，等于把「跳过守卫」的开关放进复制即用的生产模板
+ * （T4.73-fix）。
  */
 @Component
 public class WeakApiTokenGuard implements ApplicationRunner {
