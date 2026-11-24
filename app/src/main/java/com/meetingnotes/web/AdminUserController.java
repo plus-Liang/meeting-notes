@@ -1,7 +1,9 @@
 package com.meetingnotes.web;
 
+import com.meetingnotes.common.ApiException;
 import com.meetingnotes.common.UserContext;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -22,9 +24,11 @@ import java.util.Map;
 public class AdminUserController {
 
     private final AuthService authService;
+    private final LoginLockoutService loginLockout;
 
-    public AdminUserController(AuthService authService) {
+    public AdminUserController(AuthService authService, LoginLockoutService loginLockout) {
         this.authService = authService;
+        this.loginLockout = loginLockout;
     }
 
     public record CreateUserRequest(String username, String password, String role) {
@@ -50,5 +54,18 @@ public class AdminUserController {
         return authService.listUsers().stream()
                 .map(u -> Map.<String, Object>of("user_id", u.userId(), "username", u.username(), "role", u.role()))
                 .toList();
+    }
+
+    /** T4.81/P-29 后半：管理员解锁（清零 failed_login_attempts / 清空 locked_until）。
+     *  幂等：未锁定账号也返回 200 {"user_id":..,"unlocked":true}；用户不存在 → 404 NOT_FOUND；
+     *  非 ADMIN → 403 FORBIDDEN（requireAdmin），未认证 → 401（ApiTokenFilter 横切）。 */
+    @PostMapping("/users/{id}/unlock")
+    @ResponseBody
+    public Map<String, Object> unlock(@PathVariable("id") long id) {
+        authService.requireAdmin(UserContext.current());
+        if (loginLockout.reset(id) == 0) {
+            throw new ApiException(404, "NOT_FOUND", "账号不存在或已被删除");
+        }
+        return Map.of("user_id", id, "unlocked", true);
     }
 }

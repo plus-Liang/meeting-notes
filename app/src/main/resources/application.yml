@@ -245,6 +245,10 @@ app:
     # T4.71 O-2：单账号最大并存会话数（多设备登录互不踢）。登录/注册的新会话超过上限时
     # 淘汰 created_at 最旧的会话（info 日志只含数量，令牌明文/hash 不进日志）。改后重启生效。
     max-sessions: ${AUTH_MAX_SESSIONS:10}
+    # T4.81/P-29 后半：同一账号连续失败 max-failures 次 → 锁 lockout-minutes 分钟（落库，重启不丢）；
+    # 锁定期正确密码也 423 LOCKED；管理员经 POST /api/v1/admin/users/{id}/unlock 解锁。≤0 启动 WARN 回退 5/15
+    login-max-failures: ${AUTH_LOGIN_MAX_FAILURES:5}
+    lockout-minutes: ${AUTH_LOCKOUT_MINUTES:15}
 
   quota:
     minutes-per-day: ${QUOTA_MINUTES_PER_DAY:120}

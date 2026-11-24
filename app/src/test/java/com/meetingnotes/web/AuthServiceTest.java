@@ -17,6 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
@@ -26,6 +27,8 @@ import static org.mockito.Mockito.when;
 /**
  * T4.37a：AuthService——首注册认领 admin、再注册 USER、大小写 409、密码/用户名 400、
  * 登录成败 401、令牌轮换、logout 清空、开关 403（卡判据逐条）。
+ * T4.81/P-29 后半：锁定优先判定（423 且不碰密码验证）、失败计数委托 LoginLockoutService、
+ * 成功登录清零——真实 SQL 由 LoginLockoutDbTest（真 H2）钉住。
  * PasswordHasher/TokenService 用真实现（纯逻辑），只 mock JdbcTemplate。
  */
 @ExtendWith(MockitoExtension.class)
@@ -33,16 +36,19 @@ class AuthServiceTest {
 
     @Mock
     private JdbcTemplate jdbc;
+    @Mock
+    private LoginLockoutService loginLockout;
 
-    private final PasswordHasher hasher = new PasswordHasher();
+    /** spy 保留真实哈希/校验行为，同时可 verify「锁定路径零调用」（T4.81）。 */
+    private final PasswordHasher hasher = org.mockito.Mockito.spy(new PasswordHasher());
     private final TokenService tokens = new TokenService();
 
     private AuthService newService(boolean registrationEnabled) {
-        return new AuthService(jdbc, hasher, tokens, registrationEnabled, 10);
+        return new AuthService(jdbc, hasher, tokens, loginLockout, registrationEnabled, 10);
     }
 
     private AuthService newService(boolean registrationEnabled, int maxSessions) {
-        return new AuthService(jdbc, hasher, tokens, registrationEnabled, maxSessions);
+        return new AuthService(jdbc, hasher, tokens, loginLockout, registrationEnabled, maxSessions);
     }
 
     private static ApiException ofCode(Runnable action, String code) {
@@ -164,9 +170,9 @@ class AuthServiceTest {
     @Test
     void loginIssuesIndependentSessions() {
         String realHash = hasher.hash("right-pass");
-        when(jdbc.query(contains("SELECT id, username, password_hash, role FROM app_user WHERE lower(username) = lower(?)"),
+        when(jdbc.query(contains("FROM app_user WHERE lower(username) = lower(?)"),
                 any(RowMapper.class), eq("alice")))
-                .thenReturn(List.of(new AuthService.Credentials(2L, "alice", realHash, "USER")));
+                .thenReturn(List.of(new AuthService.Credentials(2L, "alice", realHash, "USER", 0, null)));
 
         AuthService.AuthSession s1 = newService(true).login("alice", "right-pass");
         AuthService.AuthSession s2 = newService(true).login("alice", " right-pass ");
@@ -186,18 +192,19 @@ class AuthServiceTest {
     void loginFailuresAreUnified401() {
         AuthService svc = newService(true);
         // 用户不存在
-        when(jdbc.query(contains("SELECT id, username, password_hash, role FROM app_user WHERE lower(username) = lower(?)"),
+        when(jdbc.query(contains("FROM app_user WHERE lower(username) = lower(?)"),
                 any(RowMapper.class), eq("ghost"))).thenReturn(List.of());
         ofCode(() -> svc.login("ghost", "whatever1"), "INVALID_CREDENTIALS");
-        // 密码错误
-        when(jdbc.query(contains("SELECT id, username, password_hash, role FROM app_user WHERE lower(username) = lower(?)"),
+        // 密码错误（spy 的 hash 必须在 when() 之外先算，否则被拦截成未完成 stubbing）
+        String wrongUserHash = hasher.hash("right-pass");
+        when(jdbc.query(contains("FROM app_user WHERE lower(username) = lower(?)"),
                 any(RowMapper.class), eq("alice")))
-                .thenReturn(List.of(new AuthService.Credentials(2L, "alice", hasher.hash("right-pass"), "USER")));
+                .thenReturn(List.of(new AuthService.Credentials(2L, "alice", wrongUserHash, "USER", 0, null)));
         ofCode(() -> svc.login("alice", "wrong-pass"), "INVALID_CREDENTIALS");
         // 管理员未认领（占位 '!'）
-        when(jdbc.query(contains("SELECT id, username, password_hash, role FROM app_user WHERE lower(username) = lower(?)"),
+        when(jdbc.query(contains("FROM app_user WHERE lower(username) = lower(?)"),
                 any(RowMapper.class), eq("admin")))
-                .thenReturn(List.of(new AuthService.Credentials(1L, "admin", "!", "ADMIN")));
+                .thenReturn(List.of(new AuthService.Credentials(1L, "admin", "!", "ADMIN", 0, null)));
         ofCode(() -> svc.login("admin", "password123"), "INVALID_CREDENTIALS");
         // 空/缺参
         ofCode(() -> svc.login("  ", "password123"), "INVALID_CREDENTIALS");
@@ -359,5 +366,43 @@ class AuthServiceTest {
 
     private static String anyString() {
         return org.mockito.ArgumentMatchers.anyString();
+    }
+
+    /* ---- T4.81/P-29 后半：锁定优先判定 + 成功清零（真 SQL 在 LoginLockoutDbTest） ---- */
+
+    /** 已锁定（locked_until 在未来）→ 423 LOCKED，且密码验证/失败计数零调用（锁定优先于验密）。 */
+    @Test
+    void lockedAccountThrows423BeforePasswordVerification() {
+        AuthService svc = newService(true);
+        String realHash = hasher.hash("right-pass");
+        when(jdbc.query(contains("FROM app_user WHERE lower(username) = lower(?)"),
+                any(RowMapper.class), eq("alice")))
+                .thenReturn(List.of(new AuthService.Credentials(2L, "alice", realHash,
+                        "USER", 2, java.sql.Timestamp.from(java.time.Instant.now().plusSeconds(600)))));
+        when(loginLockout.isLocked(org.mockito.ArgumentMatchers.any())).thenReturn(true);
+        when(loginLockout.lockedException()).thenReturn(
+                new ApiException(423, "LOCKED", "账号已锁定，请 15 分钟后再试，或联系管理员解锁"));
+
+        ApiException e = assertThrows(ApiException.class, () -> svc.login("alice", "right-pass"));
+        assertEquals(423, e.getStatus());
+        assertEquals("LOCKED", e.getCode());
+        verify(hasher, never()).verify(anyString(), anyString()); // 锁定优先：根本不验密码
+        verify(loginLockout, never()).recordFailure(2L); // 也不计失败
+    }
+
+    /** 登录成功 → 失败计数清零被调一次（签发会话之前）。 */
+    @Test
+    void successfulLoginResetsFailureCounter() {
+        AuthService svc = newService(true);
+        String realHash = hasher.hash("right-pass");
+        when(jdbc.query(contains("FROM app_user WHERE lower(username) = lower(?)"),
+                any(RowMapper.class), eq("alice")))
+                .thenReturn(List.of(new AuthService.Credentials(2L, "alice", realHash, "USER", 2,
+                        java.sql.Timestamp.from(java.time.Instant.now().minusSeconds(600)))));
+
+        AuthService.AuthSession session = svc.login("alice", "right-pass");
+
+        assertEquals(2L, session.userId());
+        verify(loginLockout).reset(2L); // 成功登录必须清零
     }
 }

@@ -37,17 +37,20 @@ public class AuthService {
     private final JdbcTemplate jdbc;
     private final PasswordHasher passwordHasher;
     private final TokenService tokenService;
+    private final LoginLockoutService loginLockout;
     private final boolean registrationEnabled;
     private final int maxSessions;
 
     public AuthService(JdbcTemplate jdbc,
                        PasswordHasher passwordHasher,
                        TokenService tokenService,
+                       LoginLockoutService loginLockout,
                        @Value("${app.auth.registration-enabled}") boolean registrationEnabled,
                        @Value("${app.auth.max-sessions}") int maxSessions) {
         this.jdbc = jdbc;
         this.passwordHasher = passwordHasher;
         this.tokenService = tokenService;
+        this.loginLockout = loginLockout;
         this.registrationEnabled = registrationEnabled;
         this.maxSessions = maxSessions;
     }
@@ -59,8 +62,10 @@ public class AuthService {
     public record UserInfo(long userId, String username, String role) {
     }
 
-    /** login 查询中间态：password_hash 不出服务（包内可见，供测试构造）。 */
-    record Credentials(long userId, String username, String passwordHash, String role) {
+    /** login 查询中间态：password_hash 不出服务（包内可见，供测试构造）；
+     *  T4.81：failed_login_attempts/locked_until 供锁定优先判定与失败计数（V11 迁移）。 */
+    record Credentials(long userId, String username, String passwordHash, String role,
+                       int failedAttempts, java.sql.Timestamp lockedUntil) {
     }
 
     /* ---- 注册 ---- */
@@ -134,17 +139,27 @@ public class AuthService {
             throw unauthorized();
         }
         List<Credentials> rows = jdbc.query("""
-                SELECT id, username, password_hash, role FROM app_user WHERE lower(username) = lower(?)
+                SELECT id, username, password_hash, role, failed_login_attempts, locked_until
+                FROM app_user WHERE lower(username) = lower(?)
                 """,
-                (rs, i) -> new Credentials(rs.getLong(1), rs.getString(2), rs.getString(3), rs.getString(4)),
+                (rs, i) -> new Credentials(rs.getLong(1), rs.getString(2), rs.getString(3), rs.getString(4),
+                        rs.getInt(5), rs.getTimestamp(6)),
                 username);
         if (rows.isEmpty() || UNCLAIMED_MARKER.equals(rows.get(0).passwordHash())) {
             throw unauthorized();
         }
         Credentials user = rows.get(0);
+        // T4.81：锁定优先判定（验密之前）——锁定期正确密码也 423，文案不提示密码对错（卡面刻意取舍）
+        if (loginLockout.isLocked(user.lockedUntil())) {
+            throw loginLockout.lockedException();
+        }
         if (!passwordHasher.verify(password, user.passwordHash())) {
+            if (loginLockout.recordFailure(user.userId())) {
+                throw loginLockout.lockedException(); // 本次失败达到上限：直接 423（不回落 401）
+            }
             throw unauthorized();
         }
+        loginLockout.reset(user.userId()); // T4.81：成功登录清零/清空（签发会话之前）
         // T4.71：多设备会话——签发新会话（不覆盖旧行），同账号可同时持多个有效令牌
         String token = tokenService.generate();
         issueSession(user.userId(), tokenService.sha256Hex(token));

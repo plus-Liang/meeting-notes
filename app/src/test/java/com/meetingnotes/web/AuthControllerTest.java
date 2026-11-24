@@ -27,6 +27,8 @@ class AuthControllerTest {
 
     @Mock
     private AuthService authService;
+    @Mock
+    private LoginLockoutService loginLockout;
 
     private AuthController authController;
     private AdminUserController adminController;
@@ -35,7 +37,7 @@ class AuthControllerTest {
     void setUp() {
         /* Mockito 在 beforeEach 才注入 @Mock——controller 必须在此之后构造（字段初始化器会拿到 null） */
         authController = new AuthController(authService);
-        adminController = new AdminUserController(authService);
+        adminController = new AdminUserController(authService, loginLockout);
     }
 
     @AfterEach
