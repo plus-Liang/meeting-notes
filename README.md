@@ -275,7 +275,6 @@ powershell -File tools\deploy-main.ps1
 | 现象 | 原因与解法 |
 |---|---|
 | 接口返回 `429 RATE_LIMITED`（登录/注册/提交任务） | 接口限流触发（T4.80/P-29 前半）：按响应头 `Retry-After` 退避重试，别立刻重放；窗口结束自动恢复。确认是被误伤时改 `.env` 的 `RATE_LIMIT_ENABLED=false` 止血后 `up -d` |
-|---|---|
 | 8080 端口被占用 | 改 `.env` 的 `APP_PORT`；同理 `9000`/`9001`（MinIO）、`8000`（ASR）、`11434`（Ollama）分别对应 `MINIO_PORT` / `MINIO_CONSOLE_PORT` / `ASR_PORT` / `OLLAMA_PORT`——这四个键 `.env.example` 里都已列出（前三个在「应用」段、`ASR_PORT` 在 ASR 段），改值即生效。**注意：`v0.1.0` 这个 tag 的 `.env.example` 早于该修复、还没有前三个键**，用 tag 部署时要手动追加（或改用 `main`）。Windows 上 `wslrelay` 偶尔抢端口，重启 Docker Desktop |
 | 抽音轨卡住 / 任务长时间 RUNNING 后转 RETRYING（日志含「ffmpeg 抽音轨超时」） | ffmpeg 对某条音频挂住不退出（坏容器/网络流）。T4.76 起抽音轨带看门狗：从进程启动起算 `FFMPEG_TIMEOUT_SEC`（默认 600s），到点强杀子进程，任务按失败重试（重试耗尽进 DEAD）。坏音频若每次都超时，重试次数耗尽后会被隔离进 DEAD，不会拖死整站；想放宽/收紧预算改 `.env` 的 `FFMPEG_TIMEOUT_SEC` 后 `up -d` |
 | `git clone` 报 TLS 错误（`schannel: failed to receive handshake` / `unexpected eof`） | 网络抖动或本机 git 的 TLS 后端问题：重试一次；仍失败可 `git config --global http.sslBackend openssl` 后重试，或改用 SSH 克隆 |
