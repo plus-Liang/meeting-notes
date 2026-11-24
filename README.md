@@ -86,6 +86,7 @@ docker compose -f docker-compose.yml -f docker-compose.ghcr.yml up -d
 
 > ⚠️ **镜像不含 ASR 模型**（461 MB）：首次启动仍需跑 `scripts/download-model.ps1` 下载到 `./models`。
 > 要固定版本：设环境变量 `MEETING_NOTES_TAG=v0.1.0`（默认 `latest`）。
+> 扩容（多副本）前置条件见 [运维-扩容前置清单](docs/项目/录音纪要平台/运维-扩容前置清单.md)；当前发布形态为单实例。
 
 ### 打开
 
