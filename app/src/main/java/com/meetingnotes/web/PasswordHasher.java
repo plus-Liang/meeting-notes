@@ -24,6 +24,9 @@ public class PasswordHasher {
     static final int KEY_BITS = 256;
     static final String PREFIX = "pbkdf2-sha256$" + ITERATIONS + "$";
 
+    /** 全零假盐（static final，不入库、不是任何用户的盐）：T4.82 时序抹平的「同成本路径」用。 */
+    private static final byte[] DUMMY_SALT = new byte[SALT_BYTES];
+
     private final SecureRandom random = new SecureRandom();
 
     /** 哈希明文密码（去首尾空白由调用方完成）。 */
@@ -35,13 +38,20 @@ public class PasswordHasher {
                 + "$" + Base64.getEncoder().encodeToString(derived);
     }
 
-    /** 校验：存储串为空/格式坏/参数缺 → 一律 false（不抛）。 */
+    /** 校验：存储串为空/格式坏/参数缺 → 一律 false（不抛）。
+     *  T4.82 时序抹平：stored 为 null/坏格式时仍付出一次 PBKDF2（结果恒不匹配），调用方据此可对
+     *  『用户不存在』走同一成本路径；password == null 保持快速 false（空密码已被 login 前置拦截）。 */
     public boolean verify(String password, String stored) {
-        if (password == null || stored == null || !stored.startsWith(PREFIX)) {
+        if (password == null) {
+            return false;
+        }
+        if (stored == null || !stored.startsWith(PREFIX)) {
+            pbkdf2(password, DUMMY_SALT, ITERATIONS); // T4.82：同成本路径（丢弃结果）
             return false;
         }
         String[] parts = stored.substring(PREFIX.length()).split("\\$");
         if (parts.length != 2 || parts[0].isEmpty() || parts[1].isEmpty()) {
+            pbkdf2(password, DUMMY_SALT, ITERATIONS); // T4.82：同成本路径（丢弃结果）
             return false;
         }
         try {

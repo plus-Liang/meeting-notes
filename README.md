@@ -295,6 +295,10 @@ powershell -File tools\deploy-main.ps1
 
 更多排障细节：`docs/项目/录音纪要平台/环境搭建说明.md`。
 
+## 安全说明（登录防爆破）
+
+登录失败对「用户名不存在」与「密码错误」返回同一文案（401「用户名或密码错误」），且两条路径都真实执行一次 PBKDF2（120000 次迭代）以抵御计时枚举——不存在用户走全零假盐的等成本计算（T4.82/P-34）。账号连续失败达 `AUTH_LOGIN_MAX_FAILURES` 次会锁定 `AUTH_LOCKOUT_MINUTES` 分钟（423 LOCKED，落库重启不丢，T4.81）；提交接口另有按用户/IP 的频率限流（T4.80）。已知限制：抹平的是 PBKDF2 计算部分，网络抖动与 JIT 预热仍有噪声，因此判断时序问题看中位数而不是单次请求。反代部署**必须**配 `server.forward-headers-strategy=framework`（或等价的 `X-Forwarded-For` 透传），否则按 IP 的限流/计数会退化为全站一个桶（T4.80 验收 S2 的坑）。
+
 ## 配置
 
 全部配置走环境变量，`.env.example` 是唯一事实来源（约 40+ 项，含端口、模型、并发、配额、上传上限、Webhook、配额、阈值等）。

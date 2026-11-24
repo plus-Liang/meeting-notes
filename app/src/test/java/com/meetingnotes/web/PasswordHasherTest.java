@@ -63,4 +63,13 @@ class PasswordHasherTest {
                 "哈希段被篡改 → 拒绝");
         assertFalse(hasher.verify("s3cret-pass", stored + "x"), "尾部拼接 → 拒绝");
     }
+
+    /** T4.82：stored=null/坏格式返回 false 但仍付一次 PBKDF2；迭代数必须保持 120000（禁改小换速度）。 */
+    @Test
+    void nullStoredReturnsFalseButCostsWork() {
+        assertFalse(hasher.verify("x", null));
+        assertFalse(hasher.verify("x", "not-a-valid-format"));
+        assertFalse(hasher.verify("x", "pbkdf2-sha256$120000$short"));
+        assertEquals(120_000, PasswordHasher.ITERATIONS, "迭代数不许为过测试改小（安全口径）");
+    }
 }

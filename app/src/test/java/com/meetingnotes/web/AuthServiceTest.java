@@ -20,7 +20,9 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -370,9 +372,11 @@ class AuthServiceTest {
 
     /* ---- T4.81/P-29 后半：锁定优先判定 + 成功清零（真 SQL 在 LoginLockoutDbTest） ---- */
 
-    /** 已锁定（locked_until 在未来）→ 423 LOCKED，且密码验证/失败计数零调用（锁定优先于验密）。 */
+    /** 已锁定（locked_until 在未来）→ 423 LOCKED，且失败计数零调用。
+     *  T4.82 起 verify 先于锁定判定执行（时序抹平），原「零验密」断言由 C3 的
+     *  lockedUserStillPaysPbkdf2Cost（verify 恰 1 次）取代——本用例保留 423 + 不计失败两个断言。 */
     @Test
-    void lockedAccountThrows423BeforePasswordVerification() {
+    void lockedAccountThrows423WithoutRecordingFailure() {
         AuthService svc = newService(true);
         String realHash = hasher.hash("right-pass");
         when(jdbc.query(contains("FROM app_user WHERE lower(username) = lower(?)"),
@@ -386,8 +390,7 @@ class AuthServiceTest {
         ApiException e = assertThrows(ApiException.class, () -> svc.login("alice", "right-pass"));
         assertEquals(423, e.getStatus());
         assertEquals("LOCKED", e.getCode());
-        verify(hasher, never()).verify(anyString(), anyString()); // 锁定优先：根本不验密码
-        verify(loginLockout, never()).recordFailure(2L); // 也不计失败
+        verify(loginLockout, never()).recordFailure(2L); // 锁定路径不计失败
     }
 
     /** 登录成功 → 失败计数清零被调一次（签发会话之前）。 */
@@ -404,5 +407,39 @@ class AuthServiceTest {
 
         assertEquals(2L, session.userId());
         verify(loginLockout).reset(2L); // 成功登录必须清零
+    }
+
+    /* ---- T4.82：时序抹平——「用户不存在/锁定」也付出一次 PBKDF2（同成本路径） ---- */
+
+    /** 用户不存在 → 401 INVALID_CREDENTIALS，但 verify(password, null) 恰好被调用 1 次（同成本路径）。 */
+    @Test
+    void missingUserStillPaysPbkdf2Cost() {
+        AuthService svc = newService(true);
+        when(jdbc.query(contains("FROM app_user WHERE lower(username) = lower(?)"),
+                any(RowMapper.class), eq("nosuch_t482"))).thenReturn(List.of());
+
+        ApiException e = assertThrows(ApiException.class, () -> svc.login("nosuch_t482", "whatever1"));
+        assertEquals(401, e.getStatus());
+        assertEquals("INVALID_CREDENTIALS", e.getCode());
+        verify(hasher, times(1)).verify(eq("whatever1"), isNull());
+    }
+
+    /** 锁定用户 → 423 LOCKED，verify 仍被调用 1 次（先付成本再判锁定）。 */
+    @Test
+    void lockedUserStillPaysPbkdf2Cost() {
+        AuthService svc = newService(true);
+        String realHash = hasher.hash("right-pass");
+        when(jdbc.query(contains("FROM app_user WHERE lower(username) = lower(?)"),
+                any(RowMapper.class), eq("alice")))
+                .thenReturn(List.of(new AuthService.Credentials(2L, "alice", realHash, "USER", 2,
+                        java.sql.Timestamp.from(java.time.Instant.now().plusSeconds(600)))));
+        when(loginLockout.isLocked(org.mockito.ArgumentMatchers.any())).thenReturn(true);
+        when(loginLockout.lockedException()).thenReturn(
+                new ApiException(423, "LOCKED", "账号已锁定，请 15 分钟后再试，或联系管理员解锁"));
+
+        ApiException e = assertThrows(ApiException.class, () -> svc.login("alice", "right-pass"));
+        assertEquals(423, e.getStatus());
+        assertEquals("LOCKED", e.getCode());
+        verify(hasher, times(1)).verify("right-pass", realHash);
     }
 }

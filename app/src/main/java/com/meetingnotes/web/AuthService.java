@@ -145,15 +145,15 @@ public class AuthService {
                 (rs, i) -> new Credentials(rs.getLong(1), rs.getString(2), rs.getString(3), rs.getString(4),
                         rs.getInt(5), rs.getTimestamp(6)),
                 username);
-        if (rows.isEmpty() || UNCLAIMED_MARKER.equals(rows.get(0).passwordHash())) {
-            throw unauthorized();
-        }
-        Credentials user = rows.get(0);
-        // T4.81：锁定优先判定（验密之前）——锁定期正确密码也 423，文案不提示密码对错（卡面刻意取舍）
+        Credentials user = rows.isEmpty() || UNCLAIMED_MARKER.equals(rows.get(0).passwordHash()) ? null : rows.get(0);
+        // T4.82 时序抹平：user == null 时 verify 也付出一次 PBKDF2（假盐恒不匹配，防计时枚举）
+        boolean matched = passwordHasher.verify(password, user == null ? null : user.passwordHash());
+        if (user == null) { throw unauthorized(); }
+        // T4.81：锁定判定——锁定期正确密码也 423，文案不提示密码对错（卡面刻意取舍）
         if (loginLockout.isLocked(user.lockedUntil())) {
             throw loginLockout.lockedException();
         }
-        if (!passwordHasher.verify(password, user.passwordHash())) {
+        if (!matched) {
             if (loginLockout.recordFailure(user.userId())) {
                 throw loginLockout.lockedException(); // 本次失败达到上限：直接 423（不回落 401）
             }
