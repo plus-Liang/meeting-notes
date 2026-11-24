@@ -270,10 +270,14 @@ app:
     poll-sec: ${INBOX_POLL_SEC:30}
 
 management:
+  metrics:
+    tags:
+      # T4.84/P-25：所有指标打上应用名全局标签（多实例/多环境抓取时区分来源）
+      application: meeting-notes
   endpoints:
     web:
       exposure:
-        include: health,info,metrics
+        include: health,info,metrics,prometheus
   endpoint:
     health:
       show-details: always

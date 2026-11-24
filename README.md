@@ -270,6 +270,10 @@ powershell -File tools\deploy-main.ps1
 
 > **升级提示（T4.73 起）**：应用新增启动期弱口令守卫——`API_TOKEN` 留空、仍是默认值 `change-me-api-token`、或短于 32 位时，应用会**拒绝启动**并在日志里给出生成命令（`openssl rand -hex 32`）。已有部署升级前先改 `.env` 里的 `API_TOKEN` 为 64 位随机值，再 `docker compose up -d`；全新部署走 `scripts/first-run.ps1` / `scripts/first-run.sh` 会自动生成 64 位随机值，无需手改。
 
+## 监控（Prometheus）
+
+应用自带 Prometheus 指标端点：`GET /actuator/prometheus`（业务指标 `meetingnotes_task_count{status=...}` / `meetingnotes_queue_depth` + JVM/HTTP/连接池标准指标，抓取驱动、cacheSeconds 节流）。抓取配置、指标清单、可直接粘贴的告警规则与手工对账口径见 `docs/项目/录音纪要平台/运维-监控与告警.md`。**指标端点无鉴权，别裸奔公网**（详见该文档第 5 节的安全边界）。
+
 ## 常见问题 / 故障排查
 
 | 现象 | 原因与解法 |
