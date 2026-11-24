@@ -28,6 +28,26 @@ jobs:
         working-directory: app
         run: mvn -B -q test -Dtest='!E2ETest,!AsrSmokeTest,!LlmSmokeTest'
 
+      # 失败时把「哪个用例挂了」直接打到日志里：T4.85 CI #130 失败时匿名读不到 job 日志，
+      # 只能靠重跑猜是不是抖动。同时把 surefire 报告留成 artifact。
+      - name: Dump failed test names (on failure)
+        if: failure()
+        working-directory: app
+        run: |
+          echo "===== surefire failure excerpts ====="
+          grep -h -A4 -E "<<< (FAILURE|ERROR)" target/surefire-reports/*.txt || echo "no surefire text report"
+          echo "===== report files containing failures ====="
+          grep -l -E "<<< (FAILURE|ERROR)" target/surefire-reports/*.txt || true
+
+      - name: Upload surefire reports (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-reports
+          path: app/target/surefire-reports
+          if-no-files-found: warn
+          retention-days: 7
+
   compose-config:
     runs-on: ubuntu-latest
     steps:
