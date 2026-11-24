@@ -67,10 +67,33 @@ class WebhookHttpSenderTest {
         try {
             String url = "http://127.0.0.1:" + server.getAddress().getPort() + "/hook";
             ApiException e = assertThrows(ApiException.class,
-                    () -> newSender(false).send(url, "task.done", "d-1",
+                    () -> newSender(false).send(url, "task.done", "d-1", "task-42",
                             "{\"event\":\"task.done\"}".getBytes(StandardCharsets.UTF_8)));
             assertEquals("URL_BLOCKED", e.getCode());
             assertEquals(0, hits.get(), "被拒目标必须一个请求都没发出去（校验在发送前）");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    /* ---- T4.86/P-26：X-Request-Id 关联头 ---- */
+
+    /** send 会带上 X-Request-Id 头（值由调用方解析；用 JDK HttpServer 捕获原始头）。 */
+    @Test
+    void sendCarriesRequestIdHeader() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        java.util.List<String> seen = new java.util.ArrayList<>();
+        server.createContext("/hook", exchange -> {
+            seen.add(exchange.getRequestHeaders().getFirst("X-Request-Id"));
+            exchange.sendResponseHeaders(200, -1);
+            exchange.close();
+        });
+        server.start();
+        try {
+            String url = "http://127.0.0.1:" + server.getAddress().getPort() + "/hook";
+            newSender(true).send(url, "task.done", "d-1", "task-42",
+                    "{\"event\":\"task.done\"}".getBytes(StandardCharsets.UTF_8));
+            assertEquals(java.util.List.of("task-42"), seen, "X-Request-Id 头必须等于调用方给定的值");
         } finally {
             server.stop(0);
         }

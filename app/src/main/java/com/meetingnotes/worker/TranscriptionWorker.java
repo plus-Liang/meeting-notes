@@ -116,7 +116,7 @@ public class TranscriptionWorker implements SmartLifecycle {
     /** 取一条 → 认领 → 处理（包级可见供 T4.77-fix/T4.79 测试驱动）。认领纳入保护伞：行不存在/DB 瞬时故障只 error 后跳过该条
      *  （不 markFailure——行不存在时 UPDATE…RETURNING 返回空会 NPE），worker 绝不停摆；已认领后 process 异常仍走 log.error + markFailure。 */
     void handleOne(String taskId) {
-        org.slf4j.MDC.put("taskId", taskId.trim()); // T2.7：MDC 防线程复用串号
+        TaskLogContext.open(taskId.trim(), null); // T2.7：MDC 防线程复用串号；T4.86：requestId 在认领后补写（TaskLogContext.open 幂等覆盖）
         Claimed claimed = null;
         try {
             long id = Long.parseLong(taskId.trim()); claimed = claim(id); // T4.79-fix F1：坏成员也进保护伞（解析/认领异常同口径跳过）
@@ -127,7 +127,7 @@ public class TranscriptionWorker implements SmartLifecycle {
         } finally {
             if (claimed != null) { claimed.hb().close(); } // T4.77：Session 在 finally 关（异常路径也要停）
             removeProcessingQuietly(taskId); // T4.79/P-02：无论成败/认领与否都清回执（僵尸回执会堆积）
-            org.slf4j.MDC.remove("taskId");
+            TaskLogContext.close(); // T4.86/P-26：清 taskId + requestId 两键（不用 clear()，不误伤其它 MDC 键）
             inflightTaskId = 0; // T4.74：成功/失败/异常退出都要把「在跑」标记归零
         }
     }
@@ -152,10 +152,11 @@ public class TranscriptionWorker implements SmartLifecycle {
     /** T4.77/P-06：原子认领（SQL 语义不变）+ 在飞标记 + 心跳启动；返回 null = 已被其它实例认领（跳过）。 */
     private Claimed claim(long taskId) {
         Map<String, Object> row = jdbc.queryForMap(
-                "SELECT status, attempts, source_type, COALESCE(source_uri, '') AS source_uri FROM task WHERE id = ?", taskId);
+                "SELECT status, attempts, source_type, COALESCE(source_uri, '') AS source_uri, COALESCE(request_id, '') AS request_id FROM task WHERE id = ?", taskId);
         int claimed = jdbc.update("UPDATE task SET status = 'RUNNING', updated_at = now() WHERE id = ? "
                 + "AND status IN ('PENDING','RETRYING')", taskId);
         if (claimed == 0) { return null; }
+        TaskLogContext.open(String.valueOf(taskId), (String) row.get("request_id")); // T4.86/P-26：认领后补写 requestId（历史任务空串 → 跳过不写）
         inflightTaskId = taskId; // T4.74：认领成功即标记在飞，stop() 依此排空
         log.info("开始转写（第 {} 次尝试）", ((Number) row.get("attempts")).intValue() + 1);
         return new Claimed(taskHeartbeat.start(taskId), row);

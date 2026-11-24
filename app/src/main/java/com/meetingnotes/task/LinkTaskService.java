@@ -133,13 +133,14 @@ public class LinkTaskService {
             Long taskId = transactionTemplate.execute(tx -> {
                 Long newId = jdbc.query(
                         """
-                        INSERT INTO task (user_id, source_type, content_hash, duration_sec, size_bytes, status)
-                        VALUES (?, 'LINK', ?, ?, ?, 'PENDING')
+                        INSERT INTO task (user_id, source_type, content_hash, duration_sec, size_bytes, status, request_id)
+                        VALUES (?, 'LINK', ?, ?, ?, 'PENDING', ?)
                         ON CONFLICT (user_id, content_hash) DO NOTHING
                         RETURNING id
                         """,
                         rs -> rs.next() ? rs.getLong(1) : null,
-                        UserContext.current(), sha256, durationSec, size);
+                        UserContext.current(), sha256, durationSec, size,
+                        org.slf4j.MDC.get("requestId")); // T4.86/P-26：同 TaskService（MDC null → NULL 列）
                 if (newId == null) {
                     return null; // 冲突：同用户已有同内容任务，回查交给事务外
                 }

@@ -124,13 +124,14 @@ public class TextTaskService {
         String sha256 = sha256Hex(bytes);
         Long taskId = transactionTemplate.execute(tx -> {
             Long newId = jdbc.query("""
-                            INSERT INTO task (user_id, source_type, content_hash, duration_sec, size_bytes, status)
-                            VALUES (?, 'PASTE', ?, NULL, ?, 'PENDING')
+                            INSERT INTO task (user_id, source_type, content_hash, duration_sec, size_bytes, status, request_id)
+                            VALUES (?, 'PASTE', ?, NULL, ?, 'PENDING', ?)
                             ON CONFLICT (user_id, content_hash) DO NOTHING
                             RETURNING id
                             """,
                     rs -> rs.next() ? rs.getLong(1) : null,
-                    UserContext.current(), sha256, (long) bytes.length);
+                    UserContext.current(), sha256, (long) bytes.length,
+                    org.slf4j.MDC.get("requestId")); // T4.86/P-26：同 TaskService（MDC null → NULL 列）
             if (newId == null) {
                 return null;
             }

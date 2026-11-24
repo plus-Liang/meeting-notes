@@ -127,13 +127,14 @@ public class TaskService {
             Long taskId = transactionTemplate.execute(tx -> {
                 Long newId = jdbc.query(
                         """
-                        INSERT INTO task (user_id, source_type, content_hash, duration_sec, size_bytes, status)
-                        VALUES (?, 'UPLOAD', ?, ?, ?, 'PENDING')
+                        INSERT INTO task (user_id, source_type, content_hash, duration_sec, size_bytes, status, request_id)
+                        VALUES (?, 'UPLOAD', ?, ?, ?, 'PENDING', ?)
                         ON CONFLICT (user_id, content_hash) DO NOTHING
                         RETURNING id
                         """,
                         rs -> rs.next() ? rs.getLong(1) : null,
-                        UserContext.current(), sha256, durationSec, size);
+                        UserContext.current(), sha256, durationSec, size,
+                        org.slf4j.MDC.get("requestId")); // T4.86/P-26：入口 filter 写入的请求 id（MDC.get 为 null 时 JdbcTemplate 落 NULL）
                 if (newId == null) {
                     return null; // 冲突：同用户已有同内容任务，回查交给事务外（事务内不能留未决状态）
                 }

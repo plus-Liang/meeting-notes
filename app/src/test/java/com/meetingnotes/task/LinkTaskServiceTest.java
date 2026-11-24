@@ -91,13 +91,13 @@ class LinkTaskServiceTest {
     @SuppressWarnings("unchecked")
     private void stubInsertInserts(long newId) {
         when(jdbc.query(contains("INSERT INTO task"), ArgumentMatchers.<ResultSetExtractor<Long>>any(),
-                eq(1L), anyString(), anyLong(), anyLong())).thenReturn(newId);
+                eq(1L), anyString(), anyLong(), anyLong(), any())).thenReturn(newId);
     }
 
     @SuppressWarnings("unchecked")
     private void stubConflict() {
         when(jdbc.query(contains("INSERT INTO task"), ArgumentMatchers.<ResultSetExtractor<Long>>any(),
-                eq(1L), anyString(), anyLong(), anyLong())).thenReturn(null);
+                eq(1L), anyString(), anyLong(), anyLong(), any())).thenReturn(null);
     }
 
     @SuppressWarnings("unchecked")
@@ -134,7 +134,7 @@ class LinkTaskServiceTest {
         assertEquals(false, resp.reused());
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
         verify(jdbc).query(sql.capture(), ArgumentMatchers.<ResultSetExtractor<Long>>any(),
-                eq(1L), anyString(), anyLong(), anyLong());
+                eq(1L), anyString(), anyLong(), anyLong(), any());
         assertTrue(sql.getValue().contains("'LINK'"), "source_type 用卡面逐字的 LINK（V1 无 CHECK 约束）");
         assertTrue(sql.getValue().contains("ON CONFLICT (user_id, content_hash) DO NOTHING"), "幂等靠唯一约束裁决");
         verify(quotaService).consume(1L, 1);

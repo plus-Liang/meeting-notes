@@ -78,13 +78,13 @@ class TextTaskServiceTest {
     @SuppressWarnings("unchecked")
     private void stubInsertInserts(long newId) {
         when(jdbc.query(contains("INSERT INTO task"), ArgumentMatchers.<ResultSetExtractor<Long>>any(),
-                eq(1L), anyString(), anyLong())).thenReturn(newId);
+                eq(1L), anyString(), anyLong(), any())).thenReturn(newId);
     }
 
     @SuppressWarnings("unchecked")
     private void stubConflict() {
         when(jdbc.query(contains("INSERT INTO task"), ArgumentMatchers.<ResultSetExtractor<Long>>any(),
-                eq(1L), anyString(), anyLong())).thenReturn(null);
+                eq(1L), anyString(), anyLong(), any())).thenReturn(null);
     }
 
     @SuppressWarnings("unchecked")
@@ -118,7 +118,7 @@ class TextTaskServiceTest {
         assertEquals(false, resp.reused());
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
         verify(jdbc).query(sql.capture(), ArgumentMatchers.<ResultSetExtractor<Long>>any(),
-                eq(1L), anyString(), anyLong());
+                eq(1L), anyString(), anyLong(), any());
         assertTrue(sql.getValue().contains("'PASTE'"), "source_type 用 schema 预留的 PASTE");
         assertTrue(sql.getValue().contains("ON CONFLICT (user_id, content_hash) DO NOTHING"), "幂等靠唯一约束裁决");
         verify(quotaService).consume(1L, 0);
@@ -253,7 +253,7 @@ class TextTaskServiceTest {
 
         assertEquals(fromSrt.contentHash(), fromAss.contentHash(), "同内容字幕/文本共享一个任务");
         verify(jdbc, times(2)).query(contains("INSERT INTO task"),
-                ArgumentMatchers.<ResultSetExtractor<Long>>any(), eq(1L), anyString(), anyLong());
+                ArgumentMatchers.<ResultSetExtractor<Long>>any(), eq(1L), anyString(), anyLong(), any());
     }
 
     private static MultipartFile multipart(String name, byte[] bytes) {

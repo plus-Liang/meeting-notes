@@ -132,7 +132,7 @@ class WebhookDeliveryServiceTest {
         when(jdbc.query(anyString(), any(org.springframework.jdbc.core.ResultSetExtractor.class), any(Object[].class)))
                 .thenReturn(Map.of("attempts", 1, "task_id", 7L,
                         "url", "http://169.254.169.254/latest/meta-data/", "event", "task.done"));
-        when(sender.send(anyString(), anyString(), anyString(), any(byte[].class)))
+        when(sender.send(anyString(), anyString(), anyString(), anyString(), any(byte[].class)))
                 .thenThrow(new com.meetingnotes.common.ApiException(400, "URL_BLOCKED", "目标地址不允许"));
 
         ch.qos.logback.classic.Logger logger =

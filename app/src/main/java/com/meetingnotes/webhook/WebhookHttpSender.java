@@ -61,15 +61,20 @@ public class WebhookHttpSender {
         }
     }
 
-    /** 出站发送：第一行先校验目标（每次真实发送前，防 DNS 重绑定/配置漂移）；五个契约头逐字保留（接入指南 §4.2）。 */
-    int send(String url, String event, String deliveryId, byte[] body) throws Exception {
+    /** 出站发送：第一行先校验目标（每次真实发送前，防 DNS 重绑定/配置漂移）；五个契约头逐字保留（接入指南 §4.2）；
+     *  T4.86/P-26：追加 X-Request-Id 关联头（值由调用方解析——任务行 request_id，缺省回退 "task-<taskId>"，判定在 service）。 */
+    int send(String url, String event, String deliveryId, String requestId, byte[] body) throws Exception {
         verifyTarget(url);
-        HttpRequest request = HttpRequest.newBuilder(URI.create(url))
+        HttpRequest.Builder builder = HttpRequest.newBuilder(URI.create(url))
                 .timeout(requestTimeout)
                 .header("Content-Type", "application/json")
                 .header("X-MeetingNotes-Event", event)
                 .header("X-MeetingNotes-Delivery", deliveryId)
-                .header("X-MeetingNotes-Signature", "sha256=" + sign(secret, body))
+                .header("X-MeetingNotes-Signature", "sha256=" + sign(secret, body));
+        if (requestId != null && !requestId.isBlank()) {
+            builder.header("X-Request-Id", requestId); // T4.86/P-26：接收方可据此反查入口请求
+        }
+        HttpRequest request = builder
                 .POST(HttpRequest.BodyPublishers.ofByteArray(body))
                 .build();
         return http.send(request, HttpResponse.BodyHandlers.discarding()).statusCode();

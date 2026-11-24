@@ -158,8 +158,12 @@ public class WebhookDeliveryService {
         String event = (String) row.get("event");
         String deliveryUuid = deliveryIdFor(deliveryId).toString();
         try {
-            byte[] body = mapper.writeValueAsBytes(buildPayload(deliveryUuid, event, taskId));
-            int statusCode = sender.send(url, event, deliveryUuid, body);
+            Built built = buildPayload(deliveryUuid, event, taskId);
+            byte[] body = mapper.writeValueAsBytes(built.payload());
+            // T4.86/P-26：X-Request-Id 回退判定在 service——任务行 request_id 为空（历史/非 HTTP 入口）→ "task-<taskId>"
+            String requestIdHeader = built.requestId() != null && !built.requestId().isBlank()
+                    ? built.requestId() : "task-" + taskId;
+            int statusCode = sender.send(url, event, deliveryUuid, requestIdHeader, body);
             boolean success = statusCode >= 200 && statusCode < 300;
             recordAttempt(deliveryId, statusCode, success ? null : nextBackoffSec(attempts, maxRetries));
             if (success) {
@@ -200,10 +204,13 @@ public class WebhookDeliveryService {
         }
     }
 
-    /** 契约载荷（接入指南 §4.2 九键）：查行后委托 {@link #payloadFromRow}（纯函数，可单测）。 */
-    Map<String, Object> buildPayload(String deliveryId, String event, long taskId) {
+    /** buildPayload 的产物：九键契约载荷 + 请求关联 id（X-Request-Id 头用，不进载荷——契约九键不变）。 */
+    record Built(Map<String, Object> payload, String requestId) {}
+
+    /** 契约载荷（接入指南 §4.2 九键）：查行后委托 {@link #payloadFromRow}（纯函数，可单测）；request_id 从行取但不进载荷。 */
+    Built buildPayload(String deliveryId, String event, long taskId) {
         Map<String, Object> result = jdbc.query("""
-                SELECT t.status, r.ai_tier, r.summary, r.todos
+                SELECT t.status, r.ai_tier, r.summary, r.todos, t.request_id
                 FROM task t LEFT JOIN task_result r ON r.task_id = t.id WHERE t.id = ?
                 """, rs -> {
             if (!rs.next()) {
@@ -214,12 +221,14 @@ public class WebhookDeliveryService {
             row.put("ai_tier", rs.getString("ai_tier"));
             row.put("summary", rs.getString("summary"));
             row.put("todos", rs.getString("todos"));
+            row.put("request_id", rs.getString("request_id")); // T4.86：不进九键载荷，走 X-Request-Id 头
             return row;
         }, taskId);
         if (result == null) {
             throw new IllegalStateException("任务 " + taskId + " 不存在，无法构建 Webhook 载荷");
         }
-        return payloadFromRow(deliveryId, event, taskId, result);
+        return new Built(payloadFromRow(deliveryId, event, taskId, result),
+                (String) result.get("request_id"));
     }
 
     /** 由 task/task_result 行组装九键载荷（键名逐字对齐接入指南 §4.2，Map 字面键即 snake_case）。 */
