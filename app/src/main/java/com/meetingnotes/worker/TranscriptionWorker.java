@@ -42,6 +42,7 @@ public class TranscriptionWorker implements SmartLifecycle {
     private final PasteTextReader pasteTextReader;
     private final MonoWavExtractor monoWavExtractor;
     private final com.meetingnotes.task.QueuePublisher queuePublisher;
+    private final com.meetingnotes.task.DeadTaskRecorder deadTaskRecorder;
     private final TaskHeartbeat taskHeartbeat;
     private final String queueKey;
     private final Duration pollTimeout;
@@ -59,12 +60,14 @@ public class TranscriptionWorker implements SmartLifecycle {
             com.meetingnotes.asr.AsrClient asrClient, com.meetingnotes.ai.StructuringService structuringService,
             com.meetingnotes.ai.TranscriptPunctuator punctuator, com.meetingnotes.webhook.WebhookDeliveryService webhookService,
             PasteTextReader pasteTextReader, MonoWavExtractor monoWavExtractor, com.meetingnotes.task.QueuePublisher queuePublisher,
+            com.meetingnotes.task.DeadTaskRecorder deadTaskRecorder,
             TaskHeartbeat taskHeartbeat, @Value("${app.worker.queue-key}") String queueKey,
             @Value("${app.worker.poll-timeout-sec}") long pollTimeoutSec,
             @Value("${app.storage.bucket}") String bucket, @Value("${app.task.max-retries}") int maxRetries) {
         this.redis = redis; this.jdbc = jdbc; this.s3 = s3; this.asrClient = asrClient;
         this.structuringService = structuringService; this.punctuator = punctuator; this.webhookService = webhookService;
         this.pasteTextReader = pasteTextReader; this.monoWavExtractor = monoWavExtractor; this.queuePublisher = queuePublisher;
+        this.deadTaskRecorder = deadTaskRecorder;
         this.taskHeartbeat = taskHeartbeat; this.queueKey = queueKey; this.pollTimeout = Duration.ofSeconds(pollTimeoutSec); this.bucket = bucket; this.maxRetries = maxRetries;
     }
 
@@ -258,9 +261,8 @@ public class TranscriptionWorker implements SmartLifecycle {
                     "UPDATE task SET attempts = attempts + 1, updated_at = now() WHERE id = ? RETURNING attempts",
                     rs -> rs.next() ? rs.getInt(1) : null, taskId);
             if (attempts != null && attempts >= maxRetries) {
-                jdbc.update("UPDATE task SET status = 'DEAD', error_code = ?, updated_at = now() WHERE id = ?",
-                        code, taskId);
-                jdbc.update("INSERT INTO dead_letter (task_id, reason) VALUES (?, ?)", taskId, reason);
+                // T4.87 C3：置 DEAD + dead_letter + 退分钟数收敛到 DeadTaskRecorder（单事务，不变量 DEAD⟺refunded）
+                deadTaskRecorder.markDead(taskId, code, reason);
                 log.error("任务 {} 重试 {} 次仍失败，置 DEAD（{}）并写 dead_letter：{}", taskId, attempts, code, reason);
                 webhookService.onTerminal(taskId, "DEAD"); // T4.6：终态异步投递 Webhook（内部不抛、不阻塞）
             } else {

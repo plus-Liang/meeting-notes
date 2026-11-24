@@ -68,6 +68,8 @@ class TranscriptionWorkerTest {
     @Mock
     private com.meetingnotes.task.QueuePublisher queuePublisher;
     @Mock
+    private com.meetingnotes.task.DeadTaskRecorder deadTaskRecorder;
+    @Mock
     private TaskHeartbeat taskHeartbeat;
     @Mock
     private StalePendingQueries stalePendingQueries;
@@ -75,7 +77,7 @@ class TranscriptionWorkerTest {
     private TranscriptionWorker newWorker() {
         return new TranscriptionWorker(redis, jdbc, s3, asrClient,
                 structuringService, punctuator, webhookService, pasteTextReader, monoWavExtractor,
-                queuePublisher, taskHeartbeat, "meetingnotes:task-queue", 10, "meetingnotes", 3);
+                queuePublisher, deadTaskRecorder, taskHeartbeat, "meetingnotes:task-queue", 10, "meetingnotes", 3);
     }
 
     @Test
@@ -278,8 +280,8 @@ class TranscriptionWorkerTest {
         ReflectionTestUtils.invokeMethod(worker, "markFailure", 10L,
                 new ProcessingException("ASR_ERROR", "ASR 转写调用失败：服务不可达", null));
 
-        verify(jdbc).update(contains("'DEAD'"), eq("ASR_ERROR"), eq(10L));
-        verify(jdbc).update(contains("dead_letter"), eq(10L), contains("服务不可达"));
+        // T4.87 C3：DEAD+dead_letter+退款 收敛到 DeadTaskRecorder（SQL 断言在 DeadTaskRecorderTest）
+        verify(deadTaskRecorder).markDead(eq(10L), eq("ASR_ERROR"), contains("服务不可达"));
         verify(queuePublisher, org.mockito.Mockito.never()).tryPublishToTail(org.mockito.ArgumentMatchers.anyLong());
         verify(queuePublisher, org.mockito.Mockito.never()).tryPublish(org.mockito.ArgumentMatchers.anyLong());
     }

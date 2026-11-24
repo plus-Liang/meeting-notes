@@ -6,6 +6,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * T4.60 B2：DEAD 复活 + PENDING 自愈 SQL 的单一实现（此前 TaskService/LinkTaskService/TextTaskService
@@ -30,21 +31,39 @@ public class TaskRequeueSupport {
     private final JdbcTemplate jdbc;
     private final QueuePublisher queuePublisher;
     private final StalePendingQueries stalePendingQueries;
+    private final QuotaService quotaService;
+    private final DeadTaskRecorder deadTaskRecorder;
+    private final TransactionTemplate transactionTemplate;
 
     public TaskRequeueSupport(JdbcTemplate jdbc, QueuePublisher queuePublisher,
-                              StalePendingQueries stalePendingQueries) {
+                              StalePendingQueries stalePendingQueries, QuotaService quotaService,
+                              DeadTaskRecorder deadTaskRecorder, TransactionTemplate transactionTemplate) {
         this.jdbc = jdbc;
         this.queuePublisher = queuePublisher;
         this.stalePendingQueries = stalePendingQueries;
+        this.quotaService = quotaService;
+        this.deadTaskRecorder = deadTaskRecorder;
+        this.transactionTemplate = transactionTemplate;
     }
 
-    /** DEAD 复活两连（D-049）：重置计数/状态/错误码 + 清死信。SQL 与原四处逐字一致。 */
+    /** T4.87 C4：DEAD 复活 = 单事务「重置 + quota_refunded=FALSE + 重新消费 + 清死信」。
+     *  重新消费与创建同口径（ceil 分钟 + 1 次）；超限 429 上抛 ⇒ 事务回滚 ⇒ 任务保持 DEAD/refunded=TRUE
+     *  （堵「失败退款 → 免费重试」漏洞）。RETURNING 拿 user_id/duration_sec 供消费。 */
     private void reviveDead(long id) {
-        jdbc.update("""
-                UPDATE task SET attempts = 0, status = 'PENDING', error_code = NULL, updated_at = now()
-                WHERE id = ?
-                """, id);
-        jdbc.update("DELETE FROM dead_letter WHERE task_id = ?", id);
+        transactionTemplate.executeWithoutResult(status -> {
+            long[] row = jdbc.query("""
+                    UPDATE task SET attempts = 0, status = 'PENDING', error_code = NULL,
+                           quota_refunded = FALSE, updated_at = now()
+                    WHERE id = ?
+                    RETURNING user_id, duration_sec
+                    """,
+                    rs -> rs.next() ? new long[]{rs.getLong(1), rs.getInt(2)} : null, id);
+            if (row == null) {
+                throw new ApiException(404, "TASK_NOT_FOUND", "任务不存在");
+            }
+            quotaService.consume(row[0], QuotaService.ceilMinutes((int) row[1]));
+            jdbc.update("DELETE FROM dead_letter WHERE task_id = ?", id);
+        });
     }
 
     /** DEAD 重传/重提复活 + 重投（队头，既有语义）；入队失败 503 上抛——任务停在 PENDING，自愈前提成立。 */
@@ -59,10 +78,9 @@ public class TaskRequeueSupport {
         try {
             queuePublisher.publish(id);
         } catch (ApiException e) {
-            jdbc.update("UPDATE task SET status = 'DEAD', error_code = 'QUEUE_UNAVAILABLE', updated_at = now() WHERE id = ?",
-                    id);
-            jdbc.update("INSERT INTO dead_letter (task_id, reason) VALUES (?, ?)",
-                    id, "批量重试入队失败（Redis 不可用），已回滚为 DEAD；队列恢复后重新发起批量重试即可");
+            // T4.87 C3：回滚置 DEAD 走单一入口（同事务退款；复活刚消费过 refunded=FALSE，此处退回去）
+            deadTaskRecorder.markDead(id, "QUEUE_UNAVAILABLE",
+                    "批量重试入队失败（Redis 不可用），已回滚为 DEAD；队列恢复后重新发起批量重试即可");
             throw e;
         }
     }
