@@ -11,6 +11,8 @@ import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.multipart.MultipartException;
 import org.springframework.web.multipart.support.MissingServletRequestPartException;
 
+import jakarta.servlet.http.HttpServletRequest;
+
 import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -28,10 +30,18 @@ public class ApiExceptionHandler {
     private static final String REQUEST_REJECTED_MSG = "请求无法被处理，请检查路径、方法与参数";
 
     @ExceptionHandler(ApiException.class)
-    public ResponseEntity<ErrorResponse> onApiException(ApiException e) {
+    public ResponseEntity<ErrorResponse> onApiException(ApiException e, HttpServletRequest request) {
         if ("QUOTA_EXCEEDED".equals(e.getCode())) {
             return ResponseEntity.status(e.getStatus())
                     .header("Retry-After", String.valueOf(secondsUntilMidnight()))
+                    .body(new ErrorResponse(e.getCode(), e.getMessage()));
+        }
+        // T4.80/P-29：限流拒绝也带 Retry-After——秒数取拦截器写入的请求属性（RateLimitInterceptor.RETRY_AFTER_ATTR），
+        // 拿不到（理论不可能，防御性兜底）默认 "60"；QUOTA_EXCEEDED 既有行为不变（沿用 secondsUntilMidnight）。
+        if ("RATE_LIMITED".equals(e.getCode())) {
+            Object retryAfterSec = request.getAttribute(RateLimitInterceptor.RETRY_AFTER_ATTR);
+            return ResponseEntity.status(e.getStatus())
+                    .header("Retry-After", retryAfterSec != null ? retryAfterSec.toString() : "60")
                     .body(new ErrorResponse(e.getCode(), e.getMessage()));
         }
         return ResponseEntity.status(e.getStatus()).body(new ErrorResponse(e.getCode(), e.getMessage()));

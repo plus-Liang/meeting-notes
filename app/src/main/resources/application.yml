@@ -124,6 +124,14 @@ app:
     # 预估耗时系数（只是预估不承诺）：estimated_sec = round(total_duration_sec * rtf + accepted * 2)
     batch-estimate-rtf: ${BATCH_ESTIMATE_RTF:0.15}
 
+  rate-limit:
+    # T4.80/P-29 前半：接口限流（固定窗口，单实例内存计数——多实例真实上限 = 配置 × 实例数，见 RateLimitInterceptor javadoc）
+    enabled: ${RATE_LIMIT_ENABLED:true}
+    window-sec: ${RATE_LIMIT_WINDOW_SEC:60}
+    login-per-window: ${RATE_LIMIT_LOGIN_PER_WINDOW:10}
+    register-per-window: ${RATE_LIMIT_REGISTER_PER_WINDOW:5}
+    tasks-per-window: ${RATE_LIMIT_TASKS_PER_WINDOW:30}
+
   media:
     # 时长探测工具（容器内 apt 装的 ffmpeg 自带 ffprobe）；换路径只改环境变量（N11）
     ffprobe-bin: ${FFPROBE_BIN:ffprobe}

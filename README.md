@@ -274,6 +274,8 @@ powershell -File tools\deploy-main.ps1
 
 | 现象 | 原因与解法 |
 |---|---|
+| 接口返回 `429 RATE_LIMITED`（登录/注册/提交任务） | 接口限流触发（T4.80/P-29 前半）：按响应头 `Retry-After` 退避重试，别立刻重放；窗口结束自动恢复。确认是被误伤时改 `.env` 的 `RATE_LIMIT_ENABLED=false` 止血后 `up -d` |
+|---|---|
 | 8080 端口被占用 | 改 `.env` 的 `APP_PORT`；同理 `9000`/`9001`（MinIO）、`8000`（ASR）、`11434`（Ollama）分别对应 `MINIO_PORT` / `MINIO_CONSOLE_PORT` / `ASR_PORT` / `OLLAMA_PORT`——这四个键 `.env.example` 里都已列出（前三个在「应用」段、`ASR_PORT` 在 ASR 段），改值即生效。**注意：`v0.1.0` 这个 tag 的 `.env.example` 早于该修复、还没有前三个键**，用 tag 部署时要手动追加（或改用 `main`）。Windows 上 `wslrelay` 偶尔抢端口，重启 Docker Desktop |
 | 抽音轨卡住 / 任务长时间 RUNNING 后转 RETRYING（日志含「ffmpeg 抽音轨超时」） | ffmpeg 对某条音频挂住不退出（坏容器/网络流）。T4.76 起抽音轨带看门狗：从进程启动起算 `FFMPEG_TIMEOUT_SEC`（默认 600s），到点强杀子进程，任务按失败重试（重试耗尽进 DEAD）。坏音频若每次都超时，重试次数耗尽后会被隔离进 DEAD，不会拖死整站；想放宽/收紧预算改 `.env` 的 `FFMPEG_TIMEOUT_SEC` 后 `up -d` |
 | `git clone` 报 TLS 错误（`schannel: failed to receive handshake` / `unexpected eof`） | 网络抖动或本机 git 的 TLS 后端问题：重试一次；仍失败可 `git config --global http.sslBackend openssl` 后重试，或改用 SSH 克隆 |
@@ -305,6 +307,11 @@ powershell -File tools\deploy-main.ps1
 | `APP_PORT` | 8080 | Web 端口 |
 | `WORKER_HEARTBEAT_SEC` | 20 | 转写期间刷新本任务 `updated_at` 的间隔（T4.77/P-06 心跳）；必须小于 P-01 的僵尸判定阈值。只刷认领的那个 id，不做全局扫表 |
 | `RECOVERY_STALE_RUNNING_MINUTES` | 5 | 启动恢复只回收心跳停止超过该时长的 RUNNING（T4.78/P-01 僵尸判据）；必须远大于 `WORKER_HEARTBEAT_SEC`，0/负值启动时 WARN 并回退 5 |
+| `RATE_LIMIT_ENABLED` | true | 接口限流总开关（T4.80/P-29 前半）；`false` 为限流误伤时的止血开关，完全放行 |
+| `RATE_LIMIT_WINDOW_SEC` | 60 | 限流固定窗口秒数；窗口滚动自动重置计数（单实例内存计数，多实例真实上限 = 配置 × 实例数） |
+| `RATE_LIMIT_LOGIN_PER_WINDOW` | 10 | 登录接口每窗口每 IP 上限 |
+| `RATE_LIMIT_REGISTER_PER_WINDOW` | 5 | 注册接口每窗口每 IP 上限 |
+| `RATE_LIMIT_TASKS_PER_WINDOW` | 30 | 任务提交（含批量）每窗口每用户上限 |
 | `WORKER_PROCESSING_KEY` | `meetingnotes:worker-processing` | 「处理中」回执 ZSET 键（T4.79/P-02）：worker 取出任务即 ZADD（score=取出时刻）、结束 ZREM；SIGKILL/OOM 后残留回执由清扫器按可见性超时回收重投。Redis 重启后回执会丢，靠启动恢复兜底 |
 | `WORKER_VISIBILITY_TIMEOUT_SEC` | 180 | 可见性超时（秒）：回执超过该时长即查 DB 判消费者死活——心跳新鲜跳过、心跳陈旧原子抢回收重投、已终态只清回执；必须远大于 `WORKER_HEARTBEAT_SEC`，0/负值 WARN 并回退 180 |
 | `API_TOKEN` | 必填 | 全局接入令牌（≡ 1 号管理员账号）；**必填 ≥32 位随机串**（生成：`openssl rand -hex 32`）；留空 / 默认值 / 短于 32 位会**拒绝启动**（T4.73）。首次部署走 `scripts/first-run.*` 会自动生成 |

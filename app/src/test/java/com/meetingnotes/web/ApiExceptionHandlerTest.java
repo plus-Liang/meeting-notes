@@ -3,6 +3,7 @@ package com.meetingnotes.web;
 import com.meetingnotes.common.ApiException;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.ResponseEntity;
+import org.springframework.mock.web.MockHttpServletRequest;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -26,10 +27,29 @@ class ApiExceptionHandlerTest {
     @Test
     void apiExceptionStillWinsOverFallback() {
         ApiException e = new ApiException(413, "SIZE_EXCEEDED", "文件超过大小上限");
-        ResponseEntity<ErrorResponse> resp = handler.onApiException(e);
+        ResponseEntity<ErrorResponse> resp = handler.onApiException(e, new MockHttpServletRequest());
 
         assertEquals(413, resp.getStatusCode().value());
         assertEquals("SIZE_EXCEEDED", resp.getBody().code());
+    }
+
+    /* ---- T4.80/P-29：限流拒绝带 Retry-After（秒数取请求属性，缺省 60） ---- */
+
+    @Test
+    void rateLimitedSetsRetryAfterFromRequestAttributeWithDefault60() {
+        ApiException e = new ApiException(429, "RATE_LIMITED", "请求过于频繁，请稍后重试");
+
+        // 缺省：请求属性不存在 → Retry-After = 60
+        ResponseEntity<ErrorResponse> resp = handler.onApiException(e, new MockHttpServletRequest());
+        assertEquals(429, resp.getStatusCode().value());
+        assertEquals("RATE_LIMITED", resp.getBody().code());
+        assertEquals("60", resp.getHeaders().getFirst("Retry-After"));
+
+        // 显式：拦截器已写入属性 → Retry-After 取属性值
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.setAttribute(RateLimitInterceptor.RETRY_AFTER_ATTR, "7");
+        ResponseEntity<ErrorResponse> resp2 = handler.onApiException(e, request);
+        assertEquals("7", resp2.getHeaders().getFirst("Retry-After"));
     }
 
     /* ---- T2.12 / D-057：框架 4xx 不再被吞成 500 ---- */
