@@ -17,6 +17,7 @@ import software.amazon.awssdk.services.s3.S3Client;
 
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -30,6 +31,7 @@ import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
@@ -392,20 +394,32 @@ class TranscriptionWorkerTest {
 
     /* ---- T4.79/P-02：取出即 ZADD「处理中」回执、结束 ZREM ---- */
 
-    /** ① ZADD 失败（Redis 抖动）→ 回执不残留、任务退回队尾（tryPublishToTail），绝不「既没回执又不在队列」。 */
+    /** ① T4.79-fix F2：ZADD 失败（Redis 抖动）→ 返回 false、任务退回队尾（tryPublishToTail），绝不「既没回执又不在队列」，且本轮不进 handleOne。 */
     @Test
-    void zaddFailureRollsTaskBackToTail() {
+    void zaddFailureReturnsFalseRollsBackAndSkipsHandleOne() {
         TranscriptionWorker worker = newWorker();
         when(redis.opsForZSet()).thenReturn(zSetOps);
         when(zSetOps.add(anyString(), anyString(), ArgumentMatchers.anyDouble()))
                 .thenThrow(new org.springframework.dao.DataAccessResourceFailureException("redis down"));
         when(queuePublisher.tryPublishToTail(7L)).thenReturn(true);
 
-        worker.markProcessing("7");
+        boolean proceed = worker.markProcessing("7"); // T4.79-fix F2：失败返回 false，本轮不处理
 
+        assertFalse(proceed, "ZADD 失败必须返回 false（本轮不进入 handleOne）");
         verify(zSetOps).add(eq("meetingnotes:worker-processing"), eq("7"), ArgumentMatchers.anyDouble());
         verify(queuePublisher).tryPublishToTail(7L);
-        verify(zSetOps, never()).remove(anyString(), anyString());
+        verifyNoInteractions(jdbc, taskHeartbeat); // handleOne 未被调用（否则必查 jdbc 认领）
+    }
+
+    /** T4.79-fix F2 补充：ZADD 成功 → markProcessing 返回 true（调用方照常进入 handleOne）。 */
+    @Test
+    void markProcessingReturnsTrueOnSuccess() {
+        TranscriptionWorker worker = newWorker();
+        when(redis.opsForZSet()).thenReturn(zSetOps);
+
+        assertTrue(worker.markProcessing("7"), "ZADD 成功必须返回 true");
+
+        verify(zSetOps).add(eq("meetingnotes:worker-processing"), eq("7"), ArgumentMatchers.anyDouble());
     }
 
     /** ② 正常处理走完 handleOne 全路径（含 finally）→ 回执 ZREM 被调用、任务置 DONE。 */
@@ -441,5 +455,32 @@ class TranscriptionWorkerTest {
 
         verify(zSetOps).remove("meetingnotes:worker-processing", "21");
         verify(taskHeartbeat, never()).start(21L);
+    }
+
+    /* ---- T4.79-fix F1：坏队列成员不得打死 worker ---- */
+
+    /** handleOne("not-a-number") 不抛异常、不认领、回执清理照走；随后下一条真实任务照常处理完（「继续」语义）。 */
+    @Test
+    void badQueueMemberDoesNotKillWorkerAndNextTaskProceeds() {
+        TranscriptionWorker worker = newWorker();
+        when(redis.opsForZSet()).thenReturn(zSetOps);
+
+        assertDoesNotThrow(() -> worker.handleOne("not-a-number"));
+        verify(zSetOps).remove("meetingnotes:worker-processing", "not-a-number"); // finally 清回执（ZREM 不存在成员无副作用）
+        verify(jdbc, never()).queryForMap(anyString(), ArgumentMatchers.any()); // 没到认领那步
+        verifyNoInteractions(taskHeartbeat);
+
+        // 坏成员之后，下一条真实任务照常认领并处理完
+        TaskHeartbeat.Session session = org.mockito.Mockito.mock(TaskHeartbeat.Session.class);
+        when(jdbc.queryForMap(contains("FROM task WHERE id = ?"), eq(1L))).thenReturn(java.util.Map.of(
+                "status", "PENDING", "attempts", 0, "source_type", "PASTE",
+                "source_uri", "s3://meetingnotes/tasks/1/paste.txt"));
+        when(jdbc.update(contains("AND status IN ('PENDING','RETRYING')"), eq(1L))).thenReturn(1);
+        when(taskHeartbeat.start(1L)).thenReturn(session);
+        when(pasteTextReader.read("tasks/1/paste.txt")).thenReturn("坏成员之后的正常任务");
+
+        assertDoesNotThrow(() -> worker.handleOne("1"));
+        verify(jdbc).update(contains("'DONE'"), eq(1L));
+        verify(zSetOps).remove("meetingnotes:worker-processing", "1");
     }
 }

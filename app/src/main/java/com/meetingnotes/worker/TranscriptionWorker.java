@@ -107,7 +107,8 @@ public class TranscriptionWorker implements SmartLifecycle {
                 sleepQuietly();
                 continue;
             }
-            if (taskId != null) { markProcessing(taskId); handleOne(taskId); } // T4.79/P-02：取出先 ZADD 回执再处理；null=BLPOP 超时，无空转轮询
+            // T4.79-fix F1 双保险：单条消息的任何异常不终结消费循环（handleOne 内部已全捕获，此处兜 Redis 侧漏网）；F2：回执写失败（已退回队尾）本轮不处理
+            try { if (taskId == null) { continue; } if (markProcessing(taskId)) { handleOne(taskId); } } catch (RuntimeException e) { log.error("消费循环单次异常，继续", e); }
         }
         log.info("worker 已停止");
     }
@@ -115,15 +116,14 @@ public class TranscriptionWorker implements SmartLifecycle {
     /** 取一条 → 认领 → 处理（包级可见供 T4.77-fix/T4.79 测试驱动）。认领纳入保护伞：行不存在/DB 瞬时故障只 error 后跳过该条
      *  （不 markFailure——行不存在时 UPDATE…RETURNING 返回空会 NPE），worker 绝不停摆；已认领后 process 异常仍走 log.error + markFailure。 */
     void handleOne(String taskId) {
-        long id = Long.parseLong(taskId.trim());
         org.slf4j.MDC.put("taskId", taskId.trim()); // T2.7：MDC 防线程复用串号
         Claimed claimed = null;
         try {
-            claimed = claim(id);
+            long id = Long.parseLong(taskId.trim()); claimed = claim(id); // T4.79-fix F1：坏成员也进保护伞（解析/认领异常同口径跳过）
             if (claimed == null) { log.warn("任务 {} 已被其它实例认领（状态已变更），跳过", id); }
             else { try { process(claimed.row(), id); } catch (Exception e) { log.error("处理异常", e); markFailure(id, e); } }
-        } catch (Exception e) { // T4.77-fix B1：认领抛异常（任务在 BLPOP 与认领之间被删/DB 抖动）→ worker 不死
-            log.error("认领异常，跳过该条继续（worker 不停）", e);
+        } catch (Exception e) { // T4.77-fix B1 + T4.79-fix F1：认领异常/坏成员 → worker 不死
+            log.error("队列成员非法，跳过该条继续（worker 不停）：{}", taskId, e);
         } finally {
             if (claimed != null) { claimed.hb().close(); } // T4.77：Session 在 finally 关（异常路径也要停）
             removeProcessingQuietly(taskId); // T4.79/P-02：无论成败/认领与否都清回执（僵尸回执会堆积）
@@ -132,14 +132,10 @@ public class TranscriptionWorker implements SmartLifecycle {
         }
     }
     /** T4.79/P-02：取出即 ZADD 回执（score=取出毫秒）。ZADD 失败必须退回队尾——绝不允许「既没回执又不在队列」；退回也失败时 DB 行仍是 PENDING（未认领），由清扫兜底。包级可见供测试。 */
-    void markProcessing(String taskId) {
-        try {
-            redis.opsForZSet().add(processingKey, taskId.trim(), System.currentTimeMillis());
-        } catch (RuntimeException e) {
-            log.error("回执 ZADD 失败（Redis 抖动），任务 {} 退回队尾", taskId, e);
-            if (!queuePublisher.tryPublishToTail(Long.parseLong(taskId.trim()))) {
-                log.error("任务 {} 退回队尾也失败（Redis 不可用），行仍在 PENDING 待清扫兜底", taskId);
-            }
+    boolean markProcessing(String taskId) { // T4.79-fix F2：true=回执已写、可处理；false=失败（任务已退回队尾），本轮不处理
+        try { redis.opsForZSet().add(processingKey, taskId.trim(), System.currentTimeMillis()); return true; }
+        catch (RuntimeException e) {
+            log.error("回执 ZADD 失败（Redis 抖动），任务 {} 退回队尾", taskId, e); if (!queuePublisher.tryPublishToTail(Long.parseLong(taskId.trim()))) { log.error("任务 {} 退回队尾也失败（Redis 不可用），行仍在 PENDING 待清扫兜底", taskId); } return false;
         }
     }
 
