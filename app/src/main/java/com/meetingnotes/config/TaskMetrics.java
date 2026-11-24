@@ -9,6 +9,8 @@ import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
+import java.sql.Timestamp;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -17,7 +19,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * 业务指标（T4.84/P-25）：任务按状态计数 + Redis 队列深度，暴露给 Prometheus（/actuator/prometheus）。
+ * 业务指标（T4.84/P-25 + T4.85/P-27 收尾）：任务按状态计数、Redis 队列深度、最老 PENDING 年龄、
+ * 近 1h DONE 任务时延分位（p50/p95），暴露给 Prometheus（/actuator/prometheus）。
  *
  * <p>两个语义要点：
  * <ul>
@@ -40,12 +43,22 @@ public class TaskMetrics {
     /** 五档状态（SQL GROUP BY 后对齐到这些桶；未知状态忽略）。 */
     private static final List<String> STATUS_BUCKETS = List.of("PENDING", "RUNNING", "DONE", "DEAD", "RETRYING");
 
+    /** 时延分位样本窗口：近 1 小时的 DONE 任务（SQL 参数为 JVM 时间戳，卡面 C1 口径）。 */
+    static final long DURATION_WINDOW_MILLIS = 3_600_000L;
+    /** 时延分位样本上限：ORDER BY updated_at DESC LIMIT 500——只统计最近的 500 条，超出截断（写进文档）。 */
+    static final int DURATION_SAMPLE_LIMIT = 500;
+
     private final JdbcTemplate jdbc;
     private final StringRedisTemplate redis;
     private final String queueKey;
     private final long cacheSeconds;
     private final Map<String, AtomicLong> taskCountByStatus = new ConcurrentHashMap<>();
     private final AtomicLong queueDepth = new AtomicLong();
+    /** 最老一条 PENDING 距今的秒数（无 PENDING = 0，不输出 NaN/-1）。 */
+    private final AtomicLong oldestPendingAgeSec = new AtomicLong();
+    /** 近 1h DONE 任务时延分位（秒，最近秩法；自算标签 quantile——非 Prometheus summary）。 */
+    private final AtomicLong durationP50Sec = new AtomicLong();
+    private final AtomicLong durationP95Sec = new AtomicLong();
     private volatile long lastRefreshMillis;
     // 注意：初始值必须为 0（不能 Long.MIN_VALUE）——now - Long.MIN_VALUE 会 long 溢出为负，
     // 使节流条件恒真、指标永远不刷新（T4.84 调试实录，K-185 候选）。0 = 启动即视为过期。
@@ -76,6 +89,37 @@ public class TaskMetrics {
                 })
                 .description("Redis 转写队列深度（BLPOP 待取条数）")
                 .register(registry);
+        Gauge.builder("meetingnotes.pending.oldest.age.seconds", oldestPendingAgeSec, value -> {
+                    refreshIfStale();  // 抓取驱动：每个 gauge 的取值函数都必须先刷新（T4.85 教训——漏写则指标恒 0）
+                    return value.doubleValue();
+                })
+                .description("最老一条 PENDING 距今秒数（0 = 无 PENDING）")
+                .register(registry);
+        // 自算 p50/p95（标签 quantile）：不是 Prometheus summary/histogram，勿用 histogram_quantile
+        Gauge.builder("meetingnotes.task.duration.seconds", durationP50Sec, value -> {
+                    refreshIfStale();
+                    return value.doubleValue();
+                })
+                .tag("quantile", "0.5")
+                .description("DONE 任务时延分位 p50（秒；近 1h、最多 500 条样本、最近秩法）")
+                .register(registry);
+        Gauge.builder("meetingnotes.task.duration.seconds", durationP95Sec, value -> {
+                    refreshIfStale();
+                    return value.doubleValue();
+                })
+                .tag("quantile", "0.95")
+                .description("DONE 任务时延分位 p95（秒；近 1h、最多 500 条样本、最近秩法）")
+                .register(registry);
+    }
+
+    /** 最近秩（nearest-rank）分位：升序第 ceil(p/100 × n) 个（1-based）；空样本 → 0。 */
+    static long percentileSeconds(List<Long> samples, int p) {
+        if (samples == null || samples.isEmpty()) {
+            return 0L;
+        }
+        long[] sorted = samples.stream().mapToLong(Long::longValue).sorted().toArray();
+        int rank = (int) Math.ceil(p / 100.0 * sorted.length);
+        return sorted[Math.min(Math.max(rank, 1), sorted.length) - 1];
     }
 
     /** 节流刷新：距上次刷新 < cacheSeconds 直接返回缓存；过期才发一条 GROUP BY SQL + 一次 Redis LLEN。 */
@@ -86,7 +130,7 @@ public class TaskMetrics {
         }
         lastRefreshMillis = now;
         try {
-            // 一次刷新只发这一条 SQL（禁止项 4：不许按状态循环查 5 次）；显式 ResultSetExtractor 类型消重载歧义
+            // ① 任务按状态计数（一条 GROUP BY；禁止按状态循环查 5 次）；显式 ResultSetExtractor 类型消重载歧义
             org.springframework.jdbc.core.ResultSetExtractor<Map<String, Long>> collector = rowSet -> {
                 Map<String, Long> byStatus = new HashMap<>();
                 while (rowSet.next()) {
@@ -95,9 +139,29 @@ public class TaskMetrics {
                 return byStatus;
             };
             Map<String, Long> byStatus = jdbc.query("SELECT status, count(*) FROM task GROUP BY status", collector);
+            // ② 最老 PENDING 年龄：SQL 只取 min(updated_at)，秒差在 Java 算（不用 SQL 时间函数——H2/PG 同一条 SQL）
+            Timestamp oldestPending = jdbc.queryForObject(
+                    "SELECT min(updated_at) FROM task WHERE status = 'PENDING'", Timestamp.class);
+            // ③ 时延分位样本：近 1h DONE（参数为 JVM 时间戳），最多 500 条，秒差在 Java 算
+            Timestamp windowStart = new Timestamp(now - DURATION_WINDOW_MILLIS);
+            List<Long> durations = jdbc.query(
+                    "SELECT created_at, updated_at FROM task WHERE status = 'DONE' AND updated_at > ? "
+                            + "ORDER BY updated_at DESC LIMIT 500",
+                    rowSet -> {
+                        List<Long> samples = new ArrayList<>();
+                        while (rowSet.next()) {
+                            samples.add((rowSet.getTimestamp(2).getTime() - rowSet.getTimestamp(1).getTime()) / 1000L);
+                        }
+                        return samples;
+                    }, windowStart);
+            // 三个查询全部成功才落缓存（任一异常 → 整批保留旧值）
             for (String status : STATUS_BUCKETS) {
                 taskCountByStatus.get(status).set(byStatus == null ? 0L : byStatus.getOrDefault(status, 0L));
             }
+            oldestPendingAgeSec.set(oldestPending == null ? 0L
+                    : Math.max(0L, (now - oldestPending.getTime()) / 1000L));
+            durationP50Sec.set(percentileSeconds(durations, 50));
+            durationP95Sec.set(percentileSeconds(durations, 95));
             Long depth = redis.opsForList().size(queueKey);
             queueDepth.set(depth == null ? 0L : depth);
             failureWarned.set(false);
