@@ -259,6 +259,10 @@ app:
     secret: ${WEBHOOK_SECRET:}
     max-retries: ${WEBHOOK_MAX_RETRIES:3}
     timeout-sec: ${WEBHOOK_TIMEOUT_SEC:10}
+    # T4.83/P-33：出站 SSRF 防护。默认 false = 投递前过 UrlGuard（拒回环 / 私有 / 链路本地 / 云元数据 /
+    # 组播 / IPv6 ULA）；校验在每次真实发送前（非入队时，防 DNS 重绑定）。仅当接收方确实在内网
+    # （如 http://nas:8080/hook）时才设 true——那等于允许服务端被配置成内网探测点，风险自担（接入指南 §3.9 同口径）。
+    allow-private: ${WEBHOOK_ALLOW_PRIVATE:false}
 
   inbox:
     enabled: ${INBOX_ENABLED:false}

@@ -276,6 +276,7 @@ powershell -File tools\deploy-main.ps1
 |---|---|
 | 接口返回 `429 RATE_LIMITED`（登录/注册/提交任务） | 接口限流触发（T4.80/P-29 前半）：按响应头 `Retry-After` 退避重试，别立刻重放；窗口结束自动恢复。确认是被误伤时改 `.env` 的 `RATE_LIMIT_ENABLED=false` 止血后 `up -d` |
 | 登录返回 `423 LOCKED`（正确密码也不行） | 同一账号连续登录失败达 `AUTH_LOGIN_MAX_FAILURES` 次（T4.81/P-29 后半），锁定 `AUTH_LOCKOUT_MINUTES` 分钟（落库，重启不解锁）：等时间自然解锁，或管理员调 `POST /api/v1/admin/users/{id}/unlock` 手工解锁 |
+| webhook 一直不投递 / 日志出现「Webhook 目标地址被拒（URL_BLOCKED）」 | 目标被 SSRF 防护拦下（T4.83/P-33，`webhook_delivery.last_status=-1` 终局留表）：若接收方在内网，显式设 `WEBHOOK_ALLOW_PRIVATE=true`，或把接收方改成公网可达并校验签名 |
 | 8080 端口被占用 | 改 `.env` 的 `APP_PORT`；同理 `9000`/`9001`（MinIO）、`8000`（ASR）、`11434`（Ollama）分别对应 `MINIO_PORT` / `MINIO_CONSOLE_PORT` / `ASR_PORT` / `OLLAMA_PORT`——这四个键 `.env.example` 里都已列出（前三个在「应用」段、`ASR_PORT` 在 ASR 段），改值即生效。**注意：`v0.1.0` 这个 tag 的 `.env.example` 早于该修复、还没有前三个键**，用 tag 部署时要手动追加（或改用 `main`）。Windows 上 `wslrelay` 偶尔抢端口，重启 Docker Desktop |
 | 抽音轨卡住 / 任务长时间 RUNNING 后转 RETRYING（日志含「ffmpeg 抽音轨超时」） | ffmpeg 对某条音频挂住不退出（坏容器/网络流）。T4.76 起抽音轨带看门狗：从进程启动起算 `FFMPEG_TIMEOUT_SEC`（默认 600s），到点强杀子进程，任务按失败重试（重试耗尽进 DEAD）。坏音频若每次都超时，重试次数耗尽后会被隔离进 DEAD，不会拖死整站；想放宽/收紧预算改 `.env` 的 `FFMPEG_TIMEOUT_SEC` 后 `up -d` |
 | `git clone` 报 TLS 错误（`schannel: failed to receive handshake` / `unexpected eof`） | 网络抖动或本机 git 的 TLS 后端问题：重试一次；仍失败可 `git config --global http.sslBackend openssl` 后重试，或改用 SSH 克隆 |
@@ -318,6 +319,7 @@ powershell -File tools\deploy-main.ps1
 | `RATE_LIMIT_TASKS_PER_WINDOW` | 30 | 任务提交（含批量）每窗口每用户上限 |
 | `AUTH_LOGIN_MAX_FAILURES` | 5 | 同一账号连续登录失败达该次数即锁定（T4.81/P-29 后半，落库重启不丢）；锁定期正确密码也 423；0/负值启动 WARN 回退 5 |
 | `AUTH_LOCKOUT_MINUTES` | 15 | 锁定时长（分钟）；管理员经 `POST /api/v1/admin/users/{id}/unlock` 解锁；0/负值启动 WARN 回退 15 |
+| `WEBHOOK_ALLOW_PRIVATE` | false | webhook 出站 SSRF 防护开关（T4.83/P-33）：默认投递前过 UrlGuard（拒内网/回环/云元数据目标，`last_status=-1` 终局留表）；仅当接收方确实在内网时设 `true`——等于允许服务端被配成内网探测点，风险自担 |
 | `WORKER_PROCESSING_KEY` | `meetingnotes:worker-processing` | 「处理中」回执 ZSET 键（T4.79/P-02）：worker 取出任务即 ZADD（score=取出时刻）、结束 ZREM；SIGKILL/OOM 后残留回执由清扫器按可见性超时回收重投。Redis 重启后回执会丢，靠启动恢复兜底 |
 | `WORKER_VISIBILITY_TIMEOUT_SEC` | 180 | 可见性超时（秒）：回执超过该时长即查 DB 判消费者死活——心跳新鲜跳过、心跳陈旧原子抢回收重投、已终态只清回执；必须远大于 `WORKER_HEARTBEAT_SEC`，0/负值 WARN 并回退 180 |
 | `API_TOKEN` | 必填 | 全局接入令牌（≡ 1 号管理员账号）；**必填 ≥32 位随机串**（生成：`openssl rand -hex 32`）；留空 / 默认值 / 短于 32 位会**拒绝启动**（T4.73）。首次部署走 `scripts/first-run.*` 会自动生成 |

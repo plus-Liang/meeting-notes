@@ -1,6 +1,7 @@
 package com.meetingnotes.webhook;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.meetingnotes.common.ApiException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -8,13 +9,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.time.Duration;
 import java.time.Instant;
-import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -22,9 +17,6 @@ import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
-
-import javax.crypto.Mac;
-import javax.crypto.spec.SecretKeySpec;
 
 /**
  * Webhook 投递（T4.6 / US-10，契约 = 接入指南.md §四，不自创字段）：任务终态（DONE→task.done / DEAD→task.failed）异步推送；
@@ -41,15 +33,18 @@ public class WebhookDeliveryService {
 
     /** 指数退避（秒）：第 1/2/3 次失败后分别等 1s/10s/60s（接入指南 §4.4 固定档）。 */
     static final long[] BACKOFF_SECONDS = {1, 10, 60};
+
+    /** T4.83/P-33：目标地址被 SSRF 防护拒绝的终局状态（last_status 是 INT，V1 已建表，不新迁移）。
+     *  取 -1 避开合法 HTTP 状态码区间；终局 = next_retry 置空，不把一次内网探测放大成 4 次重试。 */
+    static final int STATUS_URL_BLOCKED = -1;
     private final JdbcTemplate jdbc;
     private final ObjectMapper mapper;
     private final String globalUrl;
     private final String secret;
     private final int maxRetries;
-    private final Duration requestTimeout;
     private final String baseUrl;
     private final boolean offlineMode;
-    private final HttpClient http;
+    private final WebhookHttpSender sender;
     /** 单线程投递器：worker 终态回调只入队，HTTP 超时/重试不占 worker 线程。 */
     private final ExecutorService dispatcher = Executors.newSingleThreadExecutor(r -> {
         Thread t = new Thread(r, "webhook-dispatcher");
@@ -64,18 +59,17 @@ public class WebhookDeliveryService {
                                   @Value("${app.webhook.url}") String globalUrl,
                                   @Value("${app.webhook.secret}") String secret,
                                   @Value("${app.webhook.max-retries}") int maxRetries,
-                                  @Value("${app.webhook.timeout-sec}") long timeoutSec,
                                   @Value("${app.base-url}") String baseUrl,
-                                  @Value("${app.offline-mode}") boolean offlineMode) {
+                                  @Value("${app.offline-mode}") boolean offlineMode,
+                                  WebhookHttpSender sender) {
         this.jdbc = jdbc;
         this.mapper = mapper;
         this.globalUrl = globalUrl == null ? "" : globalUrl.trim();
         this.secret = secret == null ? "" : secret.trim();
         this.maxRetries = maxRetries;
-        this.requestTimeout = Duration.ofSeconds(Math.max(1, timeoutSec));
         this.baseUrl = baseUrl == null ? "" : baseUrl.trim();
         this.offlineMode = offlineMode;
-        this.http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
+        this.sender = sender;
     }
 
     /** 任务进入终态时的唯一入口（worker 调用，绝不抛异常拖垮任务流程）。 */
@@ -165,7 +159,7 @@ public class WebhookDeliveryService {
         String deliveryUuid = deliveryIdFor(deliveryId).toString();
         try {
             byte[] body = mapper.writeValueAsBytes(buildPayload(deliveryUuid, event, taskId));
-            int statusCode = post(url, event, deliveryUuid, body);
+            int statusCode = sender.send(url, event, deliveryUuid, body);
             boolean success = statusCode >= 200 && statusCode < 300;
             recordAttempt(deliveryId, statusCode, success ? null : nextBackoffSec(attempts, maxRetries));
             if (success) {
@@ -177,6 +171,11 @@ public class WebhookDeliveryService {
                 log.error("Webhook 最终投递失败（HTTP {}，已试 {} 次）：delivery={} task={} 留表可观测",
                         statusCode, attempts, deliveryUuid, taskId);
             }
+        } catch (ApiException e) {
+            // T4.83/P-33：目标地址被 UrlGuard 拒绝——重试也不会变好，直接终局，留表可观测
+            recordAttempt(deliveryId, STATUS_URL_BLOCKED, null);
+            log.warn("Webhook 目标地址被拒（{}），放弃投递：url={} task={} delivery={}",
+                    e.getCode(), url, taskId, deliveryUuid);
         } catch (Exception e) {
             // 认领后投递本身抛异常（payload 组装/网络层失败等）：按失败记账，不静默吞
             recordAttempt(deliveryId, 0, nextBackoffSec(attempts, maxRetries));
@@ -251,18 +250,6 @@ public class WebhookDeliveryService {
         }
     }
 
-    private int post(String url, String event, String deliveryId, byte[] body) throws Exception {
-        HttpRequest request = HttpRequest.newBuilder(URI.create(url))
-                .timeout(requestTimeout)
-                .header("Content-Type", "application/json")
-                .header("X-MeetingNotes-Event", event)
-                .header("X-MeetingNotes-Delivery", deliveryId)
-                .header("X-MeetingNotes-Signature", "sha256=" + sign(secret, body))
-                .POST(HttpRequest.BodyPublishers.ofByteArray(body))
-                .build();
-        return http.send(request, HttpResponse.BodyHandlers.discarding()).statusCode();
-    }
-
     /** task.callback_url 优先，否则全局 URL；两者都空返回 null（不投递）。 */
     private String resolveUrl(long taskId) {
         String callback = jdbc.query("SELECT COALESCE(callback_url, '') FROM task WHERE id = ?",
@@ -285,16 +272,5 @@ public class WebhookDeliveryService {
     /** 行 id → 确定性 UUID（v3，名字空间法）：同一次投递的所有重试共用一个去重键。 */
     static UUID deliveryIdFor(long rowId) {
         return UUID.nameUUIDFromBytes(("mn-webhook-delivery-" + rowId).getBytes(java.nio.charset.StandardCharsets.UTF_8));
-    }
-
-    /** HMAC-SHA256(secret, 原始请求体字节) → hex 小写（接入方按 §4.3 校验）。 */
-    static String sign(String secret, byte[] body) {
-        try {
-            Mac mac = Mac.getInstance("HmacSHA256");
-            mac.init(new SecretKeySpec(secret.getBytes(java.nio.charset.StandardCharsets.UTF_8), "HmacSHA256"));
-            return HexFormat.of().formatHex(mac.doFinal(body));
-        } catch (Exception e) {
-            throw new IllegalStateException("HMAC-SHA256 不可用", e);
-        }
     }
 }

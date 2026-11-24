@@ -15,6 +15,7 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.any;
@@ -43,13 +44,13 @@ class WebhookDeliveryServiceTest {
     @Test
     void signatureMatchesReceiverPseudoCode() throws Exception {
         byte[] body = "{\"event\":\"task.done\"}".getBytes(java.nio.charset.StandardCharsets.UTF_8);
-        String sig = WebhookDeliveryService.sign("t46-secret", body);
-        // 接收端 §4.3 的验证算法（独立实现，互证不是自证）；"sha256=" 前缀在 post() 拼头时加
+        String sig = WebhookHttpSender.sign("t46-secret", body);
+        // 接收端 §4.3 的验证算法（独立实现，互证不是自证）；"sha256=" 前缀在 WebhookHttpSender.send 拼头时加
         Mac mac = Mac.getInstance("HmacSHA256");
         mac.init(new SecretKeySpec("t46-secret".getBytes(java.nio.charset.StandardCharsets.UTF_8), "HmacSHA256"));
         assertEquals(HexFormat.of().formatHex(mac.doFinal(body)), sig);
-        assertNotEquals(sig, WebhookDeliveryService.sign("wrong-secret", body));
-        assertNotEquals(sig, WebhookDeliveryService.sign("t46-secret", "其它字节".getBytes()));
+        assertNotEquals(sig, WebhookHttpSender.sign("wrong-secret", body));
+        assertNotEquals(sig, WebhookHttpSender.sign("t46-secret", "其它字节".getBytes()));
     }
 
     @Test
@@ -72,7 +73,8 @@ class WebhookDeliveryServiceTest {
         ObjectMapper mapper = new ObjectMapper();
         WebhookDeliveryService service = new WebhookDeliveryService(
                 org.mockito.Mockito.mock(org.springframework.jdbc.core.JdbcTemplate.class),
-                mapper, "", "s", 3, 10, "http://localhost:8080", true);
+                mapper, "", "s", 3, "http://localhost:8080", true,
+                org.mockito.Mockito.mock(WebhookHttpSender.class));
         Map<String, Object> row = new java.util.LinkedHashMap<>();
         row.put("status", "DONE");
         row.put("ai_tier", "EXTRACTIVE");
@@ -96,7 +98,8 @@ class WebhookDeliveryServiceTest {
         JdbcTemplate jdbc = mock(JdbcTemplate.class);
         when(jdbc.queryForList(anyString(), eq(Long.class))).thenReturn(List.of(1L, 2L));
         WebhookDeliveryService service = new WebhookDeliveryService(
-                jdbc, new ObjectMapper(), "", "", 3, 10, "http://localhost:8080", false);
+                jdbc, new ObjectMapper(), "", "", 3, "http://localhost:8080", false,
+                mock(WebhookHttpSender.class));
         service.scanDue();
         service.scanDue();
         // attempt() 的认领走 jdbc.query(UPDATE ... RETURNING)（ResultSetExtractor 重载）：空 secret 必须一次都不发生
@@ -112,9 +115,52 @@ class WebhookDeliveryServiceTest {
         when(jdbc.query(anyString(), any(org.springframework.jdbc.core.ResultSetExtractor.class), any(Object[].class)))
                 .thenReturn(null);
         WebhookDeliveryService service = new WebhookDeliveryService(
-                jdbc, new ObjectMapper(), "", "t46-secret", 3, 10, "http://localhost:8080", false);
+                jdbc, new ObjectMapper(), "", "t46-secret", 3, "http://localhost:8080", false,
+                mock(WebhookHttpSender.class));
         service.scanDue();
         verify(jdbc, timeout(2000).atLeastOnce())
                 .query(anyString(), any(org.springframework.jdbc.core.ResultSetExtractor.class), any(Object[].class));
+    }
+
+    /* ---- T4.83/P-33：目标地址被 SSRF 防护拒绝 → 直接终局（不重试，防内网探测被放大 4 次） ---- */
+
+    /** blocked（ApiException URL_BLOCKED）→ last_status=-1、next_retry=NULL 终局写法，无退避重试写、日志 WARN。 */
+    @Test
+    void urlBlockedAttemptIsTerminalWithoutRetry() throws Exception {
+        JdbcTemplate jdbc = mock(JdbcTemplate.class);
+        WebhookHttpSender sender = mock(WebhookHttpSender.class);
+        when(jdbc.query(anyString(), any(org.springframework.jdbc.core.ResultSetExtractor.class), any(Object[].class)))
+                .thenReturn(Map.of("attempts", 1, "task_id", 7L,
+                        "url", "http://169.254.169.254/latest/meta-data/", "event", "task.done"));
+        when(sender.send(anyString(), anyString(), anyString(), any(byte[].class)))
+                .thenThrow(new com.meetingnotes.common.ApiException(400, "URL_BLOCKED", "目标地址不允许"));
+
+        ch.qos.logback.classic.Logger logger =
+                (ch.qos.logback.classic.Logger) org.slf4j.LoggerFactory.getLogger(WebhookDeliveryService.class);
+        ch.qos.logback.core.read.ListAppender<ch.qos.logback.classic.spi.ILoggingEvent> appender =
+                new ch.qos.logback.core.read.ListAppender<>();
+        appender.start();
+        logger.addAppender(appender);
+        try {
+            service(1L, jdbc, sender).attempt(1L);
+        } finally {
+            logger.detachAppender(appender);
+        }
+
+        // 终局写法：last_status = -1（STATUS_URL_BLOCKED）且 next_retry = NULL（不重试）
+        verify(jdbc).update(org.mockito.ArgumentMatchers.contains("next_retry = NULL"),
+                eq(WebhookDeliveryService.STATUS_URL_BLOCKED), eq(1L));
+        // 没有第二次 attempts 自增/退避写（make_interval = 可重试路径，终局不得出现）
+        verify(jdbc, never()).update(org.mockito.ArgumentMatchers.contains("make_interval"), any(Object[].class));
+        assertEquals(1, appender.list.size(), "恰好一条 WARN 日志");
+        assertEquals(ch.qos.logback.classic.Level.WARN, appender.list.get(0).getLevel());
+        assertTrue(appender.list.get(0).getFormattedMessage()
+                .contains("Webhook 目标地址被拒（URL_BLOCKED）"), "日志含固定文案");
+        assertTrue(appender.list.get(0).getFormattedMessage().contains("169.254.169.254"), "日志含被拒 url");
+    }
+
+    private WebhookDeliveryService service(long deliveryId, JdbcTemplate jdbc, WebhookHttpSender sender) {
+        return new WebhookDeliveryService(jdbc, new ObjectMapper(), "", "t483-secret", 3,
+                "http://localhost:8080", false, sender);
     }
 }
