@@ -48,6 +48,11 @@ spring:
       host: ${REDIS_HOST:redis}
       port: ${REDIS_PORT:6379}
       password: ${REDIS_PASSWORD:}
+      # T4.90/S1：Lettuce 默认 command timeout 60s——Redis 半死时 /actuator/health 会阻塞 60s，
+      # 远超 compose/Dockerfile 的 healthcheck timeout 5s，导致容器 flapping。3s 覆盖内网正常往返。
+      timeout: ${REDIS_TIMEOUT:3s}
+      # 连接阶段单独收紧：DNS/握手挂死时快速失败（必须 < timeout）
+      connect-timeout: ${REDIS_CONNECT_TIMEOUT:2s}
 
   ai:
     # T1.5：收敛 Spring AI 内部重试（默认 10 次指数退避，ASR 挂掉时单次尝试要 15+ 分钟才失败，
@@ -176,8 +181,8 @@ app:
   worker:
     # Redis 任务队列键（T1.5：LPUSH 生产 / BLPOP 消费）
     queue-key: ${TASK_QUEUE_KEY:meetingnotes:task-queue}
-    # BLPOP 阻塞超时，仅用于优雅停机响应；不是轮询间隔
-    poll-timeout-sec: ${WORKER_POLL_TIMEOUT_SEC:10}
+    # BLPOP 阻塞超时：必须 < spring.data.redis.timeout（T4.90），否则阻塞取队会被命令超时切断
+    poll-timeout-sec: ${WORKER_POLL_TIMEOUT_SEC:2}
     # T4.74/P-19：停机时等待"正在转写的那个任务"完成的上限；0 = 不等待（只用于测试）
     drain-timeout-sec: ${WORKER_DRAIN_TIMEOUT_SEC:60}
     # T4.77/P-06：转写期间刷新本任务 updated_at 的间隔（秒）——必须小于 P-01 的僵尸判定阈值，
