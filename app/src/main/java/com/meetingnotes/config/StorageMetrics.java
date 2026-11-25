@@ -56,7 +56,6 @@ public class StorageMetrics {
             audioBytes.set(storageService.audioUsage().bytes());
             failureWarned.set(false);
         } catch (Exception e) {
-            System.out.println("PROBE storage-refresh-exc: " + e);
             if (failureWarned.compareAndSet(false, true)) {
                 log.warn("存储指标刷新失败（保留上一次值）：{}", e.getMessage());
             }

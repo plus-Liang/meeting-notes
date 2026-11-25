@@ -306,7 +306,7 @@
     loadStorage();
     orphanBtnEl.addEventListener('click', function () {
       orphanBtnEl.disabled = true;
-      getJson('api/v1/admin/storage/cleanup?dryRun=true').then(function (preview) {
+      sendJson('api/v1/admin/storage/cleanup?dryRun=true', 'POST', {}).then(function (preview) {
         orphanBtnEl.disabled = false;
         if (preview.__httpStatus !== 200 || preview.deleted_objects === 0) {
           storageMsgEl.textContent = '当前没有可清理的孤儿对象。';
