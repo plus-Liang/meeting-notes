@@ -3,6 +3,7 @@ package com.meetingnotes.task;
 import com.meetingnotes.upload.AudioDurationProbe;
 import com.meetingnotes.upload.MediaMagic;
 import com.meetingnotes.common.ApiException;
+import com.meetingnotes.storage.StorageGuard;
 import com.meetingnotes.common.UserContext;
 import com.meetingnotes.common.TaskCreatedResponse;
 import org.slf4j.Logger;
@@ -53,6 +54,7 @@ public class TaskService {
     private final long maxSizeBytes;
     private final long maxDurationSec;
     private final String bucket;
+    private final StorageGuard storageGuard;
 
     public TaskService(JdbcTemplate jdbc,
                        S3Client s3,
@@ -63,7 +65,8 @@ public class TaskService {
                        TransactionTemplate transactionTemplate,
                        @Value("${app.task.max-size-bytes}") long maxSizeBytes,
                        @Value("${app.task.max-duration-sec}") long maxDurationSec,
-                       @Value("${app.storage.bucket}") String bucket) {
+                       @Value("${app.storage.bucket}") String bucket,
+                       StorageGuard storageGuard) {
         this.jdbc = jdbc;
         this.s3 = s3;
         this.probe = probe;
@@ -74,6 +77,7 @@ public class TaskService {
         this.maxSizeBytes = maxSizeBytes;
         this.maxDurationSec = maxDurationSec;
         this.bucket = bucket;
+        this.storageGuard = storageGuard;
     }
 
     public TaskCreatedResponse createUpload(MultipartFile file) throws IOException {
@@ -85,6 +89,7 @@ public class TaskService {
         if (file == null || file.isEmpty()) {
             throw new ApiException(400, "INVALID_MEDIA", "multipart 字段 file 缺失或为空文件");
         }
+        storageGuard.assertWritable(); // T4.92/P-21：落盘前磁盘护栏（低于 headroom → 503 INSUFFICIENT_STORAGE）
 
         // T3.9：模板解析先行（显式优先 → 文件名推荐 → 默认；非法显式值 400，先于一切副作用）
         TemplateResolver.Resolution resolution = TemplateResolver.resolve(template, file.getOriginalFilename());

@@ -71,6 +71,22 @@
       <div id="glossary"><div class="skeleton skeleton-block" style="width:100%"></div></div>
     </div>
 
+    <div class="kv-section" id="storageSection" hidden>
+      <div class="sechead"><h2>存储</h2><span class="n">管理员 · 磁盘与音频占用（T4.92）</span></div>
+      <div id="storageBody"><div class="skeleton skeleton-line" style="width:60%"></div></div>
+      <button type="button" id="orphanCleanupBtn" class="btn" hidden>清理孤儿对象</button>
+      <p class="error-text" id="storageMsg" hidden></p>
+      <div id="storageConfirmOverlay" hidden style="position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:60;display:flex;align-items:center;justify-content:center">
+        <div style="background:#fff;color:#1a1a1a;padding:18px 22px;border-radius:8px;max-width:460px;box-shadow:0 8px 24px rgba(0,0,0,.25)">
+          <p id="storageConfirmText" style="white-space:pre-wrap;margin:0 0 14px"></p>
+          <div style="text-align:right;display:flex;gap:8px;justify-content:flex-end">
+            <button type="button" id="storageConfirmCancel" class="btn">取消</button>
+            <button type="button" id="storageConfirmOk" class="btn">确认清理</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div class="kv-section" id="membersSection" hidden>
       <div class="sechead"><h2>成员</h2><span class="n">管理员 · 建号与列表（T4.70）</span></div>
       <p class="hint" style="margin:10px 0">注册已默认关闭：新成员由管理员在这里建号（用户名 3–32 字符，密码至少 8 位）。密码不回显、不出现在列表。</p>
@@ -250,6 +266,71 @@
           }).join('') + '</tbody></table>';
       });
     }
+    /* ===== T4.92：存储块（管理员）——占用展示 + 孤儿清理（默认 dryRun，站内确认后真删） ===== */
+    var storageSectionEl = document.getElementById('storageSection');
+    storageSectionEl.hidden = false;
+    var storageBodyEl = document.getElementById('storageBody');
+    var storageMsgEl = document.getElementById('storageMsg');
+    var orphanBtnEl = document.getElementById('orphanCleanupBtn');
+    var fmtMb = function (b) { return (b / (1024 * 1024)).toFixed(1); };
+    function loadStorage() {
+      getJson('api/v1/admin/storage').then(function (data) {
+        if (data.__httpStatus !== 200) {
+          storageBodyEl.textContent = '存储信息加载失败（HTTP ' + data.__httpStatus + '）';
+          return;
+        }
+        while (storageBodyEl.firstChild) { storageBodyEl.removeChild(storageBodyEl.firstChild); }
+        var mk = function (label) { var p = document.createElement('p'); var s = document.createElement('strong'); s.textContent = label; p.appendChild(s); return p; };
+        var pDisk = mk('磁盘'); var spanDisk = document.createElement('span');
+        spanDisk.textContent = '剩余 ' + (data.disk.free_bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB / 共 '
+          + (data.disk.total_bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB（已用 ' + data.disk.used_pct + '%）';
+        pDisk.appendChild(spanDisk);
+        var pAudio = mk('音频'); var spanAudio = document.createElement('span');
+        spanAudio.textContent = '对象 ' + data.audio.objects + ' 个 / ' + fmtMb(data.audio.bytes) + ' MB'
+          + (data.audio.truncated ? '（已达统计上限）' : '') + (data.audio.available ? '' : '（暂不可统计）');
+        pAudio.appendChild(spanAudio);
+        var pOrphan = mk('孤儿对象'); var spanOrphan = document.createElement('span');
+        spanOrphan.textContent = data.orphans.objects + ' 个 / ' + fmtMb(data.orphans.bytes) + ' MB';
+        pOrphan.appendChild(spanOrphan);
+        var pTh = mk('护栏阈值'); var spanTh = document.createElement('span');
+        spanTh.textContent = '上传前置 ' + data.thresholds.headroom_mb + ' MB / 启动告警 ' + data.thresholds.min_free_mb + ' MB';
+        pTh.appendChild(spanTh);
+        storageBodyEl.appendChild(pDisk);
+        storageBodyEl.appendChild(pAudio);
+        storageBodyEl.appendChild(pOrphan);
+        storageBodyEl.appendChild(pTh);
+        orphanBtnEl.hidden = data.orphans.objects === 0;
+      });
+      storageMsgEl.hidden = true;
+    }
+    loadStorage();
+    orphanBtnEl.addEventListener('click', function () {
+      orphanBtnEl.disabled = true;
+      getJson('api/v1/admin/storage/cleanup?dryRun=true').then(function (preview) {
+        orphanBtnEl.disabled = false;
+        if (preview.__httpStatus !== 200 || preview.deleted_objects === 0) {
+          storageMsgEl.textContent = '当前没有可清理的孤儿对象。';
+          storageMsgEl.hidden = false;
+          return;
+        }
+        document.getElementById('storageConfirmText').textContent =
+          '将删除 ' + preview.deleted_objects + ' 个孤儿对象（' + fmtMb(preview.deleted_bytes) + ' MB），'
+          + '例如：' + preview.sample.join('、') + '。确认执行？';
+        document.getElementById('storageConfirmOverlay').hidden = false;
+      }).catch(function () { orphanBtnEl.disabled = false; });
+    });
+    document.getElementById('storageConfirmCancel').addEventListener('click', function () {
+      document.getElementById('storageConfirmOverlay').hidden = true;
+    });
+    document.getElementById('storageConfirmOk').addEventListener('click', function () {
+      document.getElementById('storageConfirmOverlay').hidden = true;
+      sendJson('api/v1/admin/storage/cleanup?dryRun=false', 'POST', {}).then(function (r) {
+        storageMsgEl.textContent = '已删除 ' + r.deleted_objects + ' 个对象（' + fmtMb(r.deleted_bytes) + ' MB）';
+        storageMsgEl.hidden = false;
+        loadStorage();
+      });
+    });
+
     loadMembers();
     document.getElementById('memberCreateBtn').addEventListener('click', function () {
       var btn = this;

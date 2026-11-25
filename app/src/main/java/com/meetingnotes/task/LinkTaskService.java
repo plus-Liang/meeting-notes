@@ -1,6 +1,7 @@
 package com.meetingnotes.task;
 
 import com.meetingnotes.common.ApiException;
+import com.meetingnotes.storage.StorageGuard;
 import com.meetingnotes.common.UserContext;
 import com.meetingnotes.common.TaskCreatedResponse;
 import com.meetingnotes.fetch.MediaFetcher;
@@ -52,6 +53,7 @@ public class LinkTaskService {
     private final QueuePublisher queuePublisher;
     private final TaskRequeueSupport taskRequeueSupport;
     private final TransactionTemplate transactionTemplate;
+    private final StorageGuard storageGuard;
     private final MediaFetcher httpFetcher;
     private final MediaFetcher byofFetcher;
     private final long maxDurationSec;
@@ -67,7 +69,8 @@ public class LinkTaskService {
                            @Qualifier("httpMediaFetcher") MediaFetcher httpFetcher,
                            @Qualifier("processMediaFetcher") MediaFetcher byofFetcher,
                            @Value("${app.task.max-duration-sec}") long maxDurationSec,
-                           @Value("${app.storage.bucket}") String bucket) {
+                           @Value("${app.storage.bucket}") String bucket,
+            StorageGuard storageGuard) {
         this.jdbc = jdbc;
         this.s3 = s3;
         this.probe = probe;
@@ -79,6 +82,7 @@ public class LinkTaskService {
         this.byofFetcher = byofFetcher;
         this.maxDurationSec = maxDurationSec;
         this.bucket = bucket;
+        this.storageGuard = storageGuard;
     }
 
     /**
@@ -90,6 +94,7 @@ public class LinkTaskService {
         if (url == null || url.isBlank()) {
             throw new ApiException(400, "INVALID_PARAM", "url 不能为空");
         }
+        storageGuard.assertWritable(); // T4.92/P-21：落盘前磁盘护栏（LINK 会拉取文件到桶，PASTE 不经过本类）
         MediaFetcher fetcher = useByof ? byofFetcher : httpFetcher;
         if (useByof && fetcher instanceof com.meetingnotes.fetch.ProcessMediaFetcher pmf
                 && !pmf.isConfigured()) {

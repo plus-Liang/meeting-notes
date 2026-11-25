@@ -71,7 +71,8 @@ class LinkTaskServiceTest {
 
     private LinkTaskService newService() {
         return new LinkTaskService(jdbc, s3, probe, quotaService, queuePublisher, taskRequeueSupport,
-                transactionTemplate, fetcher, byofFetcher, 3600L, "meetingnotes");
+                transactionTemplate, fetcher, byofFetcher, 3600L, "meetingnotes",
+                new com.meetingnotes.storage.StorageGuard(2048, 256)); // T4.92：默认探测目录恒放行
     }
 
     @SuppressWarnings("unchecked")

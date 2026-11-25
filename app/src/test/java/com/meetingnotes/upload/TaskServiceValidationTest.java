@@ -60,7 +60,8 @@ class TaskServiceValidationTest {
 
     private TaskService newService(long maxSizeBytes, long maxDurationSec) {
         return new TaskService(jdbc, s3, probe, quotaService, queuePublisher, taskRequeueSupport, transactionTemplate,
-                maxSizeBytes, maxDurationSec, "meetingnotes");
+                maxSizeBytes, maxDurationSec, "meetingnotes",
+                new com.meetingnotes.storage.StorageGuard(2048, 256)); // T4.92：默认探测目录恒放行
     }
 
     /** 让 transactionTemplate.execute(...) 直接执行回调（事务管理器行为不在本单测范围）。 */

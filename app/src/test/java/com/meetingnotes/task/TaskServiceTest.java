@@ -68,7 +68,8 @@ class TaskServiceTest {
 
     private TaskService newService() {
         return new TaskService(jdbc, s3, probe, quotaService, queuePublisher, taskRequeueSupport, transactionTemplate,
-                1_000_000L, 7200L, "test-bucket");
+                1_000_000L, 7200L, "test-bucket",
+                new com.meetingnotes.storage.StorageGuard(2048, 256)); // T4.92：默认探测目录（tmpdir）恒放行
     }
 
     /** 最小合法 WAV 头（RIFF....WAVEfmt，16 字节，MediaMagic 只认文件头）。 */

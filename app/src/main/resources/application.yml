@@ -239,6 +239,9 @@ app:
   log-json: ${LOG_JSON:true}
 
   storage:
+    # T4.92/P-21：上传前护栏——可用空间低于 upload-headroom-mb 时上传/链接导入返回 503 INSUFFICIENT_STORAGE（可重试）
+    min-free-mb: ${STORAGE_MIN_FREE_MB:2048}
+    upload-headroom-mb: ${STORAGE_UPLOAD_HEADROOM_MB:256}
     endpoint: ${S3_ENDPOINT:http://minio:9000}
     access-key: ${S3_ACCESS_KEY:minioadmin}
     secret-key: ${S3_SECRET_KEY:minioadmin}
