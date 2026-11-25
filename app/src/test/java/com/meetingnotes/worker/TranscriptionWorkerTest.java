@@ -77,7 +77,8 @@ class TranscriptionWorkerTest {
     private TranscriptionWorker newWorker() {
         return new TranscriptionWorker(redis, jdbc, s3, asrClient,
                 structuringService, punctuator, webhookService, pasteTextReader, monoWavExtractor,
-                queuePublisher, deadTaskRecorder, taskHeartbeat, "meetingnotes:task-queue", 10, "meetingnotes", 3);
+                queuePublisher, deadTaskRecorder, taskHeartbeat, "meetingnotes:task-queue", 10, "meetingnotes", 3,
+                new RedisUnavailableReporter(60, 2, java.time.Clock.systemUTC())); // T4.91：构造器连带（K-192 预授权）
     }
 
     @Test

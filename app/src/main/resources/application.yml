@@ -178,11 +178,19 @@ app:
       stale-minutes: ${APP_QUEUE_PENDING_SWEEP_STALE_MINUTES:2}
       interval-ms: ${APP_QUEUE_PENDING_SWEEP_INTERVAL_MS:60000}
 
+  redis:
+    # T4.91/S1：Lettuce 重连退避（默认 100ms→30s，T4.90 实测长停后恢复 14–24s）
+    # 改成 500ms→5s 后长停恢复压到个位数秒；min<=0 或 max<min 时 WARN 回退默认
+    reconnect-min-ms: ${REDIS_RECONNECT_MIN_MS:500}
+    reconnect-max-ms: ${REDIS_RECONNECT_MAX_MS:5000}
+
   worker:
     # Redis 任务队列键（T1.5：LPUSH 生产 / BLPOP 消费）
     queue-key: ${TASK_QUEUE_KEY:meetingnotes:task-queue}
     # BLPOP 阻塞超时：必须 < spring.data.redis.timeout（T4.90），否则阻塞取队会被命令超时切断
     poll-timeout-sec: ${WORKER_POLL_TIMEOUT_SEC:2}
+    # T4.91/S2：Redis 故障日志去抖窗口（秒）——窗口内最多 1 条 WARN + 恢复 1 条 INFO；<=0 WARN 回退 60
+    redis-log-window-sec: ${WORKER_REDIS_LOG_WINDOW_SEC:60}
     # T4.74/P-19：停机时等待"正在转写的那个任务"完成的上限；0 = 不等待（只用于测试）
     drain-timeout-sec: ${WORKER_DRAIN_TIMEOUT_SEC:60}
     # T4.77/P-06：转写期间刷新本任务 updated_at 的间隔（秒）——必须小于 P-01 的僵尸判定阈值，

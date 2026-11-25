@@ -46,7 +46,7 @@ public class TranscriptionWorker implements SmartLifecycle {
     private final TaskHeartbeat taskHeartbeat;
     private final String queueKey;
     private final Duration pollTimeout;
-    private final String bucket; private final int maxRetries;
+    private final String bucket; private final int maxRetries; private final RedisUnavailableReporter reporter;
 
     private volatile boolean running;
     private Thread workerThread;
@@ -63,12 +63,13 @@ public class TranscriptionWorker implements SmartLifecycle {
             com.meetingnotes.task.DeadTaskRecorder deadTaskRecorder,
             TaskHeartbeat taskHeartbeat, @Value("${app.worker.queue-key}") String queueKey,
             @Value("${app.worker.poll-timeout-sec}") long pollTimeoutSec,
-            @Value("${app.storage.bucket}") String bucket, @Value("${app.task.max-retries}") int maxRetries) {
+            @Value("${app.storage.bucket}") String bucket, @Value("${app.task.max-retries}") int maxRetries,
+            RedisUnavailableReporter reporter) {
         this.redis = redis; this.jdbc = jdbc; this.s3 = s3; this.asrClient = asrClient;
         this.structuringService = structuringService; this.punctuator = punctuator; this.webhookService = webhookService;
         this.pasteTextReader = pasteTextReader; this.monoWavExtractor = monoWavExtractor; this.queuePublisher = queuePublisher;
         this.deadTaskRecorder = deadTaskRecorder;
-        this.taskHeartbeat = taskHeartbeat; this.queueKey = queueKey; this.pollTimeout = Duration.ofSeconds(pollTimeoutSec); this.bucket = bucket; this.maxRetries = maxRetries;
+        this.taskHeartbeat = taskHeartbeat; this.queueKey = queueKey; this.pollTimeout = Duration.ofSeconds(pollTimeoutSec); this.bucket = bucket; this.maxRetries = maxRetries; this.reporter = reporter;
     }
 
     @Override
@@ -106,12 +107,12 @@ public class TranscriptionWorker implements SmartLifecycle {
                 taskId = redis.opsForList().leftPop(queueKey, pollTimeout);
             } catch (RuntimeException e) {
                 if (!running) { break; }
-                log.warn("Redis 不可用，{}s 后重试：{}", pollTimeout.getSeconds(), e.getMessage());
+                reporter.report(e); // T4.91/S2：去抖——窗口内最多 1 条 WARN（RedisUnavailableReporter）
                 sleepQuietly();
                 continue;
             }
             // T4.79-fix F1 双保险：单条消息的任何异常不终结消费循环（handleOne 内部已全捕获，此处兜 Redis 侧漏网）；F2：回执写失败（已退回队尾）本轮不处理
-            try { if (taskId == null) { continue; } if (markProcessing(taskId)) { handleOne(taskId); } } catch (RuntimeException e) { log.error("消费循环单次异常，继续", e); }
+            try { reporter.clear(); if (taskId == null) { continue; } if (markProcessing(taskId)) { handleOne(taskId); } } catch (RuntimeException e) { log.error("消费循环单次异常，继续", e); }
         }
         log.info("worker 已停止");
     }

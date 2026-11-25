@@ -76,10 +76,11 @@ class TranscriptionWorkerDrainTest {
     }
 
     private TranscriptionWorker newWorker() {
-        // T4.77：15 参构造器（TaskHeartbeat 为 mock，本类不触发 claim）；drain 用例用 ReflectionTestUtils.setField
+        // T4.77：构造器（TaskHeartbeat 为 mock，本类不触发 claim）；drain 用例用 ReflectionTestUtils.setField；T4.91：+reporter 共 17 参
         return new TranscriptionWorker(redis, jdbc, s3, asrClient,
                 structuringService, punctuator, webhookService, pasteTextReader, monoWavExtractor,
-                queuePublisher, deadTaskRecorder, taskHeartbeat, "meetingnotes:task-queue", 10, "meetingnotes", 3);
+                queuePublisher, deadTaskRecorder, taskHeartbeat, "meetingnotes:task-queue", 10, "meetingnotes", 3,
+                new RedisUnavailableReporter(60, 2, java.time.Clock.systemUTC()));
     }
 
     private long stopAndMeasure(TranscriptionWorker worker) {
