@@ -27,8 +27,9 @@ import java.util.List;
  *   <li>都不匹配 → 401 UNAUTHORIZED（消息指引两种凭据）。</li>
  * </ul>
  *
- * <p>豁免面（filter 只挂 /api/v1 前缀，其余一律放行）：/actuator/**、静态页与资源、
- * /v3/api-docs/**、/swagger-ui/**。T4.28（K-46）：/api/v1/share/ 前缀（匿名只读分享）；
+ * <p>豁免面（filter 守 /api/v1 与 /actuator 两前缀，其余一律放行）：静态页与资源、
+ * /v3/api-docs/**、/swagger-ui/**。T4.89/P-28：/actuator/** 不再豁免（health 细节/指标需 Bearer）。
+ * T4.28（K-46）：/api/v1/share/ 前缀（匿名只读分享）；
  * T4.35b：GET ^/api/v1/tasks/\d+/audio$（自带 HMAC 短时签名验签）；
  * T4.69 C1：GET /api/v1/version（构建标识，version/build 两个非敏感字段）；
  * **T4.37a 只加两条精确路径**：POST /api/v1/auth/login、POST /api/v1/auth/register；
@@ -60,7 +61,7 @@ public class ApiTokenFilter extends OncePerRequestFilter {
         this.mapper = mapper;
     }
 
-    /** 只守 /api/v1/**：actuator、静态页、OpenAPI、Swagger 全部豁免（K：豁免面逐条实测）。
+    /** 守 /api/v1/** 与 /actuator/**（T4.89/P-28）：静态页、OpenAPI、Swagger 豁免（K：豁免面逐条实测）。
      *  T4.28（K-46）：匿名只读分享——额外放行 /api/v1/share/ 这**一条**前缀（GET share/{token}）；
      *  其它 /api/v1/**（列表/详情/写操作）对匿名与分享 token 仍一律 401。
      *  T4.35b：匿名音频流——只放行 GET 且**精确**匹配 {@code ^/api/v1/tasks/\d+/audio$} 这一条。
@@ -85,7 +86,8 @@ public class ApiTokenFilter extends OncePerRequestFilter {
         if ("GET".equals(request.getMethod()) && "/api/v1/auth/status".equals(uri)) {
             return true; // T4.70 C2：注册状态（只含 registrationEnabled/adminClaimed 两个布尔，无用户信息）
         }
-        return !uri.startsWith("/api/v1");
+        // T4.89/P-28：/actuator/** 默认拒绝（health 细节/指标不再匿名可读）；凭据判定复用 authenticate()
+        return !uri.startsWith("/api/v1") && !(uri.equals("/actuator") || uri.startsWith("/actuator/"));
     }
 
     @Override

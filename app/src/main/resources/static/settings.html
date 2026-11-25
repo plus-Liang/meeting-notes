@@ -157,7 +157,7 @@
 
   /* escapeHtml 已收敛到共享 escape.js（T4.59，五页一份） */
 
-  /* T4.15⑦：系统状态——GET /actuator/health（认证豁免端点）；app=整体 status，
+  /* T4.15⑦：系统状态——GET /actuator/health（T4.89 起需 token，getJson/apiFetch 已自动带 Bearer）；app=整体 status，
      asr/postgres(minio 的 db 组件)/minio/redis 取 components；任一失败显示「未知」，不弹错 */
   getJson('actuator/health').then(function (data) {
     var el = document.getElementById('health');

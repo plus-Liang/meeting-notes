@@ -289,8 +289,8 @@ class E2ETest {
         JsonNode err = M.readTree(resp.body());
         assertEquals("UNAUTHORIZED", err.get("code").asText(), "统一错误码：" + resp.body());
         assertFalse(err.get("message").asText().isBlank(), "message 非空");
-        // 401 不得打挂豁免面：actuator 与契约发现端点匿名可达
-        assertEquals(200, sendWithoutToken("GET", "/actuator/health", null, null).statusCode());
+        // T4.89/P-28：actuator 不再匿名豁免 → 401；契约发现端点仍匿名可达
+        assertEquals(401, sendWithoutToken("GET", "/actuator/health", null, null).statusCode());
         assertEquals(200, sendWithoutToken("GET", "/v3/api-docs", null, null).statusCode());
     }
 

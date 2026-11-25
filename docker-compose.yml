@@ -129,8 +129,8 @@ services:
     # HTTP/Bean 优雅关闭（spring.lifecycle 120s）之和的上限，否则容器先被 SIGKILL，排空形同虚设
     stop_grace_period: 180s
     healthcheck:
-      # 容器内固定 8080；D-035/D-036：无 key 也必须 UP
-      test: ["CMD-SHELL", "curl -fsS http://localhost:8080/actuator/health | grep -q '\"status\":\"UP\"'"]
+      # 容器内固定 8080；T4.89/P-28：actuator 需 Bearer，$$API_TOKEN 留给容器内 shell 展开（env_file 注入）
+      test: ["CMD-SHELL", "curl -fsS -H \"Authorization: Bearer $$API_TOKEN\" http://localhost:8080/actuator/health | grep -q '\"status\":\"UP\"'"]
       interval: 10s
       timeout: 5s
       retries: 30

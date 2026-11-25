@@ -37,6 +37,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
         properties = {
                 // T4.73：弱口令守卫逃生口——本上下文不起真实 token，不跳过守卫会启动失败（测试红）
                 "app.security.allow-weak-api-token=true",
+                // T4.89：actuator 需 Bearer；测试凭据经 property 注入（禁硬编码进 curl/源码逻辑）
+                "app.security.api-token=t489-nokey-test-token-0123456789abcdef",
                 "LLM_ENABLED=",
                 "LLM_BASE_URL=",
                 "LLM_API_KEY=",
@@ -68,6 +70,9 @@ class NoKeyStartupTest {
     @Value("${app.llm.enabled:}")
     private String llmEnabled;
 
+    @Value("${app.security.api-token}")
+    private String apiToken;
+
     /** T4.59：诊断输出走 SLF4J（M7 同口径禁 System.out；内容与旧打印一致，无断言依赖）。 */
     private static final Logger log = LoggerFactory.getLogger(NoKeyStartupTest.class);
 
@@ -77,14 +82,27 @@ class NoKeyStartupTest {
         assertTrue(context.getBeansOfType(ChatModel.class).isEmpty(),
                 "无 key 时不应创建任何 ChatModel Bean（chat 自动配置必须跳过）");
 
-        ResponseEntity<String> response = restTemplate.getForEntity("/actuator/health", String.class);
-        assertEquals(HttpStatus.OK, response.getStatusCode(), "/actuator/health 应返回 200");
-        assertNotNull(response.getBody());
-        assertTrue(response.getBody().contains("\"status\":\"UP\""),
-                "/actuator/health 应为 UP，实际: " + response.getBody());
+        // T4.89/P-28：匿名 health → 401，且 body 不含依赖细节
+        ResponseEntity<String> anon = restTemplate.getForEntity("/actuator/health", String.class);
+        assertEquals(HttpStatus.UNAUTHORIZED, anon.getStatusCode(), "匿名 /actuator/health 应 401");
+        assertNotNull(anon.getBody());
+        assertTrue(!anon.getBody().contains("components"), "401 body 不得含依赖细节: " + anon.getBody());
 
         log.info("[NoKeyStartupTest] app.llm.enabled = {}", llmEnabled);
         log.info("[NoKeyStartupTest] ChatModel beans = {}", context.getBeansOfType(ChatModel.class).size());
-        log.info("[NoKeyStartupTest] /actuator/health = {}", response.getBody());
+        log.info("[NoKeyStartupTest] anon /actuator/health = {}", anon.getStatusCode());
+    }
+
+    /** T4.89/P-28：带 Bearer token 的 health 仍 200 UP（show-details 保持 always，鉴权在 filter 层）。 */
+    @Test
+    void healthWithBearerTokenIsUp() {
+        org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
+        headers.set("Authorization", "Bearer " + apiToken);
+        ResponseEntity<String> response = restTemplate.exchange("/actuator/health",
+                org.springframework.http.HttpMethod.GET, new org.springframework.http.HttpEntity<>(headers), String.class);
+        assertEquals(HttpStatus.OK, response.getStatusCode(), "带 token /actuator/health 应 200");
+        assertNotNull(response.getBody());
+        assertTrue(response.getBody().contains("\"status\":\"UP\""),
+                "带 token 应为 UP，实际: " + response.getBody());
     }
 }

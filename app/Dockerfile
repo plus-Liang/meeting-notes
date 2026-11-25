@@ -36,6 +36,7 @@ RUN if [ -n "$APT_MIRROR" ]; then \
  && rm -rf /var/lib/apt/lists/*
 COPY --from=build /build/target/*.jar app.jar
 EXPOSE 8080
+# T4.89/P-28：actuator 需 Bearer；healthcheck 用容器内 $API_TOKEN（env_file 注入，禁硬编码）
 HEALTHCHECK --interval=15s --timeout=5s --start-period=60s --retries=10 \
-  CMD curl -fsS http://localhost:8080/actuator/health || exit 1
+  CMD curl -fsS -H "Authorization: Bearer $API_TOKEN" http://localhost:8080/actuator/health || exit 1
 ENTRYPOINT ["java", "-XX:MaxRAMPercentage=75", "-jar", "app.jar"]

@@ -273,7 +273,7 @@ powershell -File tools\deploy-main.ps1
 
 ## 监控（Prometheus）
 
-应用自带 Prometheus 指标端点：`GET /actuator/prometheus`（业务指标 `meetingnotes_task_count{status=...}` / `meetingnotes_queue_depth` + JVM/HTTP/连接池标准指标，抓取驱动、cacheSeconds 节流）。抓取配置、指标清单、可直接粘贴的告警规则与手工对账口径见 `docs/项目/录音纪要平台/运维-监控与告警.md`。**指标端点无鉴权，别裸奔公网**（详见该文档第 5 节的安全边界）。
+应用自带 Prometheus 指标端点：`GET /actuator/prometheus`（业务指标 `meetingnotes_task_count{status=...}` / `meetingnotes_queue_depth` + JVM/HTTP/连接池标准指标，抓取驱动、cacheSeconds 节流）。抓取配置、指标清单、可直接粘贴的告警规则与手工对账口径见 `docs/项目/录音纪要平台/运维-监控与告警.md`。**T4.89 起指标端点需 `Authorization: Bearer $API_TOKEN`**（匿名 401）；抓取示例：`curl -H "Authorization: Bearer $API_TOKEN" http://localhost:8080/actuator/prometheus`。
 
 ## 常见问题 / 故障排查
 
