@@ -70,10 +70,11 @@ function apiFetch(url, opts) {
       return resp;
     }
     /* 401：登录态失效（无令牌/令牌被轮换/已注销）→ 清本地并回登录页。
-     * login.html 内不跳（防循环）；share.html 匿名只读不跳；其余页带 next 原路返回。 */
+     * login.html 内不跳（防循环）；share.html 匿名只读不跳；setup.html 向导页无登录态不跳（T4.93）；
+     * 其余页带 next 原路返回。 */
     mnClearLoginState();
     var page = location.pathname.split('/').pop() || 'index.html';
-    if (page !== 'login.html' && page !== 'share.html') {
+    if (page !== 'login.html' && page !== 'share.html' && page !== 'setup.html') {
       mnGoLogin(mnCurrentNext());
     }
     return resp;

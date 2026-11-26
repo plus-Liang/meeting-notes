@@ -33,6 +33,26 @@ if [ -z "$CUR_TOKEN" ]; then
   echo "[first-run] 已生成随机 API_TOKEN（64 位，来源 ${GEN_WAY}），接入外部系统时复用该值。"
 fi
 
+# 1.2) SETUP_CODE（T4.93）：为空则生成 32 位 hex 写入；已有非空值不覆盖。
+#      该码是首启向导 /setup 创建管理员的身份闸（未初始化实例上没有它，陌生人抢不走管理员），
+#      向导创建成功后即失效。
+CUR_CODE=$(grep -E '^[[:space:]]*SETUP_CODE=' .env | head -1 | cut -d= -f2 | tr -d '"' | tr -d '\r')
+if [ -z "$CUR_CODE" ]; then
+  GEN_CODE=$(od -An -tx1 -N16 /dev/urandom | tr -d ' \n')
+  if grep -qE '^[[:space:]]*SETUP_CODE=' .env; then
+    # 只精确替换 SETUP_CODE 这一行（hex 只含 [0-9a-f]，无 sed 特殊字符）
+    sed -i.bak "s|^[[:space:]]*SETUP_CODE=.*|SETUP_CODE=${GEN_CODE}|" .env && rm -f .env.bak
+  else
+    printf 'SETUP_CODE=%s\n' "$GEN_CODE" >> .env
+  fi
+  BASE_URL=$(grep -E '^[[:space:]]*APP_BASE_URL=' .env | head -1 | cut -d= -f2 | tr -d '"' | tr -d '\r')
+  if [ -z "$BASE_URL" ]; then
+    P=$(grep -E '^[[:space:]]*APP_PORT=' .env | head -1 | cut -d= -f2 | tr -d '"' | tr -d '\r')
+    BASE_URL="http://localhost:${P:-8080}"
+  fi
+  echo "[first-run] 安装码已生成：${GEN_CODE}（浏览器打开 ${BASE_URL}/setup 时需填入，创建管理员后失效）"
+fi
+
 # 2) 模型（缺则用 asr 镜像自带 python 下载，宿主机无需 Python；国内可设 HF_ENDPOINT=https://hf-mirror.com）
 MODEL_NAME=$(grep -E '^[[:space:]]*ASR_MODEL_NAME=' .env | head -1 | cut -d= -f2 | tr -d '"' | tr -d '\r')
 MODEL_NAME=${MODEL_NAME:-small}
@@ -88,5 +108,5 @@ APP_PORT=$(grep -E '^[[:space:]]*APP_PORT=' .env | head -1 | cut -d= -f2 | tr -d
 APP_PORT=${APP_PORT:-8080}
 echo ''
 echo "[first-run] 完成。Web 地址：  http://localhost:${APP_PORT}"
-echo '[first-run] 首次进入请创建管理员账号（第一个注册的账号即管理员）。'
+echo "[first-run] 首次进入请打开安装向导： http://localhost:${APP_PORT}/setup （安装码 SETUP_CODE 见上方输出，创建管理员后失效）。"
 exit 0

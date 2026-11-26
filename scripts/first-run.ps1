@@ -41,6 +41,34 @@ if ($tokenIdx -ge 0) {
     }
 }
 
+# 1.2) SETUP_CODE（T4.93）：.env 里为空则生成 32 位 hex（16 字节）写入；已有非空值不覆盖。
+#      该码是首启向导 /setup 创建管理员的身份闸（未初始化实例上没有它，陌生人抢不走管理员），
+#      向导创建成功后即失效。编码/RNG 纪律与 1.1 相同（UTF8Encoding($false) 无 BOM、禁 Get-Random）。
+$codeLines = [System.IO.File]::ReadAllLines($envFile)
+$codeIdx = -1
+for ($i = 0; $i -lt $codeLines.Count; $i++) {
+    if ($codeLines[$i] -match '^\s*SETUP_CODE\s*=') { $codeIdx = $i; break }
+}
+if ($codeIdx -ge 0) {
+    $curCode = ($codeLines[$codeIdx] -split '=', 2)[1].Trim()
+    if ([string]::IsNullOrWhiteSpace($curCode)) {
+        $codeRng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+        $codeBytes = New-Object byte[] 16
+        $codeRng.GetBytes($codeBytes)
+        $codeRng.Dispose()
+        $setupCode = -join ($codeBytes | ForEach-Object { $_.ToString('x2') })
+        $codeLines[$codeIdx] = 'SETUP_CODE=' + $setupCode
+        [System.IO.File]::WriteAllLines($envFile, $codeLines, (New-Object System.Text.UTF8Encoding($false)))
+        $baseLine = $codeLines | Where-Object { $_ -match '^\s*APP_BASE_URL\s*=' } | Select-Object -First 1
+        $baseUrl = if ($baseLine) { ($baseLine -split '=', 2)[1].Trim() } else { '' }
+        if ([string]::IsNullOrWhiteSpace($baseUrl)) {
+            $portLine2 = $codeLines | Where-Object { $_ -match '^\s*APP_PORT\s*=' } | Select-Object -First 1
+            $baseUrl = 'http://localhost:' + $(if ($portLine2) { ($portLine2 -split '=', 2)[1].Trim() } else { '8080' })
+        }
+        Write-Host ("[first-run] 安装码已生成：{0}（浏览器打开 {1}/setup 时需填入，创建管理员后失效）" -f $setupCode, $baseUrl)
+    }
+}
+
 # 2) 模型
 $modelLine = (Get-Content $envFile | Where-Object { $_ -match '^\s*ASR_MODEL_NAME\s*=' } | Select-Object -First 1)
 $modelName = if ($modelLine) { ($modelLine -split '=', 2)[1].Trim() } else { 'small' }
@@ -119,5 +147,5 @@ $portLine = (Get-Content $envFile | Where-Object { $_ -match '^\s*APP_PORT\s*=' 
 $appPort = if ($portLine) { ($portLine -split '=', 2)[1].Trim() } else { '8080' }
 Write-Host ''
 Write-Host ("[first-run] 完成。Web 地址：  http://localhost:$appPort")
-Write-Host '[first-run] 首次进入请创建管理员账号（第一个注册的账号即管理员）。'
+Write-Host '[first-run] 首次进入请打开安装向导： http://localhost:'$appPort'/setup （安装码 SETUP_CODE 见上方输出，创建管理员后失效）。'
 exit 0

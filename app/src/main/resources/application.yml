@@ -252,6 +252,11 @@ app:
   security:
     api-token: ${API_TOKEN:change-me-api-token}
 
+  # T4.93：首启安装码（.env 的 SETUP_CODE）。空=禁止认领，只能由向导配合 .env 使用；
+  # 向导创建管理员成功后 /setup 整面 404，该码不再被消费。
+  setup:
+    code: ${SETUP_CODE:}
+
   auth:
     # T4.70 O-1：开放注册开关，**默认 false**（陌生人不能自助注册、消耗 ASR 配额）——
     # 首次部署例外：1 号管理员未认领时首次注册仍成功且 role=ADMIN（认领是原子闸，不受本开关限制）。

@@ -91,7 +91,8 @@ docker compose -f docker-compose.yml -f docker-compose.ghcr.yml up -d
 ### 打开
 
 - **Web 界面**：<http://localhost:8080>
-- 首次进入会引导你**创建管理员账号**（第一个注册的账号即管理员）；也可直接用 `.env` 里的 `API_TOKEN` 走 API
+- 浏览器打开 `/setup` 走安装向导（安装码在终端输出）：五项自检 → 创建管理员 → 完成；向导只在实例未初始化时可用
+- 首次进入会引导你**创建管理员账号**；也可直接用 `.env` 里的 `API_TOKEN` 走 API
 - API 文档：<http://localhost:8080/swagger-ui.html>
 
 **不填任何 API key 也能完整跑通**：默认走本地 ASR + 抽取式摘要（模型需联网下载一次，之后可离线运行）。想要好一点的摘要再配云 LLM（见"三档 AI"）。

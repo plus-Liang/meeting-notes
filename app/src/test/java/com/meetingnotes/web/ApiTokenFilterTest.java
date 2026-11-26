@@ -66,6 +66,21 @@ class ApiTokenFilterTest {
         public String logout() {
             return "logout";
         }
+
+        @GetMapping("/api/v1/setup/status")
+        public String setupStatus() {
+            return "setup-status";
+        }
+
+        @GetMapping("/api/v1/setup/model")
+        public String setupModel() {
+            return "setup-model";
+        }
+
+        @PostMapping("/api/v1/setup/admin")
+        public String setupAdmin() {
+            return "setup-admin";
+        }
     }
 
     @BeforeEach
@@ -213,5 +228,23 @@ class ApiTokenFilterTest {
                 .andExpect(status().isUnauthorized());
         mvc.perform(post("/api/v1/tasks/5/audio"))
                 .andExpect(status().isUnauthorized()); // 只豁免 GET
+    }
+
+    /* ---- T4.93 C5：setup 三条精确豁免 ---- */
+
+    @Test
+    void setupWizardEndpointsAreExempt() throws Exception {
+        mvc.perform(get("/api/v1/setup/status")).andExpect(status().isOk());
+        mvc.perform(get("/api/v1/setup/model")).andExpect(status().isOk());
+        mvc.perform(post("/api/v1/setup/admin")).andExpect(status().isOk());
+    }
+
+    @Test
+    void setupNearbyPathsAndMethodsAreNotExempt() throws Exception {
+        // 前缀不豁免（精确路径口径）；GET 打 POST 端点、POST 打 GET 端点都不放行（K-214 口径）
+        mvc.perform(get("/api/v1/setup/admin")).andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/v1/setup/statusx")).andExpect(status().isUnauthorized());
+        mvc.perform(post("/api/v1/setup/status")).andExpect(status().isUnauthorized());
+        mvc.perform(post("/api/v1/setup/model")).andExpect(status().isUnauthorized());
     }
 }

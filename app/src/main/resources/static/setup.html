@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="首启安装向导：五项自检、创建管理员、完成初始化。">
+<meta name="robots" content="noindex">
+<title>安装向导 · 录音纪要平台</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Ctext y=%2713%27 font-size=%2713%27%3E%E2%96%B6%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="components.css">
+<link rel="stylesheet" href="style.css">
+<style>
+/* T4.93 向导页局部样式（只用 tokens 变量，不引外部资源） */
+.setup-steps { font: 400 var(--fs-label)/1 var(--mono); letter-spacing: .12em; color: var(--ink-3); }
+.setup-checks { margin: 22px 0 0; padding: 0; list-style: none; }
+.setup-checks li { display: flex; gap: 14px; align-items: baseline; padding: 12px 0; border-top: 1px solid var(--rule); }
+.setup-checks li:last-child { border-bottom: 1px solid var(--rule); }
+.setup-checks .ck-label { flex: none; width: 92px; font-weight: 500; color: var(--ink); }
+.setup-checks .ck-detail { flex: 1; font: 400 var(--fs-sm)/1.7 var(--sans); color: var(--ink-2); overflow-wrap: anywhere; }
+.setup-actions { display: flex; gap: 12px; margin-top: 26px; flex-wrap: wrap; }
+.setup-done-list { margin: 22px 0 0; padding: 0; list-style: none; }
+.setup-done-list li { padding: 12px 0; border-top: 1px solid var(--rule); }
+.setup-done-list a { color: var(--ink); font-weight: 500; }
+details.mn-setup-code { margin-top: 4px; }
+details.mn-setup-code summary { cursor: pointer; font: 400 var(--fs-sm)/1.6 var(--sans); color: var(--ink-3); }
+details.mn-setup-code[open] summary { margin-bottom: 10px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="docket">
+    <b>REC-NOTES</b><span>自托管 · 私有部署</span>
+    <span class="r"><span>V0.1.0</span></span>
+  </div>
+
+  <header class="top">
+    <a class="brand" href="index.html">录音纪要平台<em>transcript &amp; minutes</em></a>
+  </header>
+
+  <main>
+    <div class="mn-login-card">
+
+      <!-- ① 欢迎 + 环境自检 -->
+      <section id="scrCheck" class="mast" style="grid-template-columns:1fr;padding-top:48px">
+        <p class="setup-steps" id="stepsCheck">第 1 步 / 共 3 步</p>
+        <h1>欢迎使用</h1>
+        <p class="mn-sub hint" style="margin-top:12px">先检查这台机器上的五项依赖；全部通过（或先修再检）后创建管理员。</p>
+        <ul class="setup-checks" id="checkList"></ul>
+        <p class="error-text" id="checkError" hidden></p>
+        <div class="setup-actions">
+          <button type="button" class="btn ghost" id="recheckBtn">重新检测</button>
+          <button type="button" class="btn" id="toAdminBtn" disabled>下一步：创建管理员 →</button>
+        </div>
+      </section>
+
+      <!-- ② 创建管理员 -->
+      <section id="scrAdmin" class="mast" style="grid-template-columns:1fr;padding-top:48px" hidden>
+        <p class="setup-steps">第 2 步 / 共 3 步</p>
+        <h1>创建管理员</h1>
+        <p class="mn-sub hint" style="margin-top:12px">这是本实例唯一的管理员认领入口；创建后安装向导将永久关闭。</p>
+        <form id="adminForm" novalidate style="margin-top:26px">
+          <div class="field">
+            <label class="mn-login-label" for="suUsername">用户名（3–32 个字符）</label>
+            <input type="text" id="suUsername" maxlength="32" autocomplete="username" spellcheck="false" aria-label="用户名">
+          </div>
+          <div class="field">
+            <label class="mn-login-label" for="suPassword">密码（至少 8 个字符）</label>
+            <input type="password" id="suPassword" autocomplete="new-password" aria-label="密码">
+          </div>
+          <div class="field">
+            <label class="mn-login-label" for="suPassword2">确认密码</label>
+            <input type="password" id="suPassword2" autocomplete="new-password" aria-label="确认密码">
+          </div>
+          <details class="mn-setup-code">
+            <summary>安装码在终端里</summary>
+            <div class="field">
+              <label class="mn-login-label" for="suCode">安装码（first-run 打印的 SETUP_CODE）</label>
+              <input type="text" id="suCode" autocomplete="off" spellcheck="false" aria-label="安装码">
+            </div>
+          </details>
+          <p class="error-text" id="adminError" hidden></p>
+          <button type="submit" id="adminSubmitBtn" class="btn mn-login-submit">创建管理员并进入系统</button>
+          <p class="hint mn-login-note">校验以服务端为准；安装码只在创建这一刻用到，创建成功后即失效。</p>
+        </form>
+      </section>
+
+      <!-- ③ 完成页 -->
+      <section id="scrDone" class="mast" style="grid-template-columns:1fr;padding-top:48px" hidden>
+        <p class="setup-steps">第 3 步 / 共 3 步</p>
+        <h1>系统已就绪</h1>
+        <p class="mn-sub hint" style="margin-top:12px">管理员已创建，安装向导就此关闭（本页之后将不可访问）。三条下一步：</p>
+        <ul class="setup-done-list">
+          <li><a href="index.html">提交第一条任务 →</a></li>
+          <li>外部系统怎么接（API_TOKEN 在 .env，值不回显）→ 见仓库内文档 <span class="num">docs/项目/录音纪要平台/接入指南.md</span></li>
+          <li><a href="settings.html">进设置页 →</a></li>
+        </ul>
+      </section>
+
+      <!-- 实例已初始化（/setup 面 404） -->
+      <section id="scrLocked" class="mast" style="grid-template-columns:1fr;padding-top:48px" hidden>
+        <h1>无法打开</h1>
+        <p class="mn-sub hint" style="margin-top:12px">本实例已完成初始化，请直接登录。</p>
+        <div class="setup-actions">
+          <a class="btn" href="login.html">去登录页</a>
+        </div>
+      </section>
+
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <span>私有部署 · 数据只在你自己的服务器</span>
+    <span>以 MIT 许可证开源发布</span>
+  </footer>
+</div>
+<script src="escape.js"></script>
+<script src="auth.js"></script>
+<script>
+(function () {
+  'use strict';
+  var scrCheck = document.getElementById('scrCheck');
+  var scrAdmin = document.getElementById('scrAdmin');
+  var scrDone = document.getElementById('scrDone');
+  var scrLocked = document.getElementById('scrLocked');
+
+  function show(screen) {
+    [scrCheck, scrAdmin, scrDone, scrLocked].forEach(function (el) { el.hidden = (el !== screen); });
+  }
+
+  function showLocked() { show(scrLocked); }
+
+  /* ===== 第 1 屏：五项自检（GET /api/v1/setup/status；404 = 已初始化） ===== */
+  var checkList = document.getElementById('checkList');
+  var checkError = document.getElementById('checkError');
+  var recheckBtn = document.getElementById('recheckBtn');
+  var toAdminBtn = document.getElementById('toAdminBtn');
+
+  function setCheckError(msg) {
+    checkError.textContent = msg || '';
+    checkError.hidden = !msg;
+  }
+
+  /* 只用 textContent 渲染服务端数据，不拼 innerHTML（M-12 门禁口径） */
+  function renderChecks(checks) {
+    checkList.textContent = '';
+    checks.forEach(function (c) {
+      var li = document.createElement('li');
+      var label = document.createElement('span');
+      label.className = 'ck-label';
+      label.textContent = c.label || c.key || '';
+      var badge = document.createElement('span');
+      badge.className = 'badge ' + (c.ok ? 'done' : 'dead');
+      badge.textContent = c.ok ? '已通过' : '需修复';
+      var detail = document.createElement('span');
+      detail.className = 'ck-detail';
+      detail.textContent = c.detail || '';
+      li.appendChild(label);
+      li.appendChild(badge);
+      li.appendChild(detail);
+      checkList.appendChild(li);
+    });
+  }
+
+  function runChecks() {
+    recheckBtn.disabled = true;
+    toAdminBtn.disabled = true;
+    setCheckError('');
+    fetch('api/v1/setup/status')
+      .then(function (resp) {
+        if (resp.status === 404) { showLocked(); return null; }
+        return resp.json().catch(function () { return null; });
+      })
+      .then(function (data) {
+        recheckBtn.disabled = false;
+        if (!data) {
+          setCheckError('自检服务暂时不可用，请稍后点「重新检测」。');
+          return;
+        }
+        renderChecks(data.checks || []);
+        toAdminBtn.disabled = false;
+      })
+      .catch(function () {
+        recheckBtn.disabled = false;
+        setCheckError('网络错误：连不上本机服务，请确认容器已全部 healthy。');
+      });
+  }
+
+  recheckBtn.addEventListener('click', runChecks);
+  toAdminBtn.addEventListener('click', function () { show(scrAdmin); });
+
+  /* ===== 第 2 屏：创建管理员（POST /api/v1/setup/admin） ===== */
+  var form = document.getElementById('adminForm');
+  var adminError = document.getElementById('adminError');
+  var submitBtn = document.getElementById('adminSubmitBtn');
+  var usernameEl = document.getElementById('suUsername');
+  var passwordEl = document.getElementById('suPassword');
+  var password2El = document.getElementById('suPassword2');
+  var codeEl = document.getElementById('suCode');
+  var submitting = false;
+
+  function setAdminError(msg) {
+    adminError.textContent = msg || '';
+    adminError.hidden = !msg;
+  }
+
+  form.addEventListener('submit', function (e) {
+    e.preventDefault();
+    if (submitting) return;
+    setAdminError('');
+    var username = usernameEl.value.trim();
+    var password = passwordEl.value;
+    var code = codeEl.value.trim();
+
+    /* 前端只做基本非空/长度校验，一切以服务端为准 */
+    if (username.length < 3 || username.length > 32) { setAdminError('用户名需 3–32 个字符'); return; }
+    if (password.length < 8) { setAdminError('密码至少 8 个字符'); return; }
+    if (password !== password2El.value) { setAdminError('两次输入的密码不一致'); return; }
+    if (!code) { setAdminError('请填写终端里 first-run 打印的安装码'); return; }
+
+    submitting = true;
+    submitBtn.disabled = true;
+    fetch('api/v1/setup/admin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: username, password: password, setup_code: code })
+    }).then(function (resp) {
+      if (resp.status === 404) { showLocked(); return null; }
+      return resp.json().catch(function () { return {}; }).then(function (data) {
+        submitting = false;
+        submitBtn.disabled = false;
+        if (resp.ok && data.token) {
+          try {
+            localStorage.setItem('mn_token', data.token);
+            localStorage.setItem('mn_user', JSON.stringify(
+              { user_id: data.user_id, username: data.username, role: data.role }));
+          } catch (err) {
+            setAdminError('浏览器存储不可用，无法保存登录态');
+            return;
+          }
+          show(scrDone);
+          return;
+        }
+        if (resp.status === 403) setAdminError(data.message || '安装码不正确');
+        else if (resp.status === 409) setAdminError(data.message || '实例已完成初始化');
+        else if (resp.status === 429) setAdminError('尝试过于频繁，请稍后再试');
+        else if (resp.status === 400) setAdminError(data.message || '参数有误');
+        else setAdminError(data.message || '服务暂时不可用');
+      });
+    }, function () {
+      submitting = false;
+      submitBtn.disabled = false;
+      setAdminError('服务暂时不可用');
+    });
+  });
+
+  show(scrCheck);
+  runChecks();
+})();
+</script>
+</body>
+</html>

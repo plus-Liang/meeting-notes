@@ -100,6 +100,7 @@ public class RateLimitInterceptor implements HandlerInterceptor {
         return switch (request.getRequestURI()) {
             case "/api/v1/auth/login" -> Bucket.LOGIN;
             case "/api/v1/auth/register" -> Bucket.REGISTER;
+            case "/api/v1/setup/admin" -> Bucket.REGISTER; // T4.93 C6：向导建管理员复用 register 桶（按 remoteAddr，1 行）
             case "/api/v1/tasks", "/api/v1/tasks/batch" -> Bucket.TASKS;
             default -> null;
         };

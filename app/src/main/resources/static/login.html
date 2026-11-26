@@ -34,6 +34,7 @@
           <button type="button" id="modeLogin" class="mn-mode-btn mn-mode-active">登录</button>
           <button type="button" id="modeRegister" class="mn-mode-btn">首次使用 · 创建账号</button>
         </div>
+        <p style="margin:0 0 18px"><a id="setupLink" href="setup.html" hidden>首次部署？进入安装向导 →</a></p>
         <div class="field">
           <label class="mn-login-label" for="mnUsername">用户名</label>
           <input type="text" id="mnUsername" maxlength="32" autocomplete="username" spellcheck="false" aria-label="用户名">
@@ -70,10 +71,12 @@
   }
 
   /* ===== T4.70 C2：注册状态三态（免鉴权 GET /api/v1/auth/status）=====
-   * adminClaimed=false → 保留「创建账号」入口并提示第一个账号将成为管理员；
+   * T4.93：adminClaimed=false → 显示「进入安装向导」链接、隐藏「创建账号」入口
+   * （未初始化实例上注册已不可用——认领只走 /setup 向导，AuthService T4.93 改道）；
    * adminClaimed=true 且注册关闭 → 隐藏入口、显示「注册已关闭，请联系管理员」；
    * 注册开启 → 与现状一致。请求失败按「可注册」渲染（不把管理员挡在门外），控制台留一行 warn。 */
   var regBtn = document.getElementById('modeRegister');
+  var setupLink = document.getElementById('setupLink');
   var subHint = document.querySelector('.mn-sub');
   var noteEl = document.querySelector('.mn-login-note');
   fetch('api/v1/auth/status')
@@ -81,7 +84,11 @@
     .then(function (s) {
       if (!s) { console.warn('[login] auth/status 不可用，按可注册渲染'); return; }
       if (s.adminClaimed !== true) {
-        if (subHint) subHint.textContent = '账号密码换本浏览器令牌；第一个创建的账号将成为管理员。';
+        if (setupLink) setupLink.hidden = false;
+        regBtn.hidden = true;
+        regBtn.disabled = true;
+        if (subHint) subHint.textContent = '实例尚未初始化：打开安装向导创建管理员。';
+        if (mode === 'register') { setMode('login'); }
         return;
       }
       if (subHint) subHint.textContent = '账号密码换本浏览器令牌。';

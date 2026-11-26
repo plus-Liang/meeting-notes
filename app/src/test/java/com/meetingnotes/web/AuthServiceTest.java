@@ -45,12 +45,19 @@ class AuthServiceTest {
     private final PasswordHasher hasher = org.mockito.Mockito.spy(new PasswordHasher());
     private final TokenService tokens = new TokenService();
 
+    /** T4.93：安装码测试值（setupClaimAdmin 专用）。 */
+    static final String SETUP_CODE = "t493-setup-code";
+
     private AuthService newService(boolean registrationEnabled) {
-        return new AuthService(jdbc, hasher, tokens, loginLockout, registrationEnabled, 10);
+        return new AuthService(jdbc, hasher, tokens, loginLockout, registrationEnabled, 10, SETUP_CODE);
     }
 
     private AuthService newService(boolean registrationEnabled, int maxSessions) {
-        return new AuthService(jdbc, hasher, tokens, loginLockout, registrationEnabled, maxSessions);
+        return new AuthService(jdbc, hasher, tokens, loginLockout, registrationEnabled, maxSessions, SETUP_CODE);
+    }
+
+    private AuthService newService(boolean registrationEnabled, int maxSessions, String setupCode) {
+        return new AuthService(jdbc, hasher, tokens, loginLockout, registrationEnabled, maxSessions, setupCode);
     }
 
     private static ApiException ofCode(Runnable action, String code) {
@@ -59,17 +66,47 @@ class AuthServiceTest {
         return e;
     }
 
-    /* ---- 注册：管理员认领（T4.37a-fix：条件更新原子闸） ---- */
+    /* ---- 注册：未初始化实例必须 403 SETUP_REQUIRED（T4.93：认领改道向导） ---- */
+
+    /** adminClaimed 桩：null=未认领，1L=已认领（口径与 adminClaimedMirrorsClaimMarker 一致）。 */
+    private void stubAdminClaimed(Long claimedId) {
+        when(jdbc.query(contains("WHERE id = 1 AND password_hash <> ?"),
+                any(ResultSetExtractor.class), eq("!"))).thenReturn(claimedId);
+    }
 
     @Test
-    void firstRegisterClaimsAdminId1AdminRole() {
-        // 条件更新影响 1 行 = 认领成功（T4.71：令牌不再写 app_user，改进 user_session）
+    void registerOnUnclaimedInstanceIs403SetupRequired() {
+        stubAdminClaimed(null); // 未认领
+        ApiException e = ofCode(() -> newService(true).register("Boss", "password123"), "SETUP_REQUIRED");
+        assertEquals(403, e.getStatus());
+        // 认领的条件更新绝不能被注册路径触达（T4.93：认领只走向导）
+        verify(jdbc, never()).update(contains("WHERE id = 1 AND password_hash = ?"),
+                anyString(), anyString(), anyString());
+    }
+
+    @Test
+    void registerOnClaimedInstanceFollowsNormalPath() {
+        stubAdminClaimed(1L); // 已认领 → 正常注册路径
+        when(jdbc.query(contains("WHERE lower(username) = lower(?)"),
+                any(ResultSetExtractor.class), eq("bob"))).thenReturn(null);
+        when(jdbc.queryForObject(contains("INSERT INTO app_user"), eq(Long.class),
+                eq("bob"), anyString(), eq("USER"))).thenReturn(5L);
+
+        AuthService.AuthSession s = newService(true).register("bob", "password123");
+        assertEquals(5L, s.userId());
+        assertEquals("USER", s.role());
+    }
+
+    /* ---- T4.93 C2：setupClaimAdmin（唯一认领入口，必须带安装码） ---- */
+
+    @Test
+    void setupClaimAdminWithValidCodeClaimsId1AdminRole() {
+        stubAdminClaimed(null);
         when(jdbc.update(contains("WHERE id = 1 AND password_hash = ?"),
                 anyString(), anyString(), anyString())).thenReturn(1);
 
-        AuthService.AuthSession s = newService(true).register("Boss", "password123");
-
-        assertEquals(1L, s.userId(), "首注册 = 认领 id=1");
+        AuthService.AuthSession s = newService(true).setupClaimAdmin("Boss", "password123", SETUP_CODE);
+        assertEquals(1L, s.userId(), "向导认领 = id=1");
         assertEquals("ADMIN", s.role());
         assertEquals("Boss", s.username());
         assertNotNull(s.token());
@@ -80,22 +117,65 @@ class AuthServiceTest {
     }
 
     @Test
-    void claimUsernameConflictingWithOtherUserIs409() {
+    void setupClaimAdminWithWrongCodeIs403() {
+        stubAdminClaimed(null);
+        ofCode(() -> newService(true).setupClaimAdmin("Boss", "password123", "wrong-code"), "SETUP_CODE_INVALID");
+        ofCode(() -> newService(true).setupClaimAdmin("Boss", "password123", ""), "SETUP_CODE_INVALID");
+        ofCode(() -> newService(true).setupClaimAdmin("Boss", "password123", null), "SETUP_CODE_INVALID");
+        // 码不对：原子认领一次都不能发生
+        verify(jdbc, never()).update(contains("WHERE id = 1 AND password_hash = ?"),
+                anyString(), anyString(), anyString());
+    }
+
+    /** K-183：SETUP_CODE 未配置（空）⇒ 任何码都拒绝（安全侧默认）。 */
+    @Test
+    void setupClaimAdminWithUnconfiguredCodeAlwaysRejects() {
+        stubAdminClaimed(null);
+        AuthService svc = newService(true, 10, "");
+        ofCode(() -> svc.setupClaimAdmin("Boss", "password123", SETUP_CODE), "SETUP_CODE_INVALID");
+        ofCode(() -> svc.setupClaimAdmin("Boss", "password123", ""), "SETUP_CODE_INVALID");
+    }
+
+    @Test
+    void setupClaimAdminOnClaimedInstanceIs409() {
+        stubAdminClaimed(1L);
+        ofCode(() -> newService(true).setupClaimAdmin("Boss", "password123", SETUP_CODE), "SETUP_ALREADY_DONE");
+    }
+
+    @Test
+    void setupClaimAdminConcurrentLoserIs409() {
+        stubAdminClaimed(null);
+        // 先查后更窗口内被并发认领：条件更新 0 行 → 409 SETUP_ALREADY_DONE（原子闸，K-91）
+        when(jdbc.update(contains("WHERE id = 1 AND password_hash = ?"),
+                anyString(), anyString(), anyString())).thenReturn(0);
+        ofCode(() -> newService(true).setupClaimAdmin("Boss", "password123", SETUP_CODE), "SETUP_ALREADY_DONE");
+    }
+
+    @Test
+    void setupClaimUsernameConflictingWithOtherUserIs409() {
+        stubAdminClaimed(null);
         // 认领请求的用户名撞其它用户 → 唯一索引 DuplicateKeyException → 409
         when(jdbc.update(contains("WHERE id = 1 AND password_hash = ?"),
                 anyString(), anyString(), anyString()))
                 .thenThrow(new org.springframework.dao.DuplicateKeyException("ux_app_user_username"));
 
-        ofCode(() -> newService(true).register("admin", "password123"), "USERNAME_TAKEN");
+        ofCode(() -> newService(true).setupClaimAdmin("admin", "password123", SETUP_CODE), "USERNAME_TAKEN");
+    }
+
+    @Test
+    void setupClaimAdminValidatesParams() {
+        stubAdminClaimed(null);
+        AuthService svc = newService(true);
+        ofCode(() -> svc.setupClaimAdmin("ab", "password123", SETUP_CODE), "INVALID_PARAM");   // 用户名过短
+        ofCode(() -> svc.setupClaimAdmin("boss", "7chars!", SETUP_CODE), "INVALID_PARAM");     // 密码过短
     }
 
     /* ---- 注册：普通路径 ---- */
 
     @Test
     void secondRegisterCreatesUserIdRole() {
-        // 认领条件更新影响 0 行（admin 已被认领）→ 走普通注册
-        when(jdbc.update(contains("WHERE id = 1 AND password_hash = ?"),
-                anyString(), anyString(), anyString())).thenReturn(0);
+        // T4.93：admin 已认领 → 注册走普通路径
+        stubAdminClaimed(1L);
         when(jdbc.query(contains("WHERE lower(username) = lower(?)"),
                 any(ResultSetExtractor.class), eq("bob"))).thenReturn(null);
         when(jdbc.queryForObject(contains("INSERT INTO app_user"), eq(Long.class),
@@ -111,8 +191,7 @@ class AuthServiceTest {
 
     @Test
     void duplicateUsernameCaseInsensitive409() {
-        when(jdbc.update(contains("WHERE id = 1 AND password_hash = ?"),
-                anyString(), anyString(), anyString())).thenReturn(0);
+        stubAdminClaimed(1L);
         when(jdbc.query(contains("WHERE lower(username) = lower(?)"),
                 any(ResultSetExtractor.class), eq("BOB"))).thenReturn(5L);
 
@@ -122,8 +201,7 @@ class AuthServiceTest {
     /** 卡面判据①：并发窗口下 INSERT 撞唯一索引（DuplicateKeyException）→ 409，绝不 500。 */
     @Test
     void concurrentInsertUniqueViolationIs409Not500() {
-        when(jdbc.update(contains("WHERE id = 1 AND password_hash = ?"),
-                anyString(), anyString(), anyString())).thenReturn(0);
+        stubAdminClaimed(1L);
         when(jdbc.query(contains("WHERE lower(username) = lower(?)"),
                 any(ResultSetExtractor.class), eq("bob"))).thenReturn(null);
         when(jdbc.queryForObject(contains("INSERT INTO app_user"), eq(Long.class),
@@ -136,21 +214,10 @@ class AuthServiceTest {
 
     @Test
     void registrationDisabled403WhenAdminClaimed() {
-        // 认领 0 行（已被占）+ 开关关 → 403
-        when(jdbc.update(contains("WHERE id = 1 AND password_hash = ?"),
-                anyString(), anyString(), anyString())).thenReturn(0);
+        // 已认领 + 开关关 → 403
+        stubAdminClaimed(1L);
 
         ofCode(() -> newService(false).register("bob", "password123"), "REGISTRATION_DISABLED");
-    }
-
-    @Test
-    void registrationDisabledDoesNotBlockAdminClaim() {
-        when(jdbc.update(contains("WHERE id = 1 AND password_hash = ?"),
-                anyString(), anyString(), anyString())).thenReturn(1);
-
-        AuthService.AuthSession s = newService(false).register("admin", "password123");
-        assertEquals(1L, s.userId(), "认领不受开关限制");
-        assertEquals("ADMIN", s.role());
     }
 
     /* ---- 注册：参数校验 400 ---- */
@@ -319,8 +386,7 @@ class AuthServiceTest {
     @Test
     void sessionsEvictOldestOverLimit() {
         // COUNT=3 > max=2 → 删最旧的 3−2=1 条（id IN ... ORDER BY created_at LIMIT 1），保留最新 2 条
-        when(jdbc.update(contains("WHERE id = 1 AND password_hash = ?"),
-                anyString(), anyString(), anyString())).thenReturn(0);
+        stubAdminClaimed(1L);
         when(jdbc.query(contains("WHERE lower(username) = lower(?)"),
                 any(ResultSetExtractor.class), eq("bob"))).thenReturn(null);
         when(jdbc.queryForObject(contains("INSERT INTO app_user"), eq(Long.class),
@@ -336,8 +402,7 @@ class AuthServiceTest {
 
     @Test
     void sessionsUnderLimitAreNotPruned() {
-        when(jdbc.update(contains("WHERE id = 1 AND password_hash = ?"),
-                anyString(), anyString(), anyString())).thenReturn(0);
+        stubAdminClaimed(1L);
         when(jdbc.query(contains("WHERE lower(username) = lower(?)"),
                 any(ResultSetExtractor.class), eq("bob"))).thenReturn(null);
         when(jdbc.queryForObject(contains("INSERT INTO app_user"), eq(Long.class),

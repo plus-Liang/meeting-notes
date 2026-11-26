@@ -86,6 +86,13 @@ public class ApiTokenFilter extends OncePerRequestFilter {
         if ("GET".equals(request.getMethod()) && "/api/v1/auth/status".equals(uri)) {
             return true; // T4.70 C2：注册状态（只含 registrationEnabled/adminClaimed 两个布尔，无用户信息）
         }
+        if ("GET".equals(request.getMethod())
+                && ("/api/v1/setup/status".equals(uri) || "/api/v1/setup/model".equals(uri))) {
+            return true; // T4.93：首启向导（未初始化实例的只读自检；adminClaimed=true 时 controller 返回 404）
+        }
+        if ("POST".equals(request.getMethod()) && "/api/v1/setup/admin".equals(uri)) {
+            return true; // T4.93：向导创建管理员（必须带 SETUP_CODE；创建成功后整个 /setup 面 404）
+        }
         // T4.89/P-28：/actuator/** 默认拒绝（health 细节/指标不再匿名可读）；凭据判定复用 authenticate()
         return !uri.startsWith("/api/v1") && !(uri.equals("/actuator") || uri.startsWith("/actuator/"));
     }

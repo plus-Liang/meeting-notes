@@ -142,6 +142,23 @@ class RateLimitInterceptorTest {
         }
     }
 
+    /** ⑤b T4.93 C6：/api/v1/setup/admin 复用 register 桶（按 IP，5/窗口，第 6 次 429）；不同 IP 独立。 */
+    @Test
+    void setupAdminReusesRegisterBucket() {
+        for (int i = 0; i < 5; i++) {
+            assertEquals(200, attempt(new MockHttpServletRequest[1], "POST", "/api/v1/setup/admin", "10.2.0.1"),
+                    "向导建管理员第 " + (i + 1) + " 次应放行（register 桶 5/窗口）");
+        }
+        ApiException e = assertThrows(ApiException.class, () -> {
+            MockHttpServletRequest req = new MockHttpServletRequest("POST", "/api/v1/setup/admin");
+            req.setRemoteAddr("10.2.0.1");
+            interceptor.preHandle(req, new MockHttpServletResponse(), new Object());
+        });
+        assertEquals(429, e.getStatus());
+        assertEquals(200, attempt(new MockHttpServletRequest[1], "POST", "/api/v1/setup/admin", "10.2.0.2"),
+                "另一个 IP 必须不受影响");
+    }
+
     /** ⑥ 非目标路径/方法永不计数、永不拒绝：GET /api/v1/tasks、/actuator/health、OPTIONS 预检、其它 POST。 */
     @Test
     void nonTargetPathsAndMethodsAreNeverCountedOrRejected() {
