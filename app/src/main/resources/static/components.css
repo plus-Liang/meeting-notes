@@ -986,3 +986,12 @@ details.example[open] summary { margin-bottom: 12px; }
   font-size: 12px; line-height: 1.5; color: var(--ink-2);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
+/* ===== T4.97：回收站前端 ===== */
+/* C2：回收站行说明行（克隆 .st-reason 版式，语义独立便于 Lead 定位样式） */
+.trash-note {
+  display: block; max-width: 100%; margin-top: 2px;
+  font-size: 12px; line-height: 1.5; color: var(--ink-3);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* C1：回收站切换按钮贴筛选条右侧（filter-bar 是 flex+wrap，用 margin-left:auto 推到行尾） */
+.filter-btn.trash-toggle { margin-left: auto; }

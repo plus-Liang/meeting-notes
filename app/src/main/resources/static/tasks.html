@@ -56,6 +56,7 @@
         <button id="exportBtn" class="btn-secondary">导出选中 Markdown</button>
         <button id="deleteBtn" class="btn-danger">删除所选</button>
         <button id="deleteFailedBtn" class="btn-danger">清空失败任务</button>
+        <button id="restoreBtn" class="btn-secondary" style="display:none;">恢复所选</button><button id="purgeBtn" class="btn-danger" style="display:none;">彻底删除所选</button><button id="purgeAllBtn" class="btn-danger" style="display:none;">清空回收站</button>
       </span>
       <span id="selHint" class="hint"></span>
       <span id="retryResult" class="hint"></span>
@@ -94,13 +95,17 @@
   var exportBtn = document.getElementById('exportBtn'); /* T4.15⑥ */
   var deleteBtn = document.getElementById('deleteBtn'); /* T4.21 */
   var deleteFailedBtn = document.getElementById('deleteFailedBtn'); /* T4.21 */
+  var restoreBtn = document.getElementById('restoreBtn'), /* T4.97/C3 回收站操作条三按钮 */
+      purgeBtn = document.getElementById('purgeBtn'), purgeAllBtn = document.getElementById('purgeAllBtn');
   var searchInput = document.getElementById('searchInput'); /* T4.15④ */
   var timer = null;
   var lastRenderKey = null;
   var state = { filter: '', cursor: null, items: [], checked: {}, checkedCount: 0, search: '',
     filterFavorite: false, filterLabels: [], range: '', total: null,
+    trash: false, /* T4.97/C1：回收站模式（?trash=true；入口切换按钮） */
     selectAll: false, excluded: {} }; /* T4.42：标签/时间范围/total；T4.53 缺陷3：全选=筛选内全部；
     T4.56：全选态下被单独取消的行进 excluded（勾选框表达"排除"，不再写 checked/计数） */
+  var trashTotal = null; /* T4.97/C1：回收站徽标计数 = GET /tasks?trash=true&limit=1 的 total（/counts 不含回收站） */
 
   /* 清空选择（含全选态与排除集）：筛选变化 / 动作完成后的统一入口（T4.53 缺陷3 + T4.56 excluded） */
   function clearSelection() {
@@ -159,6 +164,7 @@
   function parseUrlFilters() {
     var sp = new URLSearchParams(location.search);
     var invalid = false;
+    var trash = sp.get('trash') === 'true'; /* T4.97/C1：trash 只接受 true（其余回退默认，与后端口径一致） */
     var range = sp.get('range') || '';
     if (range && !RANGES.some(function (r) { return r.key === range; })) { invalid = true; range = ''; }
     var status = sp.get('status') || '';
@@ -172,17 +178,19 @@
     var favorite = sp.get('favorite') === 'true';
     var q = (sp.get('q') || '').trim();
     if (q.length > 100) q = q.slice(0, 100);
-    return { range: range, status: status, labels: labels, favorite: favorite, q: q,
+    return { range: range, status: status, labels: labels, favorite: favorite, q: q, trash: trash,
       invalid: invalid || labelsInvalid };
   }
 
   function syncUrl() {
     var sp = new URLSearchParams();
-    if (state.range) sp.set('range', state.range);
-    if (state.filter) sp.set('status', state.filter);
-    state.filterLabels.forEach(function (l) { sp.append('label', l); });
-    if (state.filterFavorite) sp.set('favorite', 'true');
-    if (state.search) sp.set('q', state.search);
+    if (state.trash) { if (state.search) sp.set('q', state.search); sp.set('trash', 'true'); } else { /* T4.97/C1：回收站只写 trash+q */
+      if (state.range) sp.set('range', state.range);
+      if (state.filter) sp.set('status', state.filter);
+      state.filterLabels.forEach(function (l) { sp.append('label', l); });
+      if (state.filterFavorite) sp.set('favorite', 'true');
+      if (state.search) sp.set('q', state.search);
+    }
     var qs = sp.toString();
     history.replaceState(null, '', location.pathname + (qs ? '?' + qs : ''));
   }
@@ -265,24 +273,26 @@
   }
 
   function renderFilterBar() {
+    /* T4.97/C1/C2：右侧「回收站」切换按钮（徽标 = trash=true 的 total，不用 /counts）；回收站模式隐藏 FILTERS/RANGES */
+    var trashBtn = '<button class="filter-btn trash-toggle' + (state.trash ? ' active' : '') + '" id="trashToggleBtn" type="button" aria-pressed="' + state.trash + '"' +
+      ' title="删除的任务在这里保留 30 天，可恢复">回收站' + (trashTotal === null ? '' : '<span class="count-chip">' + trashTotal + '</span>') + '</button>';
+    var picked = state.filterLabels.length;
+    var fav = '<button class="filter-btn' + (state.filterFavorite ? ' active' : '') + '" id="favoriteFilterBtn" type="button" aria-pressed="' + state.filterFavorite + '">★ 收藏</button>';
+    var labelBtn = '<span class="label-multi"><button class="filter-btn' + (picked ? ' active' : '') + '" id="labelMultiBtn" type="button" aria-expanded="false" aria-haspopup="true">标签' +
+      (picked ? ' · ' + picked : '') + '▾</button><span class="label-pop" id="labelPop" hidden></span></span>';
+    if (state.trash) { filterBar.innerHTML = trashBtn + fav + labelBtn; refreshLabelOptions(); return; }
     /* T4.42：状态 segs + 时间范围 segs + 收藏 + 标签多选（下拉复选，值由 state 保持防重建丢失） */
     var rangeBtns = RANGES.map(function (r) {
       return '<button class="filter-btn' + (state.range === r.key ? ' active' : '') +
         '" data-range="' + r.key + '" aria-pressed="' + (state.range === r.key) + '">' + r.label + '</button>';
     }).join('');
-    var fav = '<button class="filter-btn' + (state.filterFavorite ? ' active' : '') +
-      '" id="favoriteFilterBtn" type="button" aria-pressed="' + state.filterFavorite + '">★ 收藏</button>';
-    var picked = state.filterLabels.length;
-    var labelBtn = '<span class="label-multi"><button class="filter-btn' + (picked ? ' active' : '') +
-      '" id="labelMultiBtn" type="button" aria-expanded="false" aria-haspopup="true">标签' +
-      (picked ? ' · ' + picked : '') + '▾</button><span class="label-pop" id="labelPop" hidden></span></span>';
     var statusBtns = FILTERS.map(function (f) {
       var n = countFor(f.key);
       return '<button class="filter-btn' + (state.filter === f.key ? ' active' : '') +
         '" data-status="' + f.key + '" aria-pressed="' + (state.filter === f.key) + '">' + f.label +
         (n === null ? '' : '<span class="count-chip">' + n + '</span>') + '</button>';
     }).join('');
-    filterBar.innerHTML = rangeBtns + statusBtns + fav + labelBtn;
+    filterBar.innerHTML = rangeBtns + statusBtns + fav + labelBtn + trashBtn;
     refreshLabelOptions();
   }
 
@@ -340,9 +350,14 @@
     }, function () { /* 计数失败不打扰主列表 */ });
   }
 
-  /* 页面可见时每 30 秒刷新计数（D-024 精神：轮询只在可见时进行；T4.24 起为服务端真计数） */
+  function fetchTrashCount() { getJson('api/v1/tasks?trash=true&limit=1').then(function (data) { /* T4.97/C1：total（/counts 不含回收站） */
+      if (data.__httpStatus === 200) { trashTotal = typeof data.total === 'number' ? data.total : 0; renderFilterBar(); }
+    }, function () { /* 失败不打扰主列表 */ });
+  }
+
+  /* 页面可见时每 30 秒刷新计数（D-024 精神：轮询只在可见时进行；T4.97 起连同回收站徽标） */
   setInterval(function () {
-    if (document.visibilityState === 'visible') fetchCounts();
+    if (document.visibilityState === 'visible') { fetchCounts(); fetchTrashCount(); }
   }, 30000);
 
   /* 拉一页：ACTIVE 合并三个状态（各自 limit=50 第一页，前端去重排序）；其余走单状态 + 游标。
@@ -359,6 +374,8 @@
 
   function fetchPage(cursor) {
     var q = state.search ? '&q=' + encodeURIComponent(state.search) : '';
+    /* T4.97/C2：回收站模式 q 与 trash 组合；状态/时间参数不传（该模式已隐藏，进入时也已清空） */
+    if (state.trash) return getJson('api/v1/tasks?limit=20&trash=true' + q + (cursor ? '&before_id=' + cursor : ''));
     var meta = filterParams();
     if (state.filter === 'ACTIVE') {
       return Promise.all(['PENDING', 'RUNNING', 'RETRYING'].map(function (s) {
@@ -389,29 +406,34 @@
     var checkbox = '<span class="row-check-cell"><input type="checkbox" class="row-check" data-id="' + item.id + '"' +
       ((state.selectAll ? !state.excluded[item.id] : !!state.checked[item.id]) ? ' checked' : '') +
       ' aria-label="选择任务 #' + item.id + '"></span>'; /* T4.56：全选态勾选框反映操作集合（未排除=勾上）；勾选不再限于 DEAD */
-    return '<div class="task-row" data-id="' + item.id + '">' +
-      checkbox +
+    /* T4.97/C2：回收站行——标题纯文本（详情接口 404，不给详情链接）；task-side 换恢复/彻底删除 */
+    var titleHtml = state.trash ? '<span class="task-title" data-task-id="' + item.id + '">' + escapeHtml(name) + '</span>'
+      : '<span class="task-title"><a href="task.html?id=' + item.id + '" class="task-detail-link" data-task-id="' + item.id +
+        '" data-task-name="' + escapeHtml(name).replace(/"/g, '&quot;') + '" aria-label="查看任务 #' + item.id + ' 详情">' + escapeHtml(name) + '</a></span>';
+    var sideHtml = state.trash
+      ? '<button type="button" class="linkish js-trash-restore" data-id="' + item.id + '" aria-label="恢复任务 #' + item.id + '">恢复</button>' +
+        '<button type="button" class="linkish js-trash-purge" data-id="' + item.id + '" aria-label="彻底删除任务 #' + item.id + '">彻底删除</button>'
+      : '<a href="task.html?id=' + item.id + '" class="task-detail-link" data-task-id="' + item.id + '" data-task-name="' + escapeHtml(name).replace(/"/g, '&quot;') +
+        '" aria-label="查看任务 #' + item.id + ' 详情">详情</a><button type="button" class="linkish js-rename" data-rename-id="' + item.id + '" aria-label="重命名任务 #' + item.id + '">重命名</button>';
+    return '<div class="task-row" data-id="' + item.id + '">' + checkbox +
       '<span class="task-no">#' + item.id + '</span>' +
-      '<span class="task-name">' + star +
-      '<span class="task-title"><a href="task.html?id=' + item.id + '" class="task-detail-link" data-task-id="' + item.id +
-      '" data-task-name="' + escapeHtml(name).replace(/"/g, '&quot;') + '" ' +
-      'aria-label="查看任务 #' + item.id + ' 详情">' + escapeHtml(name) + '</a></span>' +
+      '<span class="task-name">' + star + titleHtml +
       '<span class="task-sub">' + identityHtml(item) + '</span>' +
-      summaryHtml(item) + failureReasonHtml(item) + '</span>' +
+      summaryHtml(item) + failureReasonHtml(item) + /* T4.97/C2 回收站说明行（days_left 缺失不夸口） */
+      (state.trash ? (typeof item.days_left !== 'number' ? '<span class="trash-note">回收站内</span>'
+        : '<span class="trash-note">回收站内 · 剩余 ' + Number(item.days_left) + ' 天自动清理</span>') : '') + '</span>' +
       '<span class="cell-num cell-dur">' + fmtDuration(item.duration_sec) + '</span>' +
       '<span class="cell-num cell-time">' + fmtClockShort(item.created_at) + '</span>' +
       '<span class="st"><i class="st-dot ' + stDotClass(item.status) + '"></i>' + statusText(item.status) + '</span>' +
-      '<span class="task-side"><a href="task.html?id=' + item.id + '" class="task-detail-link" data-task-id="' + item.id +
-      '" data-task-name="' + escapeHtml(name).replace(/"/g, '&quot;') + '" ' +
-      'aria-label="查看任务 #' + item.id + ' 详情">详情</a>' +
-      '<button type="button" class="linkish js-rename" data-rename-id="' + item.id + '"' +
-      ' aria-label="重命名任务 #' + item.id + '">重命名</button></span></div>';
+      '<span class="task-side">' + sideHtml + '</span></div>';
   }
 
   var EMPTY_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
     '<path d="M22 8v6a2 2 0 0 1-2 2H8l-4 4V6a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
 
   function emptyHtml() {
+    if (state.trash) return '<div class="empty-state">' + EMPTY_ICON + /* T4.97/C2 回收站空态（默认空态不变，C6） */
+      '<h2 class="empty-title">回收站是空的</h2><p>删除的任务会在这里保留 30 天，期间可随时恢复。</p></div>';
     return '<div class="empty-state">' + EMPTY_ICON +
       '<h2 class="empty-title">这里还没有任务</h2><p>换一个筛选条件，或提交第一个音/视频文件开始转写。</p>' +
       '<a class="btn-secondary" href="index.html">去提交文件</a></div>';
@@ -461,7 +483,7 @@
 
   /* 无变化不重绘（避免 3s 轮询整块闪烁）；勾选/重试等本地状态变化仍走 render() */
   function renderKey() {
-    return state.filter + '|' + state.filterFavorite + '|' + state.filterLabels.join(',') + '|' +
+    return state.trash + '|' + state.filter + '|' + state.filterFavorite + '|' + state.filterLabels.join(',') + '|' +
       state.range + '|' + state.total + '|' + state.search + '|' +
       state.items.map(function (i) { return i.id + ':' + i.status; }).join(',');
   }
@@ -522,11 +544,20 @@
     var key = renderKey();
     if (!force && key === lastRenderKey) { scheduleRefresh(); return; }
     lastRenderKey = key;
-    /* 操作条：DEAD 筛选（重试场景）或存在失败任务（清空场景）或有勾选/全选（导出/删除场景）时出现 */
-    retryBar.style.display = state.items.length &&
-      (state.filter === 'DEAD' || count > 0 || countState.dead > 0 || state.selectAll) ? 'flex' : 'none';
-    retryBtn.style.display = state.filter === 'DEAD' ? '' : 'none'; /* 重试只对 DEAD 开放（语义不变） */
-    deleteFailedBtn.style.display = countState.dead > 0 ? '' : 'none'; /* T4.21：无失败任务时隐藏 */
+    /* 操作条：DEAD 筛选（重试场景）或存在失败任务（清空场景）或有勾选/全选（导出/删除场景）时出现；
+       T4.97/C3：回收站模式换成 恢复所选/彻底删除所选/清空回收站三按钮（有行即显示，清空不依赖勾选） */
+    if (state.trash) {
+      retryBar.style.display = state.items.length ? 'flex' : 'none';
+      retryBtn.style.display = exportBtn.style.display = deleteBtn.style.display = deleteFailedBtn.style.display = 'none';
+      restoreBtn.style.display = purgeBtn.style.display = purgeAllBtn.style.display = '';
+      restoreBtn.disabled = purgeBtn.disabled = !hasSelection(); purgeAllBtn.disabled = false;
+    } else {
+      retryBar.style.display = state.items.length &&
+        (state.filter === 'DEAD' || count > 0 || countState.dead > 0 || state.selectAll) ? 'flex' : 'none';
+      retryBtn.style.display = state.filter === 'DEAD' ? '' : 'none'; /* 重试只对 DEAD 开放（语义不变） */
+      deleteFailedBtn.style.display = countState.dead > 0 ? '' : 'none'; /* T4.21：无失败任务时隐藏 */
+      restoreBtn.style.display = purgeBtn.style.display = purgeAllBtn.style.display = 'none'; exportBtn.style.display = deleteBtn.style.display = '';
+    }
     /* T4.53 缺陷3：全选=当前筛选内全部——total 拿不到就禁用全选（不猜）；勾态 = 全选态 或 已加载全勾 */
     checkAllEl.disabled = state.total === null;
     checkAllEl.checked = state.selectAll || (count > 0 && count === state.items.length);
@@ -867,6 +898,7 @@
     exportBtn.disabled = on;
     deleteBtn.disabled = on;
     deleteFailedBtn.disabled = on;
+    restoreBtn.disabled = purgeBtn.disabled = on || !hasSelection(); purgeAllBtn.disabled = on; /* T4.97 busy 判定 */
     checkAllEl.disabled = on || state.total === null;
   }
 
@@ -887,7 +919,7 @@
       return Promise.resolve(Object.keys(state.checked).map(Number).sort(function (a, b) { return a - b; }));
     }
     var q = state.search ? '&q=' + encodeURIComponent(state.search) : '';
-    var meta = filterParams();
+    var meta = state.trash ? '&trash=true' : filterParams(); /* T4.97/C3：回收站全选 = 回收站筛选集合内全部 */
     function collect(status) {
       var ids = [], seen = {}, cursor = null;
       function step() {
@@ -962,7 +994,7 @@
             retryResult.textContent = skipped ? '部分未删除：' + skipped : '';
             resetSelection();
             lastRenderKey = null;
-            loadFirst(false); /* 就地刷新：保留当前筛选/搜索 */
+            loadFirst(false); fetchTrashCount(); /* 就地刷新 + T4.97 回收站徽标同步 */
             return;
           }
           postJson('api/v1/tasks/delete', { ids: batches[done] }).then(function (data) {
@@ -981,10 +1013,7 @@
         }
         next();
       });
-    }, function (err) {
-      setBatchBusy(false);
-      retryResult.textContent = '收集失败（' + (err && err.message ? err.message : '未知错误') + '），已中止删除。';
-    });
+    }, function (err) { setBatchBusy(false); retryResult.textContent = '收集失败（' + (err && err.message ? err.message : '未知错误') + '），已中止删除。'; });
   }
 
   function deleteFailedAll() {
@@ -1003,7 +1032,7 @@
           /* T4.53 缺陷2：不再出现成功条数文案 */
           resetSelection();
           lastRenderKey = null;
-          loadFirst(false);
+          loadFirst(false); fetchTrashCount(); /* T4.97 回收站徽标同步 */
         } else {
           retryResult.textContent = '清空失败（' + (data.message || ('HTTP ' + data.__httpStatus)) + '）';
         }
@@ -1012,6 +1041,118 @@
   }
   deleteBtn.addEventListener('click', deleteSelected);
   deleteFailedBtn.addEventListener('click', deleteFailedAll);
+
+  /* ===== T4.97/C4：回收站动作 ===== 恢复无确认框（可逆）；彻底删/清空走 confirmDialog（文案按卡面含「不可恢复」「已用配额不退还」）；
+     批量彻底删 20/批串行、任一批失败立即中止（口径同 deleteSelected） */
+  function refreshAfterTrashAction() { /* 动作后统一就地刷新 + 徽标同步（不等 30s） */
+    clearSelection(); retryResult.textContent = ''; lastRenderKey = null; loadFirst(false); fetchTrashCount();
+  }
+  function trashToast(data, okText) { /* 200/404/其它三态提示（恢复与彻底删共用） */
+    mnDrawerToast(data.__httpStatus === 200 ? okText : data.__httpStatus === 404 ? '任务已不在这里'
+      : (okText === '已恢复' ? '恢复失败：' : '删除失败：') + (data.message || ('HTTP ' + data.__httpStatus)));
+  }
+
+  function restoreOne(id) { /* C4：单条恢复无确认框（可逆）；404 = 已被清理或并发恢复 */
+    sendJson('api/v1/tasks/' + id + '/restore', 'POST', {}).then(function (data) { trashToast(data, '已恢复'); refreshAfterTrashAction();
+    }, function () { mnDrawerToast('恢复失败：服务暂时不可用'); });
+  }
+
+  function trashConfirm(desc, okText) { /* 三个不可逆动作共用确认框骨架（文案逐字按卡面） */
+    return confirmDialog({ title: okText === '清空' ? '清空回收站确认' : '彻底删除确认', desc: desc, okText: okText }); }
+
+  function purgeOne(id) {
+    trashConfirm('彻底删除任务 #' + id + '？删除后不可恢复（转写、纪要、原音频一并删除），已用配额不退还。', '彻底删除').then(function (yes) { if (!yes) return;
+      sendJson('api/v1/tasks/' + id + '/purge', 'DELETE').then(function (data) {
+        trashToast(data, '已彻底删除'); refreshAfterTrashAction();
+      }, function () { mnDrawerToast('删除失败：服务暂时不可用'); });
+    });
+  }
+
+  function restoreSelected() { /* C4：批量恢复——后端 batch-restore 限 1..100，全选大集合分批；restored=false 聚合一处 */
+    if (batchBusy) return;
+    setBatchBusy(true); retryResult.textContent = '准备中…';
+    resolveSelectedIds().then(function (ids) {
+      if (!ids.length) { setBatchBusy(false); retryResult.textContent = ''; return; }
+      var batches = [], done = 0, failedAll = []; for (var i = 0; i < ids.length; i += 100) batches.push(ids.slice(i, i + 100));
+      function nextRestore() {
+        if (done >= batches.length) { setBatchBusy(false); /* 完成：restored=false 聚合成一行提示 */
+          retryResult.textContent = failedAll.length ? failedAll.length + ' 条未恢复：已被清理' : ''; refreshAfterTrashAction(); return; }
+        sendJson('api/v1/tasks/batch-restore', 'POST', { ids: batches[done] }).then(function (data) {
+          done++;
+          if (data.__httpStatus === 200 && data.results) {
+            (data.results || []).forEach(function (r) { if (!r.restored) failedAll.push(r); });
+            retryResult.textContent = '恢复中… ' + Math.min(done * 100, ids.length) + '/' + ids.length;
+            nextRestore();
+          } else { setBatchBusy(false);
+            retryResult.textContent = '恢复失败（' + (data.message || ('HTTP ' + data.__httpStatus)) + '）· 已中止，剩余任务未恢复。'; }
+        });
+      }
+      nextRestore();
+    }, function (err) { setBatchBusy(false); retryResult.textContent = '收集失败（' + (err && err.message ? err.message : '未知错误') + '），已中止。'; });
+  }
+
+  function purgeSelected() { /* C4：批量彻底删——20/批串行单条 DELETE（无批量端点）；404=并发清理视为跳过，其余失败立即中止 */
+    if (batchBusy) return;
+    setBatchBusy(true); retryResult.textContent = '准备中…';
+    resolveSelectedIds().then(function (ids) {
+      if (!ids.length) { setBatchBusy(false); retryResult.textContent = ''; return; }
+      trashConfirm('彻底删除所选 ' + ids.length + ' 个任务？删除后不可恢复（转写、纪要、原音频一并删除），已用配额不退还。', '彻底删除').then(function (yes) {
+        if (!yes) { setBatchBusy(false); render(true); return; }
+        var batches = [], done = 0; for (var i = 0; i < ids.length; i += 20) batches.push(ids.slice(i, i + 20));
+        function nextPurge() {
+          if (done >= batches.length) { retryResult.textContent = ''; refreshAfterTrashAction(); return; }
+          Promise.all(batches[done].map(function (id) {
+            return sendJson('api/v1/tasks/' + id + '/purge', 'DELETE');
+          })).then(function (results) {
+            var bad = results.filter(function (r) { return r.__httpStatus !== 200 && r.__httpStatus !== 404; })[0];
+            if (bad) { setBatchBusy(false); /* 404=并发清理视为跳过；其余失败立即中止 */
+              retryResult.textContent = '删除失败（' + (bad.message || ('HTTP ' + bad.__httpStatus)) + '）· 已中止，剩余任务未删除。'; return; }
+            done++;
+            retryResult.textContent = '彻底删除中… ' + Math.min(done * 20, ids.length) + '/' + ids.length;
+            nextPurge();
+          }, function () { setBatchBusy(false); retryResult.textContent = '删除失败：服务暂时不可用 · 已中止，剩余任务未删除。'; });
+        }
+        retryResult.textContent = '彻底删除中… 0/' + ids.length;
+        nextPurge();
+      });
+    }, function (err) {
+      setBatchBusy(false);
+      retryResult.textContent = '收集失败（' + (err && err.message ? err.message : '未知错误') + '），已中止删除。';
+    });
+  }
+
+  function purgeAllTrash() { /* C4：清空回收站——N 取当前 trash total（拿不到显示「全部」） */
+    if (batchBusy) return;
+    var n = state.total !== null ? state.total : trashTotal;
+    trashConfirm('彻底删除回收站里的 ' + (n === null ? '全部' : n) + ' 条任务？删除后不可恢复（转写、纪要、原音频一并删除），已用配额不退还。', '清空').then(function (yes) {
+      if (!yes) return; setBatchBusy(true);
+      sendJson('api/v1/tasks/purge-all', 'POST', {}).then(function (data) {
+        setBatchBusy(false);
+        if (data.__httpStatus === 200) {
+          mnDrawerToast('已彻底删除 ' + (typeof data.purged === 'number' ? data.purged : 0) + ' 条'); refreshAfterTrashAction();
+        } else { retryResult.textContent = '清空失败（' + (data.message || ('HTTP ' + data.__httpStatus)) + '）'; }
+      }, function () { setBatchBusy(false); retryResult.textContent = '清空失败：服务暂时不可用'; });
+    });
+  }
+  restoreBtn.addEventListener('click', restoreSelected);
+  purgeBtn.addEventListener('click', purgeSelected);
+  purgeAllBtn.addEventListener('click', purgeAllTrash);
+
+  listEl.addEventListener('click', function (e) { /* 行内恢复/彻底删除（事件委托：行随筛选/翻页重建，委托不重绑） */
+    var r = e.target.closest('.js-trash-restore');
+    if (r) { e.preventDefault(); restoreOne(Number(r.getAttribute('data-id'))); return; }
+    var p = e.target.closest('.js-trash-purge');
+    if (p) { e.preventDefault(); purgeOne(Number(p.getAttribute('data-id'))); }
+  });
+
+  /* C1：回收站开关——进入时清空状态/标签/时间/收藏（该模式隐藏这些入口），保留搜索（q 与 trash 可组合） */
+  filterBar.addEventListener('click', function (e) {
+    if (!e.target.closest('#trashToggleBtn')) return;
+    state.trash = !state.trash;
+    if (state.trash) { state.filter = ''; state.range = ''; state.filterLabels = []; state.filterFavorite = false; }
+    if (state.trash) { state.filter = ''; state.range = ''; state.filterLabels = []; state.filterFavorite = false; }
+    clearSelection(); retryResult.textContent = ''; applyFilters(); if (state.trash) fetchTrashCount();
+  });
 
   /* T4.24：300ms 防抖 → 带 q 重拉第一页（服务端搜索）；无变化不重复拉。T4.42：q 同步写 URL */
   var searchTimer = null;
@@ -1084,6 +1225,7 @@
 
   /* ===== 启动（T4.42：先还原 URL 筛选，非法参数回退默认 + toast 不白屏） ===== */
   var boot = parseUrlFilters();
+  state.trash = boot.trash; if (state.trash) { boot.range = ''; boot.status = ''; boot.labels = []; boot.favorite = false; } /* T4.97/C1：?trash=true 直进回收站；隐藏入口的筛选 URL 即带也回退默认 */
   state.range = boot.range;
   state.filter = boot.status;
   state.filterLabels = boot.labels;
@@ -1096,6 +1238,7 @@
   /* T4.38：详情站内抽屉（列表 URL 不变、不新开标签；ESC/遮罩关闭） */
   mnBindDrawerLinks(listEl);
   fetchCounts(); /* T4.24：状态计数改调 /tasks/counts（真计数无上限，页面可见时 30s 自动刷新保留） */
+  fetchTrashCount(); /* T4.97/C1：回收站入口徽标（动作后与 30s 可见刷新同步） */
   getJson('api/v1/tasks?limit=20').then(function (data) {
     if (data.__httpStatus === 200) { loadFirst(false); }
     else { renderFallback(); }
