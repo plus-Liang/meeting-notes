@@ -54,6 +54,8 @@ class TranscriptionWorkerDrainTest {
     private com.meetingnotes.task.DeadTaskRecorder deadTaskRecorder;
     @Mock
     private TaskHeartbeat taskHeartbeat;
+    @Mock
+    private TaskAttempts taskAttempts; // T4.94：构造器连带（本类不触发 markFailure）
 
     private ListAppender<ILoggingEvent> appender;
     private Logger logger;
@@ -80,7 +82,7 @@ class TranscriptionWorkerDrainTest {
         return new TranscriptionWorker(redis, jdbc, s3, asrClient,
                 structuringService, punctuator, webhookService, pasteTextReader, monoWavExtractor,
                 queuePublisher, deadTaskRecorder, taskHeartbeat, "meetingnotes:task-queue", 10, "meetingnotes", 3,
-                new RedisUnavailableReporter(60, 2, java.time.Clock.systemUTC()));
+                new RedisUnavailableReporter(60, 2, java.time.Clock.systemUTC()), taskAttempts);
     }
 
     private long stopAndMeasure(TranscriptionWorker worker) {

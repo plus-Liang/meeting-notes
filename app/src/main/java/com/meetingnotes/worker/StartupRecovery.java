@@ -38,6 +38,7 @@ public class StartupRecovery implements ApplicationRunner {
     private final JdbcTemplate jdbc;
     private final QueuePublisher queuePublisher;
     private final StalePendingQueries stalePendingQueries;
+    private final TaskCrashRecovery crashRecovery; // T4.94/P-03：陈旧 RUNNING 崩溃计次（PENDING+attempts+1 原子回收）
 
     /** T4.67 S4：阈值单一来源——与运行期清扫共用同一属性（默认值引用 StalePendingQueries 常量）。 */
     @Value("${app.queue.pending-sweep.stale-minutes:" + StalePendingQueries.DEFAULT_STALE_MINUTES + "}")
@@ -50,10 +51,12 @@ public class StartupRecovery implements ApplicationRunner {
 
     public StartupRecovery(JdbcTemplate jdbc,
                            QueuePublisher queuePublisher,
-                           StalePendingQueries stalePendingQueries) {
+                           StalePendingQueries stalePendingQueries,
+                           TaskCrashRecovery crashRecovery) {
         this.jdbc = jdbc;
         this.queuePublisher = queuePublisher;
         this.stalePendingQueries = stalePendingQueries;
+        this.crashRecovery = crashRecovery;
     }
 
     @Override
@@ -65,6 +68,8 @@ public class StartupRecovery implements ApplicationRunner {
             staleRunningMinutes = DEFAULT_STALE_RUNNING_MINUTES;
         }
         List<Long> stuck;
+        List<Long> toRequeue = new java.util.ArrayList<>(); // T4.94：仅 NEED_REQUEUE 的 id 参与头插重投
+        int quarantined = 0; // T4.94：崩溃计次达上限转 DEAD 的条数
         try {
             // T4.52 R3：两步式（先 SELECT 后 UPDATE）代替 UPDATE..RETURNING——后者 PG 专用语法，
             // 真库测试（StartupRecoveryDbTest，H2）跑不了、之前 mock 测试也覆盖不到；启动期单线程无并发，两步等价。
@@ -72,10 +77,14 @@ public class StartupRecovery implements ApplicationRunner {
             // 不写 interval '5 minute' 之类 PG 字面量——H2 跑不了。
             stuck = jdbc.query("SELECT id FROM task WHERE status = 'RUNNING' AND updated_at < ?",
                     (rs, i) -> rs.getLong(1), StalePendingQueries.cutoff(staleRunningMinutes));
-            if (!stuck.isEmpty()) {
-                // T4.78：逐条按 id 更新——不再出现不带 id 条件的全表 UPDATE（多实例下会误改别人的行）
-                for (Long id : stuck) {
-                    jdbc.update("UPDATE task SET status = 'PENDING', updated_at = now() WHERE id = ?", id);
+            // T4.94/P-03：回收改走 TaskCrashRecovery——原子「PENDING + attempts+1」，达上限置 DEAD（毒丸不再无限重试）；
+            // 重投仍留在本调用方（pushBack 头插，T4.62 S2 顺序语义不变）。
+            for (Long id : stuck) {
+                TaskCrashRecovery.Outcome outcome = crashRecovery.recover(id, "startup");
+                if (outcome == TaskCrashRecovery.Outcome.NEED_REQUEUE) {
+                    toRequeue.add(id);
+                } else if (outcome == TaskCrashRecovery.Outcome.DEAD) {
+                    quarantined++;
                 }
             }
         } catch (DataAccessException e) {
@@ -85,7 +94,7 @@ public class StartupRecovery implements ApplicationRunner {
             return;
         }
         /* T4.67 S5：recovered 记「实际入队成功数」（pushBack 返回值），不再是尝试数。 */
-        int recovered = pushBack(stuck);
+        int recovered = pushBack(toRequeue);
         // T4.50/T4.52：Redis 故障期间提交的 PENDING（行已提交、队列未投）超过阈值 → 启动时重新入队。
         // T4.62 S2：判据与刷新语句收敛到 StalePendingQueries（启动口径=先 touch 全部、再逐条投递，顺序保留）。
         int requeuedPending;
@@ -103,6 +112,7 @@ public class StartupRecovery implements ApplicationRunner {
         log.atInfo()
                 .addKeyValue("recovered", recovered)
                 .addKeyValue("requeuedPending", requeuedPending)
+                .addKeyValue("quarantined", quarantined) // T4.94：崩溃计次达上限转 DEAD 条数
                 .addKeyValue("staleRunningMinutes", staleRunningMinutes)
                 .log("启动恢复：回收 RUNNING 僵尸任务重新入队");
     }

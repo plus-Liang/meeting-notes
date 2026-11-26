@@ -43,7 +43,7 @@ public class TranscriptionWorker implements SmartLifecycle {
     private final MonoWavExtractor monoWavExtractor;
     private final com.meetingnotes.task.QueuePublisher queuePublisher;
     private final com.meetingnotes.task.DeadTaskRecorder deadTaskRecorder;
-    private final TaskHeartbeat taskHeartbeat;
+    private final TaskHeartbeat taskHeartbeat; private final TaskAttempts taskAttempts; // T4.94/P-03：attempts 可移植原语（去 RETURNING，H2 可测）
     private final String queueKey;
     private final Duration pollTimeout;
     private final String bucket; private final int maxRetries; private final RedisUnavailableReporter reporter;
@@ -64,12 +64,12 @@ public class TranscriptionWorker implements SmartLifecycle {
             TaskHeartbeat taskHeartbeat, @Value("${app.worker.queue-key}") String queueKey,
             @Value("${app.worker.poll-timeout-sec}") long pollTimeoutSec,
             @Value("${app.storage.bucket}") String bucket, @Value("${app.task.max-retries}") int maxRetries,
-            RedisUnavailableReporter reporter) {
+            RedisUnavailableReporter reporter, TaskAttempts taskAttempts) {
         this.redis = redis; this.jdbc = jdbc; this.s3 = s3; this.asrClient = asrClient;
         this.structuringService = structuringService; this.punctuator = punctuator; this.webhookService = webhookService;
         this.pasteTextReader = pasteTextReader; this.monoWavExtractor = monoWavExtractor; this.queuePublisher = queuePublisher;
         this.deadTaskRecorder = deadTaskRecorder;
-        this.taskHeartbeat = taskHeartbeat; this.queueKey = queueKey; this.pollTimeout = Duration.ofSeconds(pollTimeoutSec); this.bucket = bucket; this.maxRetries = maxRetries; this.reporter = reporter;
+        this.taskHeartbeat = taskHeartbeat; this.queueKey = queueKey; this.pollTimeout = Duration.ofSeconds(pollTimeoutSec); this.bucket = bucket; this.maxRetries = maxRetries; this.reporter = reporter; this.taskAttempts = taskAttempts;
     }
 
     @Override
@@ -118,7 +118,7 @@ public class TranscriptionWorker implements SmartLifecycle {
     }
 
     /** 取一条 → 认领 → 处理（包级可见供 T4.77-fix/T4.79 测试驱动）。认领纳入保护伞：行不存在/DB 瞬时故障只 error 后跳过该条
-     *  （不 markFailure——行不存在时 UPDATE…RETURNING 返回空会 NPE），worker 绝不停摆；已认领后 process 异常仍走 log.error + markFailure。 */
+     *  （不 markFailure——行不存在时认领 SELECT 会抛 EmptyResultDataAccessException），worker 绝不停摆；已认领后 process 异常仍走 log.error + markFailure。 */
     void handleOne(String taskId) {
         TaskLogContext.open(taskId.trim(), null); // T2.7：MDC 防线程复用串号；T4.86：requestId 在认领后补写（TaskLogContext.open 幂等覆盖）
         Claimed claimed = null;
@@ -258,9 +258,9 @@ public class TranscriptionWorker implements SmartLifecycle {
         String code = cause instanceof ProcessingException pe ? pe.code : "UNKNOWN_ERROR";
         String reason = abbreviate(cause.getMessage());
         try {
-            Integer attempts = jdbc.query(
-                    "UPDATE task SET attempts = attempts + 1, updated_at = now() WHERE id = ? RETURNING attempts",
-                    rs -> rs.next() ? rs.getInt(1) : null, taskId);
+            // T4.94/P-03：RETURNING（PG 专用）→ 可移植两步（自增 UPDATE + 单独 SELECT），SQL 首次可被 H2 真库覆盖
+            taskAttempts.bump(taskId);
+            Integer attempts = taskAttempts.read(taskId);
             if (attempts != null && attempts >= maxRetries) {
                 // T4.87 C3：置 DEAD + dead_letter + 退分钟数收敛到 DeadTaskRecorder（单事务，不变量 DEAD⟺refunded）
                 deadTaskRecorder.markDead(taskId, code, reason);

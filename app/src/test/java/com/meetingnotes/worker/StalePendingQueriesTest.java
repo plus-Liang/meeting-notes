@@ -16,7 +16,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * 真实 H2（MODE=PostgreSQL）钉住 SQL 方向：< cutoff 选中陈旧行、排除新鲜行（A2 负向对照的落点：
  * 把 StalePendingQueries 里的 < 翻成 >，本测试立即变红——mock jdbc 层面翻转会假绿）。
  * T4.79/P-02：findTaskStatus（真 SQL，参数必须真绑定——T4.79 真栈曾因漏传 id 参数出现
- * "syntax error at end of input" 假绿，mock 层测不出）与 reclaimZombieRunning（条件 UPDATE 原子性）在此钉住。
+ * "syntax error at end of input" 假绿，mock 层测不出）在此钉住。
+ * T4.94：reclaimZombieRunning 已删（僵尸 RUNNING 回收收敛到 TaskCrashRecovery，SQL 由 TaskCrashRecoveryTest 真库覆盖）。
  */
 class StalePendingQueriesTest {
 
@@ -108,7 +109,7 @@ class StalePendingQueriesTest {
         assertTrue(ids.contains(oneMinuteOlder), "cutoff-1 分钟的行应入选（阈值 0 随参数走）");
     }
 
-    /* ===== T4.79/P-02：findTaskStatus / reclaimZombieRunning（真 H2） ===== */
+    /* ===== T4.79/P-02：findTaskStatus（真 H2） ===== */
 
     /** findTaskStatus：行存在返回 status+updated_at；行不存在返回 null（真 SQL——漏传 id 参数时本测试变红）。 */
     @Test
@@ -120,18 +121,5 @@ class StalePendingQueriesTest {
         assertEquals(runStart, row.get("updated_at"));
 
         org.junit.jupiter.api.Assertions.assertNull(queries.findTaskStatus(999_999L), "行不存在必须返回 null");
-    }
-
-    /** reclaimZombieRunning：条件 UPDATE 只动 RUNNING 行；非 RUNNING 行影响 0（原子抢占语义）。 */
-    @Test
-    void reclaimZombieRunningOnlyTouchesRunningRows() {
-        long runningId = insert("RUNNING", runStart);
-        long pendingId = insert("PENDING", runStart);
-
-        assertEquals(1, queries.reclaimZombieRunning(runningId), "RUNNING 行应被抢回收");
-        assertEquals(0, queries.reclaimZombieRunning(pendingId), "PENDING 行影响 0（不被回收）");
-
-        String status = jdbc.queryForObject("SELECT status FROM task WHERE id = ?", String.class, runningId);
-        assertEquals("PENDING", status, "RUNNING → PENDING");
     }
 }

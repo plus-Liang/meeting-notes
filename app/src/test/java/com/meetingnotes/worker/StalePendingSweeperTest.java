@@ -52,12 +52,14 @@ class StalePendingSweeperTest {
     @Mock
     private StalePendingQueries stalePendingQueries;
     @Mock
+    private TaskCrashRecovery crashRecovery; // T4.94：僵尸 RUNNING 回收委托对象
+    @Mock
     private StringRedisTemplate redis;
     @Mock
     private ZSetOperations<String, String> zSetOps;
 
     private StalePendingSweeper newSweeper(boolean enabled) {
-        StalePendingSweeper sweeper = new StalePendingSweeper(queuePublisher, stalePendingQueries, redis);
+        StalePendingSweeper sweeper = new StalePendingSweeper(queuePublisher, stalePendingQueries, crashRecovery, redis);
         ReflectionTestUtils.setField(sweeper, "enabled", enabled);
         ReflectionTestUtils.setField(sweeper, "staleMinutes", 2L);
         return sweeper;
@@ -87,7 +89,7 @@ class StalePendingSweeperTest {
     /** 默认值字面量契约：字段初始化器 = 2；@Value 注解串默认 = 2 分钟（变异改 :0 时此断言变红）。 */
     @Test
     void staleMinutesDefaultsToTwoMinutes() throws Exception {
-        StalePendingSweeper fresh = new StalePendingSweeper(queuePublisher, stalePendingQueries, redis);
+        StalePendingSweeper fresh = new StalePendingSweeper(queuePublisher, stalePendingQueries, crashRecovery, redis);
         assertEquals(2L, (Long) ReflectionTestUtils.getField(fresh, "staleMinutes"),
                 "字段声明处默认值必须是 2 分钟（S4：与 StartupRecovery 共用单一来源）");
 
@@ -184,7 +186,7 @@ class StalePendingSweeperTest {
 
     /** 带 T4.79 配置的构造：visibility=20s、heartbeat=20s（心跳×3=60s 新鲜窗）。 */
     private StalePendingSweeper newSweeperWithReceiptConfig() {
-        StalePendingSweeper sweeper = new StalePendingSweeper(queuePublisher, stalePendingQueries, redis);
+        StalePendingSweeper sweeper = new StalePendingSweeper(queuePublisher, stalePendingQueries, crashRecovery, redis);
         ReflectionTestUtils.setField(sweeper, "enabled", true);
         ReflectionTestUtils.setField(sweeper, "staleMinutes", 2L);
         ReflectionTestUtils.setField(sweeper, "visibilityTimeoutSec", 20L);
@@ -210,12 +212,12 @@ class StalePendingSweeperTest {
 
         sweeper.sweepStalePending();
 
-        verify(stalePendingQueries, never()).reclaimZombieRunning(anyLong());
+        verify(crashRecovery, never()).recover(anyLong(), anyString()); // T4.94：心跳新鲜绝不触发崩溃回收
         verify(queuePublisher, never()).publishToTail(anyLong());
         verify(zSetOps, never()).remove(anyString(), anyString());
     }
 
-    /** ⑤ 可见性超时 + 心跳陈旧（updated_at 超 heartbeat×3）→ 原子抢回收成功 → publishToTail + ZREM。 */
+    /** ⑤ 可见性超时 + 心跳陈旧（updated_at 超 heartbeat×3）→ 崩溃回收 NEED_REQUEUE → publishToTail + ZREM。 */
     @Test
     void zombieReceiptReclaimsStaleRunningAndRequeues() {
         StalePendingSweeper sweeper = newSweeperWithReceiptConfig();
@@ -224,13 +226,31 @@ class StalePendingSweeperTest {
                 .thenReturn(Set.of("5"));
         when(stalePendingQueries.findTaskStatus(5L)).thenReturn(Map.of(
                 "status", "RUNNING", "updated_at", new Timestamp(System.currentTimeMillis() - 600_000L)));
-        when(stalePendingQueries.reclaimZombieRunning(5L)).thenReturn(1);
+        when(crashRecovery.recover(5L, "sweeper")).thenReturn(TaskCrashRecovery.Outcome.NEED_REQUEUE);
         when(queuePublisher.tryPublishToTail(5L)).thenReturn(true);
 
         sweeper.sweepStalePending();
 
-        verify(stalePendingQueries).reclaimZombieRunning(5L);
+        verify(crashRecovery).recover(5L, "sweeper");
         verify(queuePublisher).tryPublishToTail(5L);
+        verify(zSetOps).remove("meetingnotes:worker-processing", "5");
+    }
+
+    /** T4.94：崩溃回收返回 DEAD（毒丸达上限）→ 只清回执，绝不重投。 */
+    @Test
+    void crashDeadOutcomeQuarantinesWithoutRequeue() {
+        StalePendingSweeper sweeper = newSweeperWithReceiptConfig();
+        stubEmptyPendingSweep();
+        when(zSetOps.rangeByScore(eq("meetingnotes:worker-processing"), eq(0.0), anyDouble(), eq(0L), eq(50L)))
+                .thenReturn(Set.of("5"));
+        when(stalePendingQueries.findTaskStatus(5L)).thenReturn(Map.of(
+                "status", "RUNNING", "updated_at", new Timestamp(System.currentTimeMillis() - 600_000L)));
+        when(crashRecovery.recover(5L, "sweeper")).thenReturn(TaskCrashRecovery.Outcome.DEAD);
+
+        sweeper.sweepStalePending();
+
+        verify(crashRecovery).recover(5L, "sweeper");
+        verify(queuePublisher, never()).publishToTail(anyLong());
         verify(zSetOps).remove("meetingnotes:worker-processing", "5");
     }
 
@@ -246,11 +266,11 @@ class StalePendingSweeperTest {
         sweeper.sweepStalePending();
 
         verify(zSetOps).remove("meetingnotes:worker-processing", "5");
-        verify(stalePendingQueries, never()).reclaimZombieRunning(anyLong());
+        verify(crashRecovery, never()).recover(anyLong(), anyString());
         verify(queuePublisher, never()).publishToTail(anyLong());
     }
 
-    /** ⑦ 回收条件 UPDATE 影响行数 0（别人先动）→ 不重复投递，只清回执。 */
+    /** ⑦ 崩溃回收 SKIPPED（别人先动/条件 UPDATE 影响 0）→ 不重投，只清回执。 */
     @Test
     void lostReclaimRaceDoesNotRequeueAgain() {
         StalePendingSweeper sweeper = newSweeperWithReceiptConfig();
@@ -259,11 +279,11 @@ class StalePendingSweeperTest {
                 .thenReturn(Set.of("5"));
         when(stalePendingQueries.findTaskStatus(5L)).thenReturn(Map.of(
                 "status", "RUNNING", "updated_at", new Timestamp(System.currentTimeMillis() - 600_000L)));
-        when(stalePendingQueries.reclaimZombieRunning(5L)).thenReturn(0);
+        when(crashRecovery.recover(5L, "sweeper")).thenReturn(TaskCrashRecovery.Outcome.SKIPPED);
 
         sweeper.sweepStalePending();
 
-        verify(stalePendingQueries).reclaimZombieRunning(5L);
+        verify(crashRecovery).recover(5L, "sweeper");
         verify(queuePublisher, never()).publishToTail(anyLong());
         verify(zSetOps).remove("meetingnotes:worker-processing", "5");
     }
@@ -284,6 +304,6 @@ class StalePendingSweeperTest {
         double max = maxCaptor.getValue();
         assertTrue(max >= now - 181_000 && max <= now - 179_000,
                 "≤0 应回退 180s（cutoff ≈ now-180s），实测 " + max + " vs now=" + now);
-        verify(stalePendingQueries, never()).reclaimZombieRunning(anyLong());
+        verify(crashRecovery, never()).recover(anyLong(), anyString()); // T4.94：零候选绝不触发崩溃回收
     }
 }

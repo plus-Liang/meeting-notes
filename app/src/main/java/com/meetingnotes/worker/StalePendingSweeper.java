@@ -35,7 +35,8 @@ import java.util.Set;
  * <p>多实例口径（T4.67-fix F3，事实化）：单实例部署为当前口径（D-061），重复入队的副本无害；多实例下靠
  * worker 侧的原子认领兜底——TranscriptionWorker 用条件 UPDATE（{@code WHERE id = ? AND status IN
  * ('PENDING','RETRYING')}）并校验影响行数，同一任务只有一个实例能把行改成 RUNNING，抢到 0 行的实例直接跳过。
- * 回收僵尸 RUNNING 用 {@link StalePendingQueries#reclaimZombieRunning(long)} 的同构条件 UPDATE。
+ * 回收僵尸 RUNNING 改走 {@link TaskCrashRecovery#recover(long, String)}（T4.94/P-03：原子「PENDING + attempts+1」，
+ * 达上限置 DEAD——毒丸任务不再崩-重启-崩无限循环；重投顺序语义不变，仍尾插）。
  */
 @Component
 public class StalePendingSweeper {
@@ -50,6 +51,7 @@ public class StalePendingSweeper {
 
     private final QueuePublisher queuePublisher;
     private final StalePendingQueries stalePendingQueries;
+    private final TaskCrashRecovery crashRecovery; // T4.94/P-03：僵尸 RUNNING 崩溃计次回收
     private final StringRedisTemplate redis;
 
     @Value("${app.queue.pending-sweep.enabled:true}")
@@ -72,9 +74,10 @@ public class StalePendingSweeper {
     private long heartbeatSec = 20;
 
     public StalePendingSweeper(QueuePublisher queuePublisher, StalePendingQueries stalePendingQueries,
-                               StringRedisTemplate redis) {
+                               TaskCrashRecovery crashRecovery, StringRedisTemplate redis) {
         this.queuePublisher = queuePublisher;
         this.stalePendingQueries = stalePendingQueries;
+        this.crashRecovery = crashRecovery;
         this.redis = redis;
     }
 
@@ -139,7 +142,7 @@ public class StalePendingSweeper {
             return;
         }
         long freshCutoff = System.currentTimeMillis() - heartbeatSec * 3 * 1000L; // 心跳×3 内 = 活着
-        int zombieReceipts = 0, requeued = 0, skipped = 0;
+        int zombieReceipts = 0, requeued = 0, skipped = 0, quarantined = 0; // T4.94：+quarantined（崩溃计次达上限转 DEAD）
         for (String member : candidates) {
             long id;
             try {
@@ -159,11 +162,15 @@ public class StalePendingSweeper {
                     if (updatedAt != null && updatedAt.after(new Timestamp(freshCutoff))) {
                         skipped++; // 心跳活着：可能是慢任务，也可能是其它实例在跑——绝不回收
                     } else {
-                        int won = stalePendingQueries.reclaimZombieRunning(id); // 条件 UPDATE：抢到才算赢
-                        if (won == 1) {
-                            if (queuePublisher.tryPublishToTail(id)) { requeued++; }
+                        // T4.94/P-03：崩溃计次回收改走 TaskCrashRecovery（原子 PENDING+attempts+1，达上限置 DEAD）
+                        TaskCrashRecovery.Outcome outcome = crashRecovery.recover(id, "sweeper");
+                        if (outcome == TaskCrashRecovery.Outcome.NEED_REQUEUE) {
+                            if (queuePublisher.tryPublishToTail(id)) { requeued++; } // 尾插语义不变（T4.62 S2）
+                            else { log.warn("任务 {} 崩溃回收后重投失败（Redis 不可用），行已 PENDING（updated_at 已刷新），由陈旧 PENDING 清扫兜底", id); }
+                        } else if (outcome == TaskCrashRecovery.Outcome.DEAD) {
+                            quarantined++;
                         }
-                        zremQuietly(member); // 赢/输都清回执（输 = 行已被别人动过，PENDING 清扫兜底）
+                        zremQuietly(member); // 赢/输/SKIPPED 都清回执（输 = 行已被别人动过，PENDING 清扫兜底）
                         zombieReceipts++;
                     }
                 } else if ("PENDING".equals(row.get("status")) || "RETRYING".equals(row.get("status"))) {
@@ -190,6 +197,7 @@ public class StalePendingSweeper {
                 .addKeyValue("zombieReceipts", zombieReceipts)
                 .addKeyValue("requeued", requeued)
                 .addKeyValue("skipped", skipped)
+                .addKeyValue("quarantined", quarantined) // T4.94：崩溃计次达上限转 DEAD 条数
                 .log("僵尸回执清扫：可见性超时回收完成");
     }
 

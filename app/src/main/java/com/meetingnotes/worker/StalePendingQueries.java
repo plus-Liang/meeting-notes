@@ -69,9 +69,4 @@ public class StalePendingQueries {
                 (rs, i) -> Map.of("status", rs.getString("status"), "updated_at", rs.getTimestamp("updated_at")), id);
         return rows.isEmpty() ? null : rows.get(0);
     }
-
-    /** T4.79/P-02：原子抢占僵尸 RUNNING → PENDING（条件 UPDATE 防多实例双抢，T4.77-fix B1 语义同源）；影响行数 1 = 抢到。 */
-    public int reclaimZombieRunning(long id) {
-        return jdbc.update("UPDATE task SET status = 'PENDING', updated_at = now() WHERE id = ? AND status = 'RUNNING'", id);
-    }
 }

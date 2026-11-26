@@ -72,13 +72,17 @@ class TranscriptionWorkerTest {
     @Mock
     private TaskHeartbeat taskHeartbeat;
     @Mock
+    private TaskAttempts taskAttempts; // T4.94：markFailure 的 attempts 读写改走可移植原语
+    @Mock
     private StalePendingQueries stalePendingQueries;
+    @Mock
+    private TaskCrashRecovery crashRecovery; // T4.94：StartupRecovery 的崩溃计次委托（下方两个启动恢复用例用）
 
     private TranscriptionWorker newWorker() {
         return new TranscriptionWorker(redis, jdbc, s3, asrClient,
                 structuringService, punctuator, webhookService, pasteTextReader, monoWavExtractor,
                 queuePublisher, deadTaskRecorder, taskHeartbeat, "meetingnotes:task-queue", 10, "meetingnotes", 3,
-                new RedisUnavailableReporter(60, 2, java.time.Clock.systemUTC())); // T4.91：构造器连带（K-192 预授权）
+                new RedisUnavailableReporter(60, 2, java.time.Clock.systemUTC()), taskAttempts); // T4.91/T4.94：构造器连带（K-192 预授权）
     }
 
     @Test
@@ -240,9 +244,8 @@ class TranscriptionWorkerTest {
     @Test
     void failureUnderRetryLimitMarksRetryingAndRequeues() {
         TranscriptionWorker worker = newWorker();
-        // UPDATE ... RETURNING attempts → 本次失败后 attempts=1，未达上限 3
-        doReturn(1).when(jdbc).query(contains("RETURNING attempts"),
-                ArgumentMatchers.<ResultSetExtractor<Integer>>any(), eq(9L));
+        // T4.94：bump + read 两步替代 UPDATE...RETURNING → 本次失败后 attempts=1，未达上限 3
+        when(taskAttempts.read(9L)).thenReturn(1);
         when(queuePublisher.tryPublishToTail(9L)).thenReturn(true);
 
         ReflectionTestUtils.invokeMethod(worker, "markFailure", 9L,
@@ -259,8 +262,7 @@ class TranscriptionWorkerTest {
     @Test
     void repushFailureRollsBackToPendingNotStuckRetrying() {
         TranscriptionWorker worker = newWorker();
-        doReturn(1).when(jdbc).query(contains("RETURNING attempts"),
-                ArgumentMatchers.<ResultSetExtractor<Integer>>any(), eq(11L));
+        when(taskAttempts.read(11L)).thenReturn(1); // T4.94：bump + read 两步（本条失败后 attempts=1）
         when(queuePublisher.tryPublishToTail(11L)).thenReturn(false);
 
         ReflectionTestUtils.invokeMethod(worker, "markFailure", 11L,
@@ -275,8 +277,7 @@ class TranscriptionWorkerTest {
     void failureExhaustedMarksDeadAndWritesDeadLetterWithReason() {
         TranscriptionWorker worker = newWorker();
         // 重试耗尽：attempts=3 >= max-retries=3
-        doReturn(3).when(jdbc).query(contains("RETURNING attempts"),
-                ArgumentMatchers.<ResultSetExtractor<Integer>>any(), eq(10L));
+        when(taskAttempts.read(10L)).thenReturn(3); // T4.94：bump + read 两步
 
         ReflectionTestUtils.invokeMethod(worker, "markFailure", 10L,
                 new ProcessingException("ASR_ERROR", "ASR 转写调用失败：服务不可达", null));
@@ -292,10 +293,13 @@ class TranscriptionWorkerTest {
     @Test
     void startupRecoveryRequeuesRunningTasksAsPending() {
         com.meetingnotes.worker.StartupRecovery recovery = new com.meetingnotes.worker.StartupRecovery(
-                jdbc, queuePublisher, stalePendingQueries);
+                jdbc, queuePublisher, stalePendingQueries, crashRecovery);
         // T4.78：启动恢复 SELECT 带僵尸判据 cutoff 参数（query(String, RowMapper, Object...) 重载）
         doReturn(List.of(5L, 7L)).when(jdbc).query(contains("WHERE status = 'RUNNING'"),
                 ArgumentMatchers.<org.springframework.jdbc.core.RowMapper<Long>>any(), ArgumentMatchers.any());
+        // T4.94：回收走崩溃计次（NEED_REQUEUE 才重投）
+        when(crashRecovery.recover(5L, "startup")).thenReturn(TaskCrashRecovery.Outcome.NEED_REQUEUE);
+        when(crashRecovery.recover(7L, "startup")).thenReturn(TaskCrashRecovery.Outcome.NEED_REQUEUE);
 
         recovery.run(null);
 
@@ -308,7 +312,7 @@ class TranscriptionWorkerTest {
     @Test
     void startupRecoveryWithNoZombiesLogsZeroAndPushesNothing() {
         com.meetingnotes.worker.StartupRecovery recovery = new com.meetingnotes.worker.StartupRecovery(
-                jdbc, queuePublisher, stalePendingQueries);
+                jdbc, queuePublisher, stalePendingQueries, crashRecovery);
         doReturn(List.of()).when(jdbc).query(contains("WHERE status = 'RUNNING'"),
                 ArgumentMatchers.<org.springframework.jdbc.core.RowMapper<Long>>any(), ArgumentMatchers.any());
 
@@ -362,7 +366,7 @@ class TranscriptionWorkerTest {
     /* ---- T4.77-fix B1：认领抛异常（毒丸：任务行不存在/DB 瞬时故障）→ worker 不死、不 markFailure，下一条照常处理 ---- */
 
     /** 队列里出现库里已不存在的 task id 时：handleOne 必须 catch 住认领异常只记 error（绝不 markFailure——
-     *  行不存在时 UPDATE…RETURNING 返回空会 NPE），worker 存活，下一条任务照常认领并走完管线置 DONE。 */
+     *  行不存在时认领 SELECT 会抛 EmptyResultDataAccessException），worker 存活，下一条任务照常认领并走完管线置 DONE。 */
     @Test
     void claimExceptionDoesNotKillWorkerAndNextTaskProceeds() {
         TranscriptionWorker worker = newWorker();
@@ -382,8 +386,7 @@ class TranscriptionWorkerTest {
         worker.handleOne("1");
 
         // 毒丸路径：绝不触发 markFailure（无 attempts 回写/RETRYING/DEAD），也绝无心跳会话
-        verify(jdbc, never()).query(contains("RETURNING attempts"),
-                ArgumentMatchers.<ResultSetExtractor<Integer>>any(), eq(999999L));
+        verify(taskAttempts, never()).bump(999999L); // T4.94：markFailure 的入口现在是 taskAttempts.bump
         verify(jdbc, never()).update(contains("'RETRYING'"), ArgumentMatchers.any(), eq(999999L));
         verify(jdbc, never()).update(contains("'DEAD'"), ArgumentMatchers.any(), eq(999999L));
         verify(taskHeartbeat, never()).start(999999L);

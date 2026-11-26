@@ -46,9 +46,11 @@ class StartupRecoveryTest {
     private QueuePublisher queuePublisher;
     @Mock
     private StalePendingQueries stalePendingQueries;
+    @Mock
+    private TaskCrashRecovery crashRecovery; // T4.94：崩溃计次回收委托对象
 
     private StartupRecovery newRecovery() {
-        return new StartupRecovery(jdbc, queuePublisher, stalePendingQueries);
+        return new StartupRecovery(jdbc, queuePublisher, stalePendingQueries, crashRecovery);
     }
 
     @Test
@@ -56,6 +58,7 @@ class StartupRecoveryTest {
         when(jdbc.query(contains("WHERE status = 'RUNNING'"), ArgumentMatchers.<RowMapper<Long>>any(),
                 ArgumentMatchers.any()))
                 .thenReturn(List.of(7L));
+        when(crashRecovery.recover(7L, "startup")).thenReturn(TaskCrashRecovery.Outcome.NEED_REQUEUE);
         when(stalePendingQueries.findStalePending(ArgumentMatchers.any())).thenReturn(List.of(9L));
 
         newRecovery().run(null);
@@ -65,6 +68,8 @@ class StartupRecoveryTest {
         verify(queuePublisher, times(1)).tryPublish(9L);
         verify(queuePublisher, never()).tryPublishToTail(7L);
         verify(queuePublisher, never()).publish(7L);
+        /* T4.94：回收必须先经崩溃计次（recover），source 固定 "startup" */
+        verify(crashRecovery).recover(7L, "startup");
         /* 启动口径：先 touch 全部、再逐条投递（顺序语义与运行期 sweeper 相反，不许合并） */
         InOrder order = inOrder(stalePendingQueries, queuePublisher);
         order.verify(stalePendingQueries).touch(9L);
@@ -87,6 +92,7 @@ class StartupRecoveryTest {
         when(jdbc.query(contains("WHERE status = 'RUNNING'"), ArgumentMatchers.<RowMapper<Long>>any(),
                 ArgumentMatchers.any()))
                 .thenReturn(List.of(7L));
+        when(crashRecovery.recover(7L, "startup")).thenReturn(TaskCrashRecovery.Outcome.NEED_REQUEUE);
         when(stalePendingQueries.findStalePending(ArgumentMatchers.any())).thenReturn(List.of(9L));
         /* tryPublish 的失败语义 = 返回 false（publish 已把 DataAccessException 转 503 内部消化，永不外抛） */
         when(queuePublisher.tryPublish(7L)).thenReturn(false);
@@ -101,6 +107,7 @@ class StartupRecoveryTest {
         when(jdbc.query(contains("WHERE status = 'RUNNING'"), ArgumentMatchers.<RowMapper<Long>>any(),
                 ArgumentMatchers.any()))
                 .thenReturn(List.of(7L));
+        when(crashRecovery.recover(7L, "startup")).thenReturn(TaskCrashRecovery.Outcome.NEED_REQUEUE);
         doThrow(new IllegalStateException("connection factory not initialized"))
                 .when(queuePublisher).tryPublish(7L);
 
@@ -115,6 +122,7 @@ class StartupRecoveryTest {
         ReflectionTestUtils.setField(recovery, "recoveryStaleMinutes", 0L);
         when(jdbc.query(contains("WHERE status = 'RUNNING'"), ArgumentMatchers.<RowMapper<Long>>any(),
                 ArgumentMatchers.any())).thenReturn(List.of(7L));
+        when(crashRecovery.recover(7L, "startup")).thenReturn(TaskCrashRecovery.Outcome.NEED_REQUEUE);
         ArgumentCaptor<Timestamp> cutoff = ArgumentCaptor.forClass(Timestamp.class);
 
         recovery.run(null);
