@@ -60,7 +60,7 @@ public class TaskQueryService {
         return trimmed;
     }
 
-    /** 列表项：对外契约 snake_case（D-041，T2.10 六键 + T4.21 三键 + T4.29 两键 + T4.43 一键，只增不改）。 */
+    /** 列表项：对外契约 snake_case（D-041；T2.10 六键 + T4.21 三键 + T4.29 两键 + T4.43 一键 + T4.95/C2 error_message（dead_letter 最新人话原因），只增不改、末尾追加）。 */
     public record TaskListItem(
             long id,
             String status,
@@ -73,7 +73,8 @@ public class TaskQueryService {
             String template,
             List<String> labels,
             boolean favorite,
-            String displayName) {
+            String displayName,
+            String errorMessage) {
     }
 
     /** 列表响应：items + next_before_id（还有下一页时为最后一项的 id，否则 null）+
@@ -167,11 +168,14 @@ public class TaskQueryService {
         Long total = jdbc.queryForObject(
                 "SELECT count(*) FROM task t WHERE " + where, Long.class, args.toArray());
 
-        /* 注意：文本块会剥掉行尾空格，WHERE 后必须显式补空格再拼 where 片段（T4.42 首跑踩过 WHEREt） */
+        /* 注意：文本块会剥掉行尾空格，WHERE 后必须显式补空格再拼 where 片段（T4.42 首跑踩过 WHEREt）。
+           T4.95/C2：error_message = dead_letter 最新一条 reason（可移植 LIMIT 子查询，H2/PG 都能跑，禁 LATERAL/RETURNING）；
+           **后端不按状态裁剪**——DONE 也可能有历史 dead_letter 行（T4.87 复活后残留），前端按 status 判断展示。 */
         StringBuilder sql = new StringBuilder("""
                 SELECT t.id, t.status, t.source_uri, t.duration_sec, t.created_at, t.error_code,
                        r.keywords, r.summary, r.template, t.labels::text AS labels, t.favorite,
-                       t.display_name
+                       t.display_name,
+                       COALESCE((SELECT d.reason FROM dead_letter d WHERE d.task_id = t.id ORDER BY d.id DESC LIMIT 1), NULL) AS error_message
                 FROM task t
                 LEFT JOIN task_result r ON r.task_id = t.id
                 WHERE """).append(' ').append(where);
@@ -199,7 +203,8 @@ public class TaskQueryService {
                         rs.getString("template"),
                         labelsOf(rs.getString("labels")),
                         rs.getBoolean("favorite"),
-                        rs.getString("display_name")));
+                        rs.getString("display_name"),
+                        rs.getString("error_message")));
             } else {
                 hasMore[0] = true; // 第 limit+1 行存在 = 还有下一页
             }

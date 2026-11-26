@@ -26,6 +26,10 @@ import java.util.Map;
  * 字符串、值=标签）：未标注/清除/旧任务为 null（不是 {}），PATCH /tasks/{id}/speaker-map 写入；
  * {@code display_name} 为用户自定义展示名（T4.43 第 17 键，PATCH /tasks/{id} 写入）：
  * 未命名/清除/旧任务为 null（不是空串），前端回退清洗文件名展示；原文件名（source_uri）不动。
+ * {@code error_message} 为人话失败原因（T4.95/C3 第 18 键）= dead_letter 最新一条 reason
+ * （可移植 LIMIT 子查询；DEAD 有人话，RETRYING 通常无 dead_letter 行为 null，前端用
+ * FailureReason 映射按 error_code 兜底；后端不按状态裁剪）；{@code attempts} 为已尝试次数
+ * （T4.95/C3 第 19 键，task.attempts 原值，非负整数、失败/崩溃每次 +1）。
  */
 public record TaskStatusResponse(
         long taskId,
@@ -44,7 +48,9 @@ public record TaskStatusResponse(
         String template,
         List<SegmentView> segments,
         Map<String, String> speakerMap,
-        String displayName) {
+        String displayName,
+        String errorMessage,
+        Integer attempts) {
 
     /** 句子级时间戳元素（T4.35a）：start/end 秒（double），text 去首尾空白后的句子文本。 */
     public record SegmentView(double start, double end, String text) {

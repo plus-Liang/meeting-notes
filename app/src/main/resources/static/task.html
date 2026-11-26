@@ -62,6 +62,67 @@
     return ERROR_TEXT[code] || ('未知错误码：' + code);
   }
 
+  /* ===== T4.95/C5：失败可视——「为什么失败」块（DEAD/RETRYING 才渲染） =====
+     人话优先接口 error_message（dead_letter.reason）；无则用前端码→文案映射（与后端
+     FailureReason.java 同文案，两处必须同步改）；未知码原样显示不编造。全部 escapeHtml/escapeAttr。 */
+  var FAILURE_TEXT = {
+    STORAGE_ERROR: { title: '文件读取失败', hint: '检查对象存储是否可用、文件是否被移动或删除；重新提交即可重试。' },
+    ASR_ERROR: { title: '语音识别失败', hint: '检查 ASR 容器是否健康（`/api/v1/admin/storage` 页或 `docker logs`）；换一种音频格式再试。' },
+    WORKER_CRASH: { title: '处理进程异常中断', hint: '该任务连续中断已达上限；查看 `docker logs` 中 `taskId` 对应的 ERROR，必要时重启服务。' },
+    QUEUE_UNAVAILABLE: { title: '队列不可用', hint: 'Redis 可能不可用；恢复后点「重试」即可。' },
+    UNKNOWN_ERROR: { title: '未知错误', hint: '把这段错误码复制给开发者，或查看容器日志。' }
+  };
+
+  function failureHintOf(code) {
+    if (!code) return FAILURE_TEXT.UNKNOWN_ERROR;
+    return FAILURE_TEXT[code] || { title: code, hint: FAILURE_TEXT.UNKNOWN_ERROR.hint };
+  }
+
+  function failureHtml(data) {
+    var h = failureHintOf(data.error_code);
+    var reason = data.error_message || h.title;
+    var attempts = (data.attempts === null || data.attempts === undefined) ? '—' : data.attempts;
+    var diag = '任务 #' + data.task_id + '｜状态 ' + data.status +
+      '｜错误码 ' + (data.error_code || '—') +
+      '｜原因 ' + (data.error_message || h.title) +
+      '｜已尝试 ' + attempts + ' 次';
+    return '<div class="section" id="failBox"><h2>为什么失败</h2>' +
+      '<dl class="facts">' +
+      '<dt>原因</dt><dd>' + escapeHtml(reason) + '</dd>' +
+      '<dt>建议</dt><dd>' + escapeHtml(h.hint) + '</dd>' +
+      '<dt>已尝试</dt><dd>' + attempts + ' 次</dd>' +
+      '</dl>' +
+      '<button type="button" class="btn-secondary js-copy-diag" data-diag="' + escapeAttr(diag) + '"' +
+      ' aria-label="复制诊断信息">复制诊断信息</button>' +
+      '</div>';
+  }
+
+  /* 复制诊断信息：clipboard API 优先，textarea + execCommand 兜底；结果用 mnToast 提示（禁 alert，M-13）。 */
+  function bindCopyDiag(data) {
+    var btn = card.querySelector('.js-copy-diag');
+    if (!btn) return;
+    btn.addEventListener('click', function () {
+      var text = btn.getAttribute('data-diag');
+      var done = function () { mnToast('已复制诊断信息'); };
+      var fallback = function () {
+        var ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand('copy'); done(); }
+        catch (e) { mnToast('复制失败，请手动选择文本'); }
+        document.body.removeChild(ta);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done, fallback);
+      } else {
+        fallback();
+      }
+    });
+  }
+
   var transcript = ''; /* T4.15⑧：详情逐字稿缓存（供关键词/依据定位）；T4.18 起为**展示文本**（有 AI 标点则用标点文本），只读不回写 */
   var displayText = ''; /* T4.18：页面实际展示文本（句子按行拼接），「复制全文」以它为准（复制==页面文本） */
 
@@ -646,10 +707,14 @@
         '<div class="skeleton skeleton-block" style="width:100%"></div>' +
         '<div class="skeleton skeleton-block" style="width:92%"></div></div>';
     } else if (status === 'RETRYING') {
-      body = '<div class="section"><p class="error-text">转写遇到问题，正在自动重试，请稍候（每 3 秒自动刷新）。</p>' +
-        '<p class="hint">原因：' + escapeHtml(errorTextOf(data.error_code)) + '</p></div>';
+      /* T4.95：结构化原因/建议/已尝试前置（原「原因：」行并入 failureHtml，避免重复展示） */
+      body = failureHtml(data) +
+        '<div class="section"><p class="error-text">转写遇到问题，正在自动重试，请稍候（每 3 秒自动刷新）。</p>' +
+        '</div>';
     } else if (status === 'DEAD') {
-      body = '<div class="section"><p class="error-text">转写失败。原因：' + escapeHtml(errorTextOf(data.error_code)) + '</p>' +
+      /* T4.95：同上；「原因：」行并入 failureHtml */
+      body = failureHtml(data) +
+        '<div class="section"><p class="error-text">转写失败。</p>' +
         '<p class="hint">请检查 ASR 服务是否正常后，可在<a href="tasks.html">任务列表</a>按"失败"筛选并批量重试。</p></div>';
     } else if (status === 'DONE') {
       /* T4.41：按定稿稿骨架两栏（左：摘要+要点+播放器+逐字稿；右：待办/关键词/标签/模板/转写口径/分享/导出/删除）；
@@ -664,6 +729,9 @@
     }
     card.innerHTML = head + body;
     bindDetailRename(data); /* T4.43：重命名入口随刊头重建 */
+    if (status === 'RETRYING' || status === 'DEAD') {
+      bindCopyDiag(data); /* T4.95：复制诊断信息按钮随失败块重建 */
+    }
     if (status === 'DONE') {
       bindExport(data);
       bindDelete(data);

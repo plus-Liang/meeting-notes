@@ -153,7 +153,9 @@ public class TaskController {
                        r.template,
                        CASE WHEN t.status = 'DONE' THEN r.segments::text END AS segments,
                        r.speaker_map::text AS speaker_map,
-                       t.display_name
+                       t.display_name,
+                       COALESCE((SELECT d.reason FROM dead_letter d WHERE d.task_id = t.id ORDER BY d.id DESC LIMIT 1), NULL) AS error_message,
+                       t.attempts
                 FROM task t
                 LEFT JOIN task_result r ON r.task_id = t.id
                 WHERE t.id = ? AND t.user_id = ?
@@ -242,7 +244,8 @@ public class TaskController {
                             rs.getString("error_code"), rs.getString("summary"), keywords,
                             rs.getString("ai_tier"), todos, keypoints,
                             rs.getString("transcript_punctuated"), rs.getString("template"), segments,
-                            speakerMap, rs.getString("display_name"));
+                            speakerMap, rs.getString("display_name"),
+                            rs.getString("error_message"), (Integer) rs.getObject("attempts"));
                 },
                 id, UserContext.current());
         if (resp == null) {

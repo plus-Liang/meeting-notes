@@ -980,3 +980,9 @@ details.example[open] summary { margin-bottom: 12px; }
 .dlg-title { margin: 0 0 8px; font-size: 17px; color: var(--ink); }
 .dlg-desc { margin: 0 0 16px; color: var(--ink-2); line-height: 1.65; }
 .dlg-actions { display: flex; gap: 10px; justify-content: flex-end; }
+/* ===== T4.95/C4：失败可视——台账行原因副行（DEAD/RETRYING 才渲染） ===== */
+.st-reason {
+  display: block; max-width: 100%; margin-top: 2px;
+  font-size: 12px; line-height: 1.5; color: var(--ink-2);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}

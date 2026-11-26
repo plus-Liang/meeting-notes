@@ -230,6 +230,17 @@
       : '';
   }
 
+  /* ===== T4.95/C4：失败可视——台账行原因副行 =====
+     仅 DEAD/RETRYING 渲染；内容优先接口人话 error_message（dead_letter.reason），
+     否则回退 error_code 原码（前端不内置映射）；截 40 字 + title 放全文；全部走转义。 */
+  function failureReasonHtml(item) {
+    if (item.status !== 'DEAD' && item.status !== 'RETRYING') return '';
+    var text = item.error_message || item.error_code;
+    if (!text) return '';
+    var shown = text.length > 40 ? text.slice(0, 40) + '…' : text;
+    return '<span class="st-reason" title="' + escapeAttr(text) + '">' + escapeHtml(shown) + '</span>';
+  }
+
   /* ===== T4.43：展示名规则 = display_name || 清洗文件名 =====
      清洗 = 去常见音视频/字幕扩展名、>60 字截断加省略号；纯 uuid/hash 名不特殊处理（由用户重命名解决）。
      原文件名与溯源不动（display_name 是 task 表独立展示列，V9）。 */
@@ -386,7 +397,7 @@
       '" data-task-name="' + escapeHtml(name).replace(/"/g, '&quot;') + '" ' +
       'aria-label="查看任务 #' + item.id + ' 详情">' + escapeHtml(name) + '</a></span>' +
       '<span class="task-sub">' + identityHtml(item) + '</span>' +
-      summaryHtml(item) + '</span>' +
+      summaryHtml(item) + failureReasonHtml(item) + '</span>' +
       '<span class="cell-num cell-dur">' + fmtDuration(item.duration_sec) + '</span>' +
       '<span class="cell-num cell-time">' + fmtClockShort(item.created_at) + '</span>' +
       '<span class="st"><i class="st-dot ' + stDotClass(item.status) + '"></i>' + statusText(item.status) + '</span>' +
