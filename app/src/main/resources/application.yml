@@ -259,7 +259,8 @@ app:
 
   auth:
     # T4.70 O-1：开放注册开关，**默认 false**（陌生人不能自助注册、消耗 ASR 配额）——
-    # 首次部署例外：1 号管理员未认领时首次注册仍成功且 role=ADMIN（认领是原子闸，不受本开关限制）。
+    # T4.93 起：未认领实例上 POST /auth/register 直接 403 SETUP_REQUIRED——认领只走 /setup 向导
+    # （必须带 SETUP_CODE），不再有「首个注册者即管理员」的例外路径。
     # 加人通道：管理员经 POST /api/v1/admin/users 建号（settings.html 成员区）。
     # true = 允许任何人自助注册（仅自用/可信环境临时开启）。配置项改后重启生效，不做运行期热改。
     registration-enabled: ${AUTH_REGISTRATION_ENABLED:false}
