@@ -3,6 +3,7 @@ package com.meetingnotes.web;
 import com.meetingnotes.common.ApiException;
 import com.meetingnotes.common.UserContext;
 import com.meetingnotes.task.TaskDateWindow;
+import com.meetingnotes.task.TaskListSupport;
 import com.meetingnotes.task.TaskQueryService;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -31,9 +32,11 @@ public class TaskListController {
     }
 
     /** 服务端任务列表（T2.10 / D-053）：keyset 分页（before_id 游标禁 OFFSET）、user_id 服务端过滤（D-040）；
-     *  limit 1..50、status 白名单、T4.24 只增可选 q（去空格/超长 400，见 TaskQueryService.normalizeQ）；非法 → 400。
+     *  limit 1..50、status 白名单、T4.24 只增可选 q（去空格/超长 400，见 TaskListSupport.normalizeQ）；非法 → 400。
      *  T4.42：label 多值（重复参数，trim 后去空）；created_after/created_before 校验在
-     *  TaskDateWindow.resolve（格式/顺序 → 400 INVALID_PARAM）。 */
+     *  TaskDateWindow.resolve（格式/顺序 → 400 INVALID_PARAM）。
+     *  T4.96/C5：只增可选 trash——true = 回收站列表（deleted_at IS NOT NULL），false/空 = 默认列表
+     *  （回收站任务不可见，D-245）；其它值 → 400 INVALID_PARAM（口径同 favorite）。 */
     @GetMapping("/tasks")
     public TaskQueryService.TaskListResponse list(
             @org.springframework.web.bind.annotation.RequestParam(required = false) String status,
@@ -43,7 +46,8 @@ public class TaskListController {
             @org.springframework.web.bind.annotation.RequestParam(required = false) java.util.List<String> label,
             @org.springframework.web.bind.annotation.RequestParam(required = false) String favorite,
             @org.springframework.web.bind.annotation.RequestParam(name = "created_after", required = false) String createdAfter,
-            @org.springframework.web.bind.annotation.RequestParam(name = "created_before", required = false) String createdBefore) {
+            @org.springframework.web.bind.annotation.RequestParam(name = "created_before", required = false) String createdBefore,
+            @org.springframework.web.bind.annotation.RequestParam(required = false) String trash) {
         int lim = TaskQueryService.DEFAULT_LIMIT;
         if (limit != null) {
             try {
@@ -85,8 +89,17 @@ public class TaskListController {
         java.util.List<String> labelFilters = label == null ? java.util.List.of()
                 : label.stream().filter(java.util.Objects::nonNull).map(String::trim)
                         .filter(s -> !s.isEmpty()).toList();
+        /* T4.96/C5：trash 只允许 true/false/空（其它 400，口径同 favorite） */
+        boolean trashFilter = false;
+        if (trash != null && !trash.isBlank()) {
+            String value = trash.trim();
+            if (!"true".equals(value) && !"false".equals(value)) {
+                throw new ApiException(400, "INVALID_PARAM", "trash 只允许 true/false");
+            }
+            trashFilter = Boolean.parseBoolean(value);
+        }
         return taskQueryService.list(UserContext.current(), statusFilter, lim, before,
-                TaskQueryService.normalizeQ(q), labelFilters, favoriteFilter,
-                TaskDateWindow.resolve(createdAfter, createdBefore));
+                TaskListSupport.normalizeQ(q), labelFilters, favoriteFilter,
+                TaskDateWindow.resolve(createdAfter, createdBefore), trashFilter);
     }
 }

@@ -107,7 +107,7 @@ public class TaskExportController {
                        t.display_name
                 FROM task t
                 LEFT JOIN task_result r ON r.task_id = t.id
-                WHERE t.id = ? AND t.user_id = ?
+                WHERE t.id = ? AND t.user_id = ? AND t.deleted_at IS NULL
                 """, (rs, i) -> new ExportRow(rs.getString("status"), rs.getString("transcript"),
                 rs.getString("summary"), rs.getString("keywords"), rs.getString("todos"),
                 rs.getString("keypoints"), rs.getString("transcript_punctuated"), rs.getString("source_uri"),

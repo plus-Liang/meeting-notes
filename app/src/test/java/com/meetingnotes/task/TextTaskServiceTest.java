@@ -89,7 +89,7 @@ class TextTaskServiceTest {
 
     @SuppressWarnings("unchecked")
     private void stubExisting(TextTaskService.ExistingTask existing) {
-        when(jdbc.query(contains("SELECT id, status FROM task"),
+        when(jdbc.query(contains("FROM task WHERE content_hash"),
                 ArgumentMatchers.<ResultSetExtractor<TextTaskService.ExistingTask>>any(),
                 any(), any())).thenReturn(existing);
     }
@@ -148,7 +148,7 @@ class TextTaskServiceTest {
     void pasteIdempotentHitPendingRequeuesT452() {
         txExecutesCallback();
         stubConflict();
-        stubExisting(new TextTaskService.ExistingTask(9L, "PENDING"));
+        stubExisting(new TextTaskService.ExistingTask(9L, "PENDING", false));
 
         TaskCreatedResponse resp = newService().createPaste("重复的文本");
 
@@ -178,7 +178,7 @@ class TextTaskServiceTest {
     void duplicateTextReusesExistingDoneTaskWithoutConsumingQuota() {
         txExecutesCallback();
         stubConflict();
-        stubExisting(new TextTaskService.ExistingTask(5L, "DONE"));
+        stubExisting(new TextTaskService.ExistingTask(5L, "DONE", false));
 
         TaskCreatedResponse resp = newService().createPaste("重复文本");
 
@@ -195,7 +195,7 @@ class TextTaskServiceTest {
         // 命中 DEAD → 复活重投 + 清死信（D-049），PASTE 与音频路径同口径
         txExecutesCallback();
         stubConflict();
-        stubExisting(new TextTaskService.ExistingTask(6L, "DEAD"));
+        stubExisting(new TextTaskService.ExistingTask(6L, "DEAD", false));
 
         TaskCreatedResponse resp = newService().createPaste("复活文本");
 

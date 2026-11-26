@@ -119,7 +119,7 @@ public class TaskZipExportController {
         args.addAll(ids);
         List<Long> exportable = jdbc.query(
                 "SELECT t.id FROM task t LEFT JOIN task_result r ON r.task_id = t.id "
-                        + "WHERE t.user_id = ? AND t.id IN (" + inSql + ") "
+                        + "WHERE t.user_id = ? AND t.id IN (" + inSql + ") AND t.deleted_at IS NULL "
                         + "AND t.status = 'DONE' AND r.transcript IS NOT NULL AND r.transcript <> ''",
                 (rs, i) -> rs.getLong(1), args.toArray());
         List<Long> ordered = new ArrayList<>();

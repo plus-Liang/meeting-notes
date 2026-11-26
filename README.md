@@ -186,7 +186,7 @@ docker compose -f docker-compose.yml -f docker-compose.ghcr.yml up -d
 - Web 界面**零外部请求**（不引 CDN、不引外链字体/图标、不埋第三方统计）；
 - 云端只有一处可能外发：当你配置了 CLOUD 档 LLM 时，**文本**（不是音频）会发给你配置的 API；不配就完全不出门；
 - 备份包**不含 `.env`**（密钥不进备份），`backups/` 已进 `.gitignore`；
-- 删除任务会同时删数据库行与对象存储文件（不可恢复，请依赖备份）。
+- 删除任务进回收站（默认保留 30 天，可恢复；到期自动彻底删除并释放对象存储；`TRASH_PURGE_ENABLED=false` 可关自动清理）。
 
 ## 运维：备份 / 恢复 / 日志 / 升级
 
@@ -295,7 +295,7 @@ powershell -File tools\deploy-main.ps1
 | 云摘要失败但任务成功 | 云 LLM 配错会自动降级到 LOCAL/EXTRACTIVE；查结果里的 `ai_tier` 与 `docker compose logs app` |
 | 上传被拒 | 单文件 >200 MB 或 >60 分钟或格式不在白名单；错误信息会说明原因 |
 | 提交任务返回 `503 QUEUE_UNAVAILABLE` | Redis 不可用（或正在重启）。任务没丢：恢复后按 5–30s 退避重试即可；若已有任务行停在 `PENDING`，周期清扫会在 2 分钟后自动重投，**不用重启 app** |
-| 磁盘满 | 音频在 MinIO 卷里；先备份再清旧任务（删除任务会删对象） |
+| 磁盘满 | 音频在 MinIO 卷里；先备份再清旧任务（删除进回收站 30 天后才真正释放空间；急用可「清空回收站」或调小 `TRASH_RETENTION_DAYS`） |
 | 所有接口 401 | 浏览器登录态过期 → 回登录页；API 调用需 `Authorization: Bearer <API_TOKEN 或账号令牌>` |
 | 首次启动很慢 | 首次要拉镜像 + 加载模型，属正常；之后启动约 20 秒 |
 | GHCR 镜像拉不下来（`denied` / `unauthorized`） | `v0.1.0` 起两个包已设为 **Public**，可匿名拉取（无需 `docker login`）。若仍被拒：确认网络能访问 `ghcr.io`；必要时 `docker login ghcr.io`（PAT 勾 `read:packages`）；国内可把镜像名换成自己的加速源 |

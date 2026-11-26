@@ -42,7 +42,7 @@ public class TaskMetaService {
     public TaskMeta read(long userId, long taskId) {
         ensureExists(userId, taskId);
         List<MetaRow> rows = jdbc.query(
-                "SELECT labels::text AS labels, favorite FROM task WHERE id = ? AND user_id = ?",
+                "SELECT labels::text AS labels, favorite FROM task WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
                 (rs, i) -> new MetaRow(rs.getString("labels"), rs.getBoolean("favorite")), taskId, userId);
         MetaRow row = rows.get(0);
         List<String> labels = List.of();
@@ -61,7 +61,7 @@ public class TaskMetaService {
     }
 
     private void ensureExists(long userId, long taskId) {
-        Integer present = jdbc.query("SELECT 1 FROM task WHERE id = ? AND user_id = ?",
+        Integer present = jdbc.query("SELECT 1 FROM task WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
                 rs -> rs.next() ? 1 : null, taskId, userId);
         if (present == null) {
             throw new ApiException(404, "TASK_NOT_FOUND", "任务 " + taskId + " 不存在");

@@ -41,7 +41,7 @@ public class SpeakerMapService {
     public SpeakerMapResponse update(long taskId, long userId, Map<String, String> speakerMap) {
         Map<String, Object> row = jdbc.query(
                 "SELECT t.status, COALESCE(jsonb_array_length(r.segments), -1) AS seg_len "
-                        + "FROM task t LEFT JOIN task_result r ON r.task_id = t.id WHERE t.id = ? AND t.user_id = ?",
+                        + "FROM task t LEFT JOIN task_result r ON r.task_id = t.id WHERE t.id = ? AND t.user_id = ? AND t.deleted_at IS NULL",
                 rs -> rs.next()
                         ? Map.of("status", rs.getString(1), "seg_len", rs.getInt(2))
                         : null,

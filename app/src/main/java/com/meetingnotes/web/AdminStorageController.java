@@ -35,14 +35,17 @@ public class AdminStorageController {
         this.authService = authService;
     }
 
-    /** 占用总览：磁盘 / 音频（含 truncated 与 available）/ 孤儿 / 阈值。 */
+    /** 占用总览：磁盘 / 音频（含 truncated 与 available）/ 孤儿 / 回收站（T4.96/C8）/ 阈值。
+     *  T4.96 起走 {@link StorageService#usageBundle()}——单次扫桶（不重复全桶扫）。 */
     @GetMapping
     @ResponseBody
     public Map<String, Object> overview() {
         authService.requireAdmin(UserContext.current());
-        StorageService.Disk disk = storageService.diskUsage();
-        StorageService.Audio audioRec = storageService.audioUsage();
-        StorageService.Orphans orphans = storageService.orphans();
+        StorageService.UsageBundle bundle = storageService.usageBundle();
+        StorageService.Disk disk = bundle.disk();
+        StorageService.Audio audioRec = bundle.audio();
+        StorageService.Orphans orphans = bundle.orphans();
+        StorageService.Trash trash = bundle.trash();
 
         Map<String, Object> audio = new LinkedHashMap<>();
         audio.put("objects", audioRec.objects());
@@ -50,11 +53,16 @@ public class AdminStorageController {
         audio.put("truncated", audioRec.truncated());
         audio.put("available", audioRec.available());
 
+        Map<String, Object> trashMap = new LinkedHashMap<>();
+        trashMap.put("objects", trash.objects());
+        trashMap.put("bytes", trash.bytes());
+
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("disk", Map.of("total_bytes", disk.totalBytes(),
                 "free_bytes", disk.freeBytes(), "used_pct", disk.usedPct()));
         body.put("audio", audio);
         body.put("orphans", Map.of("objects", orphans.objects(), "bytes", orphans.bytes()));
+        body.put("trash", trashMap); // T4.96/C8：回收站占用（只增段；回收站对象计入 audio，也计入 trash）
         body.put("thresholds", Map.of("min_free_mb", storageGuard.minFreeMb(),
                 "headroom_mb", storageGuard.headroomMb()));
         return body;

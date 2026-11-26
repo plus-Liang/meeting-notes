@@ -45,16 +45,16 @@ public class StatsService {
         TaskStats tasks = new TaskStats(c.total(), c.active(), c.done(), c.dead());
 
         Long durationTotal = jdbc.queryForObject(
-                "SELECT COALESCE(SUM(duration_sec), 0) FROM task WHERE user_id = ?",
+                "SELECT COALESCE(SUM(duration_sec), 0) FROM task WHERE user_id = ? AND deleted_at IS NULL",
                 Long.class, userId);
         Double ratio = jdbc.queryForObject(
                 "SELECT AVG(EXTRACT(EPOCH FROM (updated_at - created_at)) / NULLIF(duration_sec, 0)) "
-                        + "FROM task WHERE user_id = ? AND status = 'DONE' AND duration_sec > 0",
+                        + "FROM task WHERE user_id = ? AND status = 'DONE' AND duration_sec > 0 AND deleted_at IS NULL",
                 Double.class, userId);
 
         Map<String, Long> tiers = new LinkedHashMap<>();
         jdbc.query("SELECT r.ai_tier, count(*) FROM task t LEFT JOIN task_result r ON r.task_id = t.id "
-                        + "WHERE t.user_id = ? AND t.status = 'DONE' GROUP BY r.ai_tier ORDER BY r.ai_tier",
+                        + "WHERE t.user_id = ? AND t.status = 'DONE' AND t.deleted_at IS NULL GROUP BY r.ai_tier ORDER BY r.ai_tier",
                 rs -> {
                     String tier = rs.getString(1); /* 只取一次（映射 null 键用局部变量，不重复读列） */
                     tiers.put(tier == null ? "null" : tier, rs.getLong(2));

@@ -140,7 +140,9 @@ public class TaskMutationService {
     }
 
     private void requireTask(long taskId, long userId) {
-        List<Long> ids = jdbc.queryForList("SELECT id FROM task WHERE id = ? AND user_id = ?", Long.class, taskId, userId);
+        // T4.96/C7-4：回收站任务不可变更（改词/待办勾选/删除）——deleted_at IS NULL，命中即 404（口径与详情一致）
+        List<Long> ids = jdbc.queryForList("SELECT id FROM task WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
+                Long.class, taskId, userId);
         if (ids.isEmpty()) {
             throw new ApiException(404, "TASK_NOT_FOUND", "任务 " + taskId + " 不存在");
         }

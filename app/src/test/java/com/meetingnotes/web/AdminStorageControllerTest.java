@@ -51,20 +51,24 @@ class AdminStorageControllerTest {
     /** GET 总览：四段键名逐字（disk/audio/orphans/thresholds），audio 含 truncated/available。 */
     @Test
     void overviewMatchesContractKeySet() {
-        when(storageService.diskUsage()).thenReturn(new StorageService.Disk(1000, 250, 75));
-        when(storageService.audioUsage()).thenReturn(new StorageService.Audio(3, 350, true, true, null));
-        when(storageService.orphans()).thenReturn(new StorageService.Orphans(1, 300, java.util.List.of("tasks/2/o.wav")));
+        when(storageService.usageBundle()).thenReturn(new StorageService.UsageBundle(
+                new StorageService.Disk(1000, 250, 75),
+                new StorageService.Audio(3, 350, true, true, null),
+                new StorageService.Orphans(1, 300, java.util.List.of("tasks/2/o.wav")),
+                new StorageService.Trash(1, 120)));
         when(storageGuard.minFreeMb()).thenReturn(2048L);
         when(storageGuard.headroomMb()).thenReturn(256L);
 
         Map<String, Object> body = controller().overview();
 
-        assertEquals(Set.of("disk", "audio", "orphans", "thresholds"), body.keySet());
+        assertEquals(Set.of("disk", "audio", "orphans", "trash", "thresholds"), body.keySet());
         assertEquals(Set.of("total_bytes", "free_bytes", "used_pct"),
                 ((Map<?, ?>) body.get("disk")).keySet());
         assertEquals(Set.of("objects", "bytes", "truncated", "available"),
                 ((Map<?, ?>) body.get("audio")).keySet());
         assertEquals(Set.of("objects", "bytes"), ((Map<?, ?>) body.get("orphans")).keySet());
+        assertEquals(Set.of("objects", "bytes"), ((Map<?, ?>) body.get("trash")).keySet(), "T4.96/C8：trash 只增段");
+        assertEquals(1L, ((Map<?, ?>) body.get("trash")).get("objects"));
         assertEquals(Set.of("min_free_mb", "headroom_mb"), ((Map<?, ?>) body.get("thresholds")).keySet());
         assertEquals(2048L, ((Map<?, ?>) body.get("thresholds")).get("min_free_mb"));
         assertEquals(256L, ((Map<?, ?>) body.get("thresholds")).get("headroom_mb"));

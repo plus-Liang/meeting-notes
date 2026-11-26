@@ -16,16 +16,14 @@ import java.util.LinkedHashSet;
 import java.util.List;
 
 /**
- * 任务删除（T4.21 / D-115）：单条 / 批量（1..100，去重，逐条部分成功口径同 T4.1 批量重试）/
- * 清空失败任务（当前用户全部 DEAD，不限已加载行）。
+ * 任务删除（T4.21 / D-115；T4.96/C2 起为**软删除**）：单条 / 批量（1..100，去重，逐条部分成功口径同
+ * T4.1 批量重试）/ 清空失败任务（当前用户全部 DEAD 且未在回收站）。
  *
- * <p>事务（TransactionTemplate 显式包裹，批量循环每条独立事务 → 部分成功不互相牵连）：
- * 按 task_id 依次删 webhook_delivery → dead_letter → task_result → task（FK 顺序）。
- * 可删状态仅 DONE/DEAD；PENDING/RUNNING/RETRYING → TASK_BUSY（409）；
- * 不存在/非本人 → NOT_FOUND（404）。状态判断与删除同事务，防 worker 竞态。
- *
- * <p>MinIO 对象删除 **best-effort**：DB 行删除成功后逐个调 S3，失败只 WARN 记 taskId，不回滚 DB 行。
- * **配额不退还**（D-115 口径，错误信息与文档写明）。
+ * <p>T4.96（D-245）：删除 = {@code UPDATE task SET deleted_at = now()}（进回收站，保留期内可恢复），
+ * **不再删** webhook_delivery / dead_letter / task_result / task，**不再删 MinIO 对象**——
+ * 恢复时内容与原音频必须还在。可删状态仍仅 DONE/DEAD（PENDING/RUNNING/RETRYING → TASK_BUSY 409）；
+ * FOR UPDATE 行锁防 worker 竞态（T4.21 验收 P3 语义不变）。**配额仍不退**（D-115）。
+ * 物理删除收敛到 {@link TaskTrashService#purge}（4 表 DELETE + best-effort 删对象）。
  */
 @Service
 public class TaskDeleteService {
@@ -81,28 +79,27 @@ public class TaskDeleteService {
         return results;
     }
 
-    /** 清空当前用户全部 DEAD 任务（不限已加载行；RETRYING 不算失败不删）。@return 实际删除条数。
+    /** 清空当前用户全部 DEAD 任务（T4.96/C2-5：只处理 {@code deleted_at IS NULL} 的行——回收站任务
+     *  由回收站出口清理，不在本入口重复处置）。@return 实际删除条数。
      *
-     * <p>T4.21b 补口：删除成功的任务在**事务外**逐个 best-effort 清 MinIO 对象
-     * （口径同 controller：S3 失败只 WARN、不回滚 DB、不抛），三条删除路径口径一致。</p>
+     *  <p>T4.96：删除 = 软删（进回收站），**不再** best-effort 删 MinIO 对象（回收站要能恢复）。</p>
      */
     public int deleteAllFailed() {
         List<Long> ids = jdbc.query(
-                "SELECT id FROM task WHERE user_id = ? AND status = 'DEAD' ORDER BY id",
+                "SELECT id FROM task WHERE user_id = ? AND status = 'DEAD' AND deleted_at IS NULL ORDER BY id",
                 (rs, i) -> rs.getLong(1), UserContext.current());
         int deleted = 0;
         for (Long id : ids) {
             DeleteOutcome outcome = deleteOne(id);
             if (outcome.deleted()) {
-                purgeObjectBestEffort(id, outcome.sourceUri());
                 deleted++;
             }
         }
-        log.info("清空失败任务：DEAD {} 条，删除 {} 条", ids.size(), deleted);
+        log.info("清空失败任务：DEAD {} 条，进回收站 {} 条（软删除，配额不退还）", ids.size(), deleted);
         return deleted;
     }
 
-    /** MinIO 对象 best-effort 删除：失败只 WARN 记 taskId，不抛（DB 行已删，不回滚）。 */
+    /** MinIO 对象 best-effort 删除：失败只 WARN 记 taskId，不抛（T4.96 起仅 {@link TaskTrashService#purge} 使用）。 */
     public void purgeObjectBestEffort(long taskId, String sourceUri) {
         if (sourceUri == null || !sourceUri.startsWith("s3://" + bucket + "/")) {
             return;
@@ -115,8 +112,32 @@ public class TaskDeleteService {
         }
     }
 
-    /** 事务内单条删除：状态判断与删除同事务，且状态读加 FOR UPDATE 行锁
-     * （T4.21 验收 P3：读状态与删行同事务但无锁仍有毫秒级竞态窗口，加锁后读-删串行化）。 */
+    /** T4.96/C3：事务内物理删 4 表（webhook_delivery → dead_letter → task_result → task，FK 顺序）——
+     *  回收站彻底删除/到期清理的**唯一**物理删入口。FOR UPDATE 校验归属（userId 可空 = 系统清扫）
+     *  **且 deleted_at IS NOT NULL**（双重防误删在用任务）。
+     *  @return source_uri（供事务外 best-effort 删对象）；null = 条件不满足 0 行（幂等，不 500）。 */
+    public String purgeInTx(long taskId, Long userId) {
+        return tx.execute(status -> {
+            String sourceUri = userId == null
+                    ? jdbc.query("SELECT COALESCE(source_uri, '') FROM task WHERE id = ? AND deleted_at IS NOT NULL FOR UPDATE",
+                            rs -> rs.next() ? rs.getString(1) : null, taskId)
+                    : jdbc.query("SELECT COALESCE(source_uri, '') FROM task WHERE id = ? AND user_id = ? AND deleted_at IS NOT NULL FOR UPDATE",
+                            rs -> rs.next() ? rs.getString(1) : null, taskId, userId);
+            if (sourceUri == null) {
+                return null; // 已被并发清掉 / 不在回收站 / 非本人
+            }
+            jdbc.update("DELETE FROM webhook_delivery WHERE task_id = ?", taskId);
+            jdbc.update("DELETE FROM dead_letter WHERE task_id = ?", taskId);
+            jdbc.update("DELETE FROM task_result WHERE task_id = ?", taskId);
+            jdbc.update("DELETE FROM task WHERE id = ?", taskId);
+            log.info("任务 {} 已彻底删除（4 表同事务物理删 + 对象 best-effort；配额不退，D-115/D-245）", taskId);
+            return sourceUri;
+        });
+    }
+
+    /** 事务内单条软删除：状态判断与打删除时间戳同事务，状态读加 FOR UPDATE 行锁
+     * （T4.21 验收 P3：读-改串行化防竞态，语义不变）。
+     * T4.96/C2：不再删 4 张子表、不再删 MinIO 对象——回收站要能整条恢复。 */
     private DeleteOutcome deleteOneInTx(long taskId) {
         String status = jdbc.query(
                 "SELECT status FROM task WHERE id = ? AND user_id = ? FOR UPDATE",
@@ -130,11 +151,9 @@ public class TaskDeleteService {
         String sourceUri = jdbc.query(
                 "SELECT COALESCE(source_uri, '') FROM task WHERE id = ?",
                 rs -> { rs.next(); return rs.getString(1); }, taskId);
-        jdbc.update("DELETE FROM webhook_delivery WHERE task_id = ?", taskId);
-        jdbc.update("DELETE FROM dead_letter WHERE task_id = ?", taskId);
-        jdbc.update("DELETE FROM task_result WHERE task_id = ?", taskId);
-        jdbc.update("DELETE FROM task WHERE id = ?", taskId);
-        log.info("任务 {}（{}）已删除（task/task_result/dead_letter/webhook_delivery 同事务清理；配额不退还）",
+        jdbc.update("UPDATE task SET deleted_at = now(), updated_at = now() WHERE id = ? AND user_id = ?",
+                taskId, UserContext.current());
+        log.info("任务 {}（{}）已进回收站（软删除：deleted_at 置 now，子表与对象保留；配额不退还，D-115）",
                 taskId, status);
         return new DeleteOutcome(taskId, true, null, sourceUri);
     }

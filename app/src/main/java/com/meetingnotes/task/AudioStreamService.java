@@ -57,7 +57,7 @@ public class AudioStreamService {
     /** 签发短时播放 URL：存在性/归属在 404，无音频在 400（都是签发前的显式闸，绝不 500）。 */
     public AudioTokenResponse issue(long taskId, long userId) {
         Map<String, Object> row = jdbc.query(
-                "SELECT status, source_type, COALESCE(source_uri, '') AS source_uri FROM task WHERE id = ? AND user_id = ?",
+                "SELECT status, source_type, COALESCE(source_uri, '') AS source_uri FROM task WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
                 rs -> rs.next()
                         ? Map.of("status", rs.getString(1), "source_type", rs.getString(2), "source_uri", rs.getString(3))
                         : null,

@@ -172,6 +172,13 @@ public class TaskService {
                     // 理论不可达：约束冲突却查不到行。宁可暴露也不给假 201。
                     throw new ApiException(500, "INTERNAL_ERROR", "幂等冲突回查未找到已有任务，请联系管理员");
                 }
+                if (existing.trashed()) {
+                    // T4.96/D-245：幂等命中回收站任务 → 自动恢复并复用（同一 task_id、reused=true）。
+                    // 恢复后按原状态逻辑继续走（DEAD → 复活重投；DONE/PENDING → 原样返回）。
+                    jdbc.update("UPDATE task SET deleted_at = NULL, updated_at = now() WHERE id = ? AND deleted_at IS NOT NULL",
+                            existing.id());
+                    log.info("任务 {} 幂等命中回收站任务，已自动恢复（D-245）", existing.id());
+                }
                 if ("DEAD".equals(existing.status())) {
                     // T2.11 F-1：复活即清死信，否则死信列表出现"已 DONE 的任务"，再失败还会写第二条。
                     // T4.60 B2：复活两连 + 重投收敛到 TaskRequeueSupport（四套重复 SQL 单一实现）
@@ -237,15 +244,15 @@ public class TaskService {
         }
     }
 
-    /** 幂等命中时返回的已有任务摘要：id + 库里真实状态。 */
-    public record ExistingTask(long id, String status) {
+    /** 幂等命中时返回的已有任务摘要：id + 库里真实状态 + 是否在回收站（T4.96）。 */
+    public record ExistingTask(long id, String status, boolean trashed) {
     }
 
     /** 按内容 hash 查已有任务；必须带 user_id（D-040），防止未来跨用户读到他人任务。 */
     private ExistingTask findIdAndStatusByHash(long userId, String sha256) {
         return jdbc.query(
-                "SELECT id, status FROM task WHERE content_hash = ? AND user_id = ? ORDER BY id LIMIT 1",
-                rs -> rs.next() ? new ExistingTask(rs.getLong(1), rs.getString(2)) : null,
+                "SELECT id, status, (deleted_at IS NOT NULL) AS trashed FROM task WHERE content_hash = ? AND user_id = ? ORDER BY id LIMIT 1",
+                rs -> rs.next() ? new ExistingTask(rs.getLong(1), rs.getString(2), rs.getBoolean(3)) : null,
                 sha256, userId);
     }
 

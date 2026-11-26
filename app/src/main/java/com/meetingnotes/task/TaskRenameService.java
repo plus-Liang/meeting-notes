@@ -42,7 +42,7 @@ public class TaskRenameService {
     }
 
     private void ensureExists(long userId, long taskId) {
-        Integer present = jdbc.query("SELECT 1 FROM task WHERE id = ? AND user_id = ?",
+        Integer present = jdbc.query("SELECT 1 FROM task WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
                 rs -> rs.next() ? 1 : null, taskId, userId);
         if (present == null) {
             throw new ApiException(404, "TASK_NOT_FOUND", "任务 " + taskId + " 不存在");

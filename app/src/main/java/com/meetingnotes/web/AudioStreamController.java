@@ -86,7 +86,7 @@ public class AudioStreamController {
         // 验签成功后再校验任务归属（user_id 与 u 不符 → 404，不泄露存在性；T4.35b P3-1 收口）
         Map<String, Object> row = jdbc.query(
                 "SELECT COALESCE(source_uri, '') AS source_uri, size_bytes FROM task"
-                        + " WHERE id = ? AND user_id = ? AND status = 'DONE'",
+                        + " WHERE id = ? AND user_id = ? AND status = 'DONE' AND deleted_at IS NULL",
                 rs -> rs.next()
                         ? Map.of("source_uri", rs.getString(1), "size_bytes", rs.getLong(2))
                         : null,

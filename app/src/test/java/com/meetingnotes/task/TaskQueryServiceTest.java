@@ -40,7 +40,7 @@ class TaskQueryServiceTest {
     private ResultSet rs;
 
     private TaskQueryService newService() {
-        return new TaskQueryService(jdbc, "meetingnotes");
+        return new TaskQueryService(jdbc, "meetingnotes", 30);
     }
 
     /** 让 jdbc.query 的 RowCallbackHandler 收到 rowCount 行模拟数据（id 从 startId 递减）。一次性顺序打桩。 */
@@ -63,6 +63,8 @@ class TaskQueryServiceTest {
         }
         when(rs.getString("status")).thenReturn("DONE");
         when(rs.getObject("duration_sec")).thenReturn(90);
+        when(rs.getObject(org.mockito.ArgumentMatchers.eq("deleted_at"),
+                org.mockito.ArgumentMatchers.<Class<java.time.OffsetDateTime>>any())).thenReturn(null);
         when(rs.getObject(org.mockito.ArgumentMatchers.eq("created_at"),
                 org.mockito.ArgumentMatchers.<Class<OffsetDateTime>>any())).thenReturn(OffsetDateTime.now());
         when(rs.getString("error_code")).thenReturn(null);
@@ -101,7 +103,7 @@ class TaskQueryServiceTest {
                 new String[]{"会议讨论了AI对就业市场的影响，覆盖基础开发岗位缩减与初级程序员入口收窄两大议题，并给出行动建议。", null},
                 new String[]{"meeting", null});
 
-        TaskQueryService.TaskListResponse resp = newService().list(1L, null, 5, null, null, List.of(), null, null);
+        TaskQueryService.TaskListResponse resp = newService().list(1L, null, 5, null, null, List.of(), null, null, false);
 
         var first = resp.items().get(0);
         assertEquals(List.of("AI", "简历", "招聘", "扩容"), first.keywords(), "合法 JSON → 数组原样");
@@ -122,7 +124,7 @@ class TaskQueryServiceTest {
         when(rs.getString("labels")).thenReturn(null);
         when(rs.getString("display_name")).thenReturn("第三章 讲座", (String) null);
 
-        TaskQueryService.TaskListResponse resp = newService().list(1L, null, 5, null, null, List.of(), null, null);
+        TaskQueryService.TaskListResponse resp = newService().list(1L, null, 5, null, null, List.of(), null, null, false);
 
         assertEquals("第三章 讲座", resp.items().get(0).displayName(), "display_name 原样透传");
         assertNull(resp.items().get(1).displayName(), "未命名任务 display_name = null（不是空串）");
@@ -133,7 +135,7 @@ class TaskQueryServiceTest {
         // limit=2 但库里有 3 行 → 返回 2 项，next_before_id=4（本页最后一项 id）
         stubRows(3, 5L);
 
-        TaskQueryService.TaskListResponse resp = newService().list(1L, null, 2, null, null, List.of(), null, null);
+        TaskQueryService.TaskListResponse resp = newService().list(1L, null, 2, null, null, List.of(), null, null, false);
 
         assertEquals(2, resp.items().size());
         assertEquals(5L, resp.items().get(0).id());
@@ -147,7 +149,7 @@ class TaskQueryServiceTest {
         // 只有 2 行、limit=3 → 没有下一页，next_before_id 必须为 null
         stubRows(2, 9L);
 
-        TaskQueryService.TaskListResponse resp = newService().list(1L, null, 3, null, null, List.of(), null, null);
+        TaskQueryService.TaskListResponse resp = newService().list(1L, null, 3, null, null, List.of(), null, null, false);
 
         assertEquals(2, resp.items().size());
         assertNull(resp.nextBeforeId(), "总数未超过 limit 时不得给出翻页游标");
@@ -156,7 +158,7 @@ class TaskQueryServiceTest {
     @Test
     void statusAndBeforeIdFiltersLandInSqlAndArgs() {
         // 只验证 SQL 形状与参数（不喂行数据；jdbc.query 返回值在此模式下不被使用）
-        newService().list(1L, "DEAD", 20, 42L, null, List.of(), null, null);
+        newService().list(1L, "DEAD", 20, 42L, null, List.of(), null, null, false);
 
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
@@ -173,10 +175,10 @@ class TaskQueryServiceTest {
     void controllerRejectsBadParamsWith400InvalidParam() {
         com.meetingnotes.web.TaskListController controller = newListController();
 
-        assertEquals("INVALID_PARAM", assertThrows(ApiException.class, () -> controller.list(null, "51", null, null, null, null, null, null)).getCode());
-        assertEquals(400, assertThrows(ApiException.class, () -> controller.list(null, "0", null, null, null, null, null, null)).getStatus());
-        assertEquals("INVALID_PARAM", assertThrows(ApiException.class, () -> controller.list(null, "abc", null, null, null, null, null, null)).getCode());
-        assertEquals("INVALID_PARAM", assertThrows(ApiException.class, () -> controller.list(null, null, "not-a-number", null, null, null, null, null)).getCode());
+        assertEquals("INVALID_PARAM", assertThrows(ApiException.class, () -> controller.list(null, "51", null, null, null, null, null, null, null)).getCode());
+        assertEquals(400, assertThrows(ApiException.class, () -> controller.list(null, "0", null, null, null, null, null, null, null)).getStatus());
+        assertEquals("INVALID_PARAM", assertThrows(ApiException.class, () -> controller.list(null, "abc", null, null, null, null, null, null, null)).getCode());
+        assertEquals("INVALID_PARAM", assertThrows(ApiException.class, () -> controller.list(null, null, "not-a-number", null, null, null, null, null, null)).getCode());
     }
 
     /** T4.1 起构造器多了 retry/glossary 两个依赖，T4.7 再加 batch，这里统一补齐 mock。 */
@@ -202,13 +204,13 @@ class TaskQueryServiceTest {
         com.meetingnotes.web.TaskListController controller = newListController();
 
         // 非法 status → 400 INVALID_PARAM，不再静默空列表（T2.12）
-        ApiException e = assertThrows(ApiException.class, () -> controller.list("BOGUS", null, null, null, null, null, null, null));
+        ApiException e = assertThrows(ApiException.class, () -> controller.list("BOGUS", null, null, null, null, null, null, null, null));
         assertEquals(400, e.getStatus());
         assertEquals("INVALID_PARAM", e.getCode());
 
         // 合法 status 原样透传（ 不触发 400）
         stubRows(1, 3L);
-        com.meetingnotes.task.TaskQueryService.TaskListResponse resp = controller.list("DONE", null, null, null, null, null, null, null);
+        com.meetingnotes.task.TaskQueryService.TaskListResponse resp = controller.list("DONE", null, null, null, null, null, null, null, null);
         assertEquals(1, resp.items().size());
     }
 
@@ -228,7 +230,7 @@ class TaskQueryServiceTest {
     @Test
     void qLandsInSqlParameterizedWithLikeEscaping() {
         // %/_/\ 全部转义成字面量，且关键词只出现在参数里、绝不拼进 SQL 字符串
-        newService().list(1L, null, 20, null, "ab%_\\c", List.of(), null, null);
+        newService().list(1L, null, 20, null, "ab%_\\c", List.of(), null, null, false);
 
         CapturedSql c = captureLastQuery();
         assertTrue(c.sql().contains("ILIKE ? ESCAPE '\\'"), "必须声明 ESCAPE '\\'（反斜杠为转义符）");
@@ -239,8 +241,8 @@ class TaskQueryServiceTest {
 
     @Test
     void blankOrNullQAddsNoCondition() {
-        newService().list(1L, null, 20, null, null, List.of(), null, null);
-        newService().list(1L, null, 20, null, "   ", List.of(), null, null);
+        newService().list(1L, null, 20, null, null, List.of(), null, null, false);
+        newService().list(1L, null, 20, null, "   ", List.of(), null, null, false);
 
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
         ArgumentCaptor<Object[]> args = ArgumentCaptor.forClass(Object[].class);
@@ -255,7 +257,7 @@ class TaskQueryServiceTest {
 
     @Test
     void pureNumericQAlsoMatchesIdExactly() {
-        newService().list(1L, null, 20, null, "42", List.of(), null, null);
+        newService().list(1L, null, 20, null, "42", List.of(), null, null, false);
 
         CapturedSql c = captureLastQuery();
         assertTrue(c.sql().contains("OR t.id = ?"), "纯数字 q 额外精确匹配任务 id");
@@ -265,7 +267,7 @@ class TaskQueryServiceTest {
 
     @Test
     void qCombinesWithStatusAndBeforeId() {
-        newService().list(1L, "DEAD", 20, 42L, "abc", List.of(), null, null);
+        newService().list(1L, "DEAD", 20, 42L, "abc", List.of(), null, null, false);
 
         CapturedSql c = captureLastQuery();
         assertTrue(c.sql().contains("AND t.status = ?"), "与 status 可组合");
@@ -281,13 +283,13 @@ class TaskQueryServiceTest {
 
         // q 超过 100 字符 → 400 INVALID_PARAM
         ApiException e = assertThrows(ApiException.class,
-                () -> controller.list(null, null, null, "x".repeat(101), null, null, null, null));
+                () -> controller.list(null, null, null, "x".repeat(101), null, null, null, null, null));
         assertEquals(400, e.getStatus());
         assertEquals("INVALID_PARAM", e.getCode());
 
         // q 去空格 + 纯数字 → 透传到 SQL（id 精确匹配）
         stubRows(1, 3L);
-        controller.list(null, null, null, "  42  ", null, null, null, null);
+        controller.list(null, null, null, "  42  ", null, null, null, null, null);
         CapturedSql c = captureLastQuery();
         assertTrue(c.sql().contains("OR t.id = ?"), "q 去空格后纯数字仍精确匹配 id");
         assertEquals(List.of(1L, "%42%", 42L, 21), List.of(c.args()));
@@ -299,7 +301,7 @@ class TaskQueryServiceTest {
     void overLongNumericQOnlyGoesIlikeWithoutIdMatch() {
         // 20 位数字 > Long.MAX → 不加 OR t.id（防 NumberFormatException 打 500），只走 ILIKE，保持 200
         String q20 = "9".repeat(20);
-        newService().list(1L, null, 20, null, q20, List.of(), null, null);
+        newService().list(1L, null, 20, null, q20, List.of(), null, null, false);
 
         CapturedSql c = captureLastQuery();
         assertFalse(c.sql().contains("OR t.id = ?"), "超出 64 位范围的数字不得加 id 精确匹配");
@@ -310,7 +312,7 @@ class TaskQueryServiceTest {
     void longMaxValueQStillMatchesIdExactly() {
         // Long.MAX_VALUE（9223372036854775807）恰好能装进 long → 精确匹配保留，参数 = MAX
         String max = Long.toString(Long.MAX_VALUE);
-        newService().list(1L, null, 20, null, max, List.of(), null, null);
+        newService().list(1L, null, 20, null, max, List.of(), null, null, false);
 
         CapturedSql c = captureLastQuery();
         assertTrue(c.sql().contains("OR t.id = ?"), "Long.MAX 边界值仍走 id 精确匹配");
@@ -343,7 +345,7 @@ class TaskQueryServiceTest {
 
     @Test
     void labelFilterUsesJsonbContainmentParameterized() {
-        newService().list(1L, null, 20, null, null, List.of("课程"), null, null);
+        newService().list(1L, null, 20, null, null, List.of("课程"), null, null, false);
 
         CapturedSql c = captureLastQuery();
         assertTrue(c.sql().contains("t.labels @> ?::jsonb"), "label 筛选走 jsonb 包含匹配");
@@ -354,7 +356,7 @@ class TaskQueryServiceTest {
 
     @Test
     void favoriteFilterBindsBooleanParameterized() {
-        newService().list(1L, null, 20, null, null, List.of(), true, null);
+        newService().list(1L, null, 20, null, null, List.of(), true, null, false);
 
         CapturedSql c = captureLastQuery();
         assertTrue(c.sql().contains("t.favorite = ?"), "favorite 筛选参数化");
@@ -418,7 +420,7 @@ class TaskQueryServiceTest {
     @Test
     void dateWindowLandsInListSqlParameterized() {
         TaskDateWindow w = TaskDateWindow.resolve("2026-01-01", "2026-01-02");
-        newService().list(1L, null, 20, null, null, List.of(), null, w);
+        newService().list(1L, null, 20, null, null, List.of(), null, w, false);
 
         CapturedSql c = captureLastQuery();
         assertTrue(c.sql().contains("t.created_at >= ?"), "after 必须进 SQL");
@@ -429,7 +431,7 @@ class TaskQueryServiceTest {
     @Test
     void multiLabelUsesOrUnionParameterizedPerLabel() {
         /* D-162 判别用例（先红后绿）：OR 并集——两标签各自一个 @> 参数，绝不合并成一个数组（那是 AND 语义） */
-        newService().list(1L, null, 20, null, null, List.of("课程", "不存在"), null, null);
+        newService().list(1L, null, 20, null, null, List.of("课程", "不存在"), null, null, false);
 
         CapturedSql c = captureLastQuery();
         assertTrue(c.sql().contains("t.labels @> ?::jsonb OR t.labels @> ?::jsonb"),
@@ -446,7 +448,7 @@ class TaskQueryServiceTest {
                 ArgumentMatchers.any(Object[].class))).thenReturn(7L);
         stubRows(3, 9L); // limit=2 → 列表 2 项 + 有下一页
 
-        TaskQueryService.TaskListResponse resp = newService().list(1L, "DONE", 2, 8L, null, List.of(), null, null);
+        TaskQueryService.TaskListResponse resp = newService().list(1L, "DONE", 2, 8L, null, List.of(), null, null, false);
 
         assertEquals(7, resp.total(), "total 来自 COUNT（与分页无关）");
         assertEquals(2, resp.items().size());
@@ -462,7 +464,7 @@ class TaskQueryServiceTest {
     @Test
     void allNewFiltersCombineWithStatusQAndKeysetStaysListOnly() {
         TaskDateWindow w = TaskDateWindow.resolve("2026-01-01", "2026-01-02");
-        newService().list(1L, "DONE", 20, 42L, "abc", List.of("会议"), true, w);
+        newService().list(1L, "DONE", 20, 42L, "abc", List.of("会议"), true, w, false);
 
         CapturedSql c = captureLastQuery();
         assertTrue(c.sql().contains("AND t.status = ?"), "与 status 可组合");
@@ -480,12 +482,12 @@ class TaskQueryServiceTest {
         com.meetingnotes.web.TaskListController controller = newListController();
 
         ApiException badFormat = assertThrows(ApiException.class,
-                () -> controller.list(null, null, null, null, null, null, "2026/01/01", null));
+                () -> controller.list(null, null, null, null, null, null, "2026/01/01", null, null));
         assertEquals(400, badFormat.getStatus());
         assertEquals("INVALID_PARAM", badFormat.getCode());
 
         ApiException reversed = assertThrows(ApiException.class,
-                () -> controller.list(null, null, null, null, null, null, "2026-01-02", "2026-01-01"));
+                () -> controller.list(null, null, null, null, null, null, "2026-01-02", "2026-01-01", null));
         assertEquals(400, reversed.getStatus());
         assertEquals("INVALID_PARAM", reversed.getCode());
     }
@@ -496,7 +498,7 @@ class TaskQueryServiceTest {
         stubRows(1, 3L);
         TaskDateWindow w = TaskDateWindow.resolve("2026-01-01", null);
 
-        controller.list(null, null, null, null, java.util.Arrays.asList(" 会议 ", "", null), null, "2026-01-01", null);
+        controller.list(null, null, null, null, java.util.Arrays.asList(" 会议 ", "", null), null, "2026-01-01", null, null);
 
         CapturedSql c = captureLastQuery();
         assertEquals(List.of(1L, "[\"会议\"]", w.after(), 21), List.of(c.args()),
@@ -517,6 +519,7 @@ class TaskQueryServiceTest {
         jdbc.execute("CREATE TABLE task (id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY, "
                 + "user_id BIGINT, status VARCHAR(16), source_uri VARCHAR(512), duration_sec INT, "
                 + "created_at TIMESTAMP WITH TIME ZONE DEFAULT now(), error_code VARCHAR(64), "
+                + "content_hash VARCHAR(64), deleted_at TIMESTAMP WITH TIME ZONE, "
                 + "labels VARCHAR(64), favorite BOOLEAN NOT NULL DEFAULT FALSE, display_name VARCHAR(128))");
         jdbc.execute("CREATE TABLE task_result (task_id BIGINT PRIMARY KEY, keywords VARCHAR(256), "
                 + "summary VARCHAR(512), template VARCHAR(16))");
@@ -549,7 +552,7 @@ class TaskQueryServiceTest {
         insertDeadLetter(jdbc, deadId, "旧原因（不是这条）");
         insertDeadLetter(jdbc, deadId, "ASR 连接超时（最新原因）");
 
-        var resp = new TaskQueryService(jdbc, "meetingnotes").list(1L, null, 5, null, null, List.of(), null, null);
+        var resp = new TaskQueryService(jdbc, "meetingnotes", 30).list(1L, null, 5, null, null, List.of(), null, null, false);
 
         var item = resp.items().stream().filter(i -> i.id() == deadId).findFirst().orElseThrow();
         assertEquals("DEAD", item.status());
@@ -565,7 +568,7 @@ class TaskQueryServiceTest {
         insertDeadLetter(jdbc, doneWithHistory, "历史失败原因（复活后残留）");
         long plainDone = insertTask(jdbc, "DONE");
 
-        var resp = new TaskQueryService(jdbc, "meetingnotes").list(1L, null, 5, null, null, List.of(), null, null);
+        var resp = new TaskQueryService(jdbc, "meetingnotes", 30).list(1L, null, 5, null, null, List.of(), null, null, false);
 
         assertEquals("历史失败原因（复活后残留）",
                 resp.items().stream().filter(i -> i.id() == doneWithHistory).findFirst().orElseThrow().errorMessage(),
@@ -580,7 +583,7 @@ class TaskQueryServiceTest {
         var jdbc = h2();
         insertTask(jdbc, "RETRYING", "ASR_ERROR");
 
-        var resp = new TaskQueryService(jdbc, "meetingnotes").list(1L, null, 5, null, null, List.of(), null, null);
+        var resp = new TaskQueryService(jdbc, "meetingnotes", 30).list(1L, null, 5, null, null, List.of(), null, null, false);
 
         assertNull(resp.items().get(0).errorMessage(), "RETRYING 且无 dead_letter 行 → null");
         assertEquals("ASR_ERROR", resp.items().get(0).errorCode(), "error_code 仍透传（前端兜底数据源）");
@@ -594,7 +597,7 @@ class TaskQueryServiceTest {
         insertTask(real, "DEAD");
         insertDeadLetter(real, jdbc.queryForObject("SELECT MAX(id) FROM task", Long.class), "r");
 
-        new TaskQueryService(jdbc, "meetingnotes").list(1L, null, 5, null, null, List.of(), null, null);
+        new TaskQueryService(jdbc, "meetingnotes", 30).list(1L, null, 5, null, null, List.of(), null, null, false);
 
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
         verify(jdbc).query(sql.capture(), ArgumentMatchers.<RowCallbackHandler>any(),
@@ -602,5 +605,69 @@ class TaskQueryServiceTest {
         assertTrue(sql.getValue().contains("dead_letter"), "列表 SQL 必须带 dead_letter 子查询");
         assertFalse(sql.getValue().toUpperCase().contains("LATERAL"), "禁 LATERAL（PG 专有）");
         assertFalse(sql.getValue().toUpperCase().contains("RETURNING"), "禁 RETURNING（PG 专有）");
+    }
+
+    /* ===== T4.96/C4：trash 模式（真 H2——可见性条件必须真执行，漏加即泄露） ===== */
+
+    @Test
+    void trashListOnlyShowsDeletedRowsWithDaysLeft() {
+        var jdbc = h2();
+        // 在用任务（deleted_at NULL）+ 回收站任务（3 天前删除）
+        jdbc.update("INSERT INTO task (user_id, status, source_uri, content_hash, deleted_at) "
+                + "VALUES (1, 'DONE', 's3://meetingnotes/tasks/x/live.wav', 'h-live', NULL)");
+        jdbc.update("INSERT INTO task (user_id, status, source_uri, content_hash, deleted_at) "
+                + "VALUES (1, 'DEAD', 's3://meetingnotes/tasks/x/dead.wav', 'h-dead', ?)",
+                java.sql.Timestamp.from(java.time.Instant.now().minusSeconds(3 * 86400)));
+        var svc = new TaskQueryService(jdbc, "meetingnotes", 30);
+
+        var normal = svc.list(1L, null, 20, null, null, List.of(), null, null, false);
+        var trash = svc.list(1L, null, 20, null, null, List.of(), null, null, true);
+
+        assertTrue(normal.items().stream().noneMatch(i -> "h-dead".equals(
+                        jdbc.queryForObject("SELECT content_hash FROM task WHERE id = ?", String.class, i.id()))),
+                "默认列表不得出现回收站任务（泄露 = 阻塞）");
+        assertTrue(normal.items().stream().allMatch(i -> i.deletedAt() == null && i.daysLeft() == null),
+                "非 trash 模式 deleted_at/days_left 恒 null");
+        assertEquals(1, trash.items().size(), "trash=true 只看回收站");
+        var item = trash.items().get(0);
+        assertNotNull(item.deletedAt(), "trash 行 deleted_at 非空");
+        assertTrue(item.daysLeft() != null && item.daysLeft() >= 27 && item.daysLeft() <= 30,
+                "days_left = max(0, 30 − 已过天数)，3 天前删的应在 27 附近（实测 " + item.daysLeft() + "）");
+    }
+
+    @Test
+    void trashCountsUseSameVisibilityCondition() {
+        var jdbc = h2();
+        jdbc.update("INSERT INTO task (user_id, status, source_uri, content_hash, deleted_at) "
+                + "VALUES (1, 'DONE', 's3://meetingnotes/tasks/x/a.wav', 'h1', NULL)");
+        jdbc.update("INSERT INTO task (user_id, status, source_uri, content_hash, deleted_at) "
+                + "VALUES (1, 'DONE', 's3://meetingnotes/tasks/x/b.wav', 'h2', now())");
+        var svc = new TaskQueryService(jdbc, "meetingnotes", 30);
+
+        assertEquals(1, svc.list(1L, null, 20, null, null, List.of(), null, null, false).total(),
+                "total（COUNT）与列表同条件：默认列表 total 不含回收站");
+        assertEquals(1, svc.list(1L, null, 20, null, null, List.of(), null, null, true).total(),
+                "trash 模式 total 只算回收站行");
+    }
+
+    /** T4.96/B2：counts 必须排除回收站（台账侧栏徽标与默认列表 total 同口径，漏加即「徽标有数点进去没有」）。 */
+    @Test
+    void countsExcludeTrashedTasks() throws java.sql.SQLException {
+        when(rs.getString(1)).thenReturn("DONE");
+        when(rs.getLong(2)).thenReturn(1L);
+        doAnswer(inv -> {
+            RowCallbackHandler handler = inv.getArgument(1);
+            handler.processRow(rs);
+            return null;
+        }).when(jdbc).query(contains("GROUP BY status"), ArgumentMatchers.<RowCallbackHandler>any(),
+                ArgumentMatchers.any(Object[].class));
+
+        TaskQueryService.TaskCounts c = newService().counts(1L);
+
+        assertEquals(1, c.total());
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(jdbc).query(sql.capture(), ArgumentMatchers.<RowCallbackHandler>any(), eq(1L));
+        assertTrue(sql.getValue().contains("deleted_at IS NULL"),
+                "counts SQL 必须排除回收站任务（实测：" + sql.getValue() + "）");
     }
 }

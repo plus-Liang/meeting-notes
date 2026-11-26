@@ -16,6 +16,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import org.mockito.ArgumentCaptor;
+import org.mockito.ArgumentMatchers;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.any;
@@ -23,6 +25,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
+import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.Mockito.when;
 
 /**
@@ -157,6 +160,58 @@ class WebhookDeliveryServiceTest {
         assertTrue(appender.list.get(0).getFormattedMessage()
                 .contains("Webhook 目标地址被拒（URL_BLOCKED）"), "日志含固定文案");
         assertTrue(appender.list.get(0).getFormattedMessage().contains("169.254.169.254"), "日志含被拒 url");
+    }
+
+
+    /* ---- T4.96/C7-6（D-245）：回收站任务不投递 ---- */
+
+    /** onTerminal：deleted_at 非空 → 不投递、不记账，日志 reason=TRASHED。 */
+    @Test
+    void onTerminalSkipsTrashedTaskWithReasonLogged() {
+        JdbcTemplate jdbc = mock(JdbcTemplate.class);
+        when(jdbc.query(contains("deleted_at IS NOT NULL"),
+                ArgumentMatchers.<org.springframework.jdbc.core.ResultSetExtractor<Integer>>any(), eq(7L)))
+                .thenReturn(1); // 任务在回收站
+        WebhookDeliveryService service = new WebhookDeliveryService(
+                jdbc, new ObjectMapper(), "cb-x", "t496-secret", 3, "http://localhost:8080", false,
+                mock(WebhookHttpSender.class));
+        service.onTerminal(7L, "DONE");
+        verify(jdbc, never()).query(contains("INSERT INTO webhook_delivery"),
+                ArgumentMatchers.<org.springframework.jdbc.core.ResultSetExtractor<Long>>any(),
+                any(Object[].class)); // 不记账 = 不投递
+    }
+
+    /** onTerminal：任务未删除（deleted_at NULL → 查不到行）→ 照常走投递记账（正向对照，防守卫写过头）。 */
+    @Test
+    void onTerminalNormalTaskStillDelivers() {
+        JdbcTemplate jdbc = mock(JdbcTemplate.class);
+        when(jdbc.query(contains("deleted_at IS NOT NULL"),
+                ArgumentMatchers.<org.springframework.jdbc.core.ResultSetExtractor<Integer>>any(), eq(8L)))
+                .thenReturn(null); // 不在回收站
+        when(jdbc.query(contains("INSERT INTO webhook_delivery"),
+                ArgumentMatchers.<org.springframework.jdbc.core.ResultSetExtractor<Long>>any(),
+                any(Object[].class))).thenReturn(99L);
+        WebhookDeliveryService service = new WebhookDeliveryService(
+                jdbc, new ObjectMapper(), "cb-x", "t496-secret", 3, "http://localhost:8080", false,
+                mock(WebhookHttpSender.class));
+        service.onTerminal(8L, "DONE");
+        verify(jdbc).query(contains("INSERT INTO webhook_delivery"),
+                ArgumentMatchers.<org.springframework.jdbc.core.ResultSetExtractor<Long>>any(),
+                any(Object[].class));
+    }
+
+    /** F-22 同口径：重试扫描 SQL 必须 JOIN task 且排除回收站（任务进回收站 → 遗留到期行不投）。 */
+    @Test
+    void scanDueSqlExcludesTrashedTasks() {
+        JdbcTemplate jdbc = mock(JdbcTemplate.class);
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        when(jdbc.queryForList(sql.capture(), eq(Long.class))).thenReturn(List.of());
+        WebhookDeliveryService service = new WebhookDeliveryService(
+                jdbc, new ObjectMapper(), "", "t496-secret", 3, "http://localhost:8080", false,
+                mock(WebhookHttpSender.class));
+        service.scanDue();
+        assertTrue(sql.getValue().contains("JOIN task") && sql.getValue().contains("t.deleted_at IS NULL"),
+                "重试扫描必须排除回收站任务（实测 SQL：" + sql.getValue().replace('\n', ' ') + "）");
     }
 
     private WebhookDeliveryService service(long deliveryId, JdbcTemplate jdbc, WebhookHttpSender sender) {

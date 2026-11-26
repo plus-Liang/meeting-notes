@@ -3,6 +3,7 @@ package com.meetingnotes.task;
 import com.meetingnotes.common.ApiException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.ArgumentMatchers;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -88,6 +89,27 @@ class TaskMetaServiceTest {
         assertEquals("TASK_NOT_FOUND", e.getCode());
         ApiException e2 = assertThrows(ApiException.class, () -> newService().read(1L, 99L));
         assertEquals(404, e2.getStatus());
+    }
+
+    /** T4.96/B3：回收站任务（ensureExists 带 deleted_at IS NULL）→ /meta 404 而非 500（修 rows.get(0) 越界）。 */
+    @Test
+    void trashedTaskMetaReturns404Not500() {
+        // ensureExists 的归属查询（含 deleted_at IS NULL）对回收站任务返回 null → 404，主查询不会触达
+        when(jdbc.query(contains("deleted_at IS NULL"),
+                ArgumentMatchers.<org.springframework.jdbc.core.ResultSetExtractor<Integer>>any(),
+                eq(11L), eq(1L))).thenReturn(null);
+
+        ApiException e = assertThrows(ApiException.class, () -> newService().read(1L, 11L));
+        assertEquals(404, e.getStatus(), "回收站任务 /meta 必须 404（修复前 500：rows.get(0) 越界）");
+        assertEquals("TASK_NOT_FOUND", e.getCode());
+
+        // SQL 形状钉住：ensureExists 必须带 deleted_at IS NULL（漏加即复发 500）
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(jdbc, org.mockito.Mockito.atLeastOnce()).query(sql.capture(),
+                ArgumentMatchers.<org.springframework.jdbc.core.ResultSetExtractor<Integer>>any(),
+                org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.anyLong());
+        assertTrue(sql.getAllValues().stream().anyMatch(s -> s.contains("deleted_at IS NULL")),
+                "ensureExists SQL 必须排除回收站任务");
     }
 
     private static void assertFalse(boolean v) {

@@ -46,8 +46,9 @@ class TaskDeleteControllerTest {
         assertEquals("TASK_BUSY", ex.getCode());
     }
 
+    /** T4.96/C2 语义迁移：软删除后 controller **不再** best-effort 删对象（回收站要能恢复）。 */
     @Test
-    void deleteTaskSuccessReturnsDeletedOneAndPurgesObject() {
+    void deleteTaskSuccessReturnsDeletedOneWithoutTouchingObject() {
         when(service.deleteOne(7L))
                 .thenReturn(new TaskDeleteService.DeleteOutcome(7L, true, null,
                         "s3://meetingnotes/tasks/7/a.wav"));
@@ -56,7 +57,8 @@ class TaskDeleteControllerTest {
                 new TaskDeleteController(service).deleteTask(7L);
 
         assertEquals(1, resp.deleted());
-        verify(service).purgeObjectBestEffort(7L, "s3://meetingnotes/tasks/7/a.wav");
+        verify(service, org.mockito.Mockito.never()).purgeObjectBestEffort(org.mockito.ArgumentMatchers.anyLong(),
+                org.mockito.ArgumentMatchers.anyString());
     }
 
     @Test

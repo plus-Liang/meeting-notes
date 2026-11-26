@@ -112,9 +112,38 @@ class ShareServiceTest {
     @Test
     void existsActiveByHashFalseForRevokedOrExpired() {
         // 伪造/撤销/过期统一走"查不到有效行"→ false（web 层转 404 SHARE_NOT_FOUND，防探测）
-        when(jdbc.query(contains("revoked_at IS NULL AND expires_at > now()"),
+        when(jdbc.query(contains("expires_at > now()"),
                 ArgumentMatchers.<org.springframework.jdbc.core.RowMapper<Long>>any(),
                 any(Object[].class))).thenReturn(List.of());
         assertTrue(!newService(7).existsActiveByHash("deadbeef"), "无有效行 → false");
+    }
+
+    /* ===== T4.96/C7-2：回收站任务不可分享（SQL 形状钉住——mock 层只能证条件存在，真链路由真栈验收） ===== */
+
+    /** create 的归属查询必须带 deleted_at IS NULL（回收站任务 → 404 TASK_NOT_FOUND）。 */
+    @org.junit.jupiter.api.Test
+    void createSqlExcludesTrashedTasks() {
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        when(jdbc.query(sql.capture(), ArgumentMatchers.<org.springframework.jdbc.core.ResultSetExtractor<String>>any(),
+                ArgumentMatchers.any(), ArgumentMatchers.any())).thenReturn(null);
+
+        ApiException e = org.junit.jupiter.api.Assertions.assertThrows(ApiException.class,
+                () -> newService(7).create(1L, 42L));
+        assertEquals(404, e.getStatus());
+        assertTrue(sql.getValue().contains("deleted_at IS NULL"),
+                "create 归属查询必须排除回收站任务（实测 SQL：" + sql.getValue() + "）");
+    }
+
+    /** existsActiveByHash 必须 JOIN task 且 deleted_at IS NULL（任务进回收站 → 匿名分享 404）。 */
+    @org.junit.jupiter.api.Test
+    void anonymousReadSqlExcludesTrashedTasks() {
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        when(jdbc.query(sql.capture(), ArgumentMatchers.<org.springframework.jdbc.core.RowMapper<Long>>any(),
+                ArgumentMatchers.any())).thenReturn(java.util.List.of());
+
+        boolean ok = newService(7).existsActiveByHash("deadbeef");
+        assertTrue(!ok);
+        assertTrue(sql.getValue().contains("JOIN task") && sql.getValue().contains("t.deleted_at IS NULL"),
+                "匿名读取判定必须 JOIN task 且排除回收站（实测 SQL：" + sql.getValue() + "）");
     }
 }

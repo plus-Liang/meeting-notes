@@ -57,7 +57,7 @@ public class RestructureService {
     private RestructureResponse restructureInTx(long userId, long taskId, String template) {
         String status;
         try {
-            status = jdbc.query("SELECT status FROM task WHERE id = ? AND user_id = ? FOR UPDATE NOWAIT",
+            status = jdbc.query("SELECT status FROM task WHERE id = ? AND user_id = ? AND deleted_at IS NULL FOR UPDATE NOWAIT",
                     rs -> rs.next() ? rs.getString(1) : null, taskId, userId);
         } catch (CannotAcquireLockException e) {
             /* Spring 已翻译为锁获取失败的兼容分支（非 PG NOWAIT 场景） */

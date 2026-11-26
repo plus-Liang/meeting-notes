@@ -35,7 +35,8 @@ public class ShareService {
     }
 
     public ShareCreated create(long userId, long taskId) {
-        String status = jdbc.query("SELECT status FROM task WHERE id = ? AND user_id = ?",
+        // T4.96/C7-2：回收站任务不可分享（deleted_at IS NULL）——口径与详情一致（回收站任务 → 404）
+        String status = jdbc.query("SELECT status FROM task WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
                 rs -> rs.next() ? rs.getString(1) : null, taskId, userId);
         if (status == null) {
             throw new ApiException(404, "TASK_NOT_FOUND", "任务 " + taskId + " 不存在");
@@ -61,11 +62,13 @@ public class ShareService {
         return jdbc.update("UPDATE share_link SET revoked_at = now() WHERE task_id = ? AND revoked_at IS NULL", taskId);
     }
 
-    /** token hash 是否有效（存在、未撤销、未过期）——供 web 层匿名读取前判定。 */
+    /** token hash 是否有效（存在、未撤销、未过期、**所属任务不在回收站**）——供 web 层匿名读取前判定。
+     *  T4.96/C7-2：JOIN task 且 deleted_at IS NULL——任务进回收站 → 匿名分享 404 SHARE_NOT_FOUND（防探测口径不变）。 */
     public boolean existsActiveByHash(String hash) {
         List<Long> rows = jdbc.query("""
-                SELECT id FROM share_link
-                WHERE token_hash = ? AND revoked_at IS NULL AND expires_at > now()
+                SELECT s.id FROM share_link s
+                JOIN task t ON t.id = s.task_id AND t.deleted_at IS NULL
+                WHERE s.token_hash = ? AND s.revoked_at IS NULL AND s.expires_at > now()
                 """, (rs, i) -> rs.getLong(1), hash);
         return !rows.isEmpty();
     }

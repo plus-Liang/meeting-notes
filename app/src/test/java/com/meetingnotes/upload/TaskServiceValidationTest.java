@@ -175,8 +175,8 @@ class TaskServiceValidationTest {
         runCallbackForReal();
         doReturn(null).when(jdbc).query(contains("ON CONFLICT (user_id, content_hash)"),
                 ArgumentMatchers.<ResultSetExtractor<Long>>any(), eq(1L), any(), any(), any(), any());
-        doReturn(new TaskService.ExistingTask(7L, "DONE")).when(jdbc)
-                .query(contains("SELECT id, status FROM task"),
+        doReturn(new TaskService.ExistingTask(7L, "DONE", false)).when(jdbc)
+                .query(contains("FROM task WHERE content_hash"),
                         ArgumentMatchers.<ResultSetExtractor<TaskService.ExistingTask>>any(), any(), eq(1L));
 
         com.meetingnotes.common.TaskCreatedResponse resp = newService(209715200L, 3600L).createUpload(wav(64));
@@ -195,8 +195,8 @@ class TaskServiceValidationTest {
         runCallbackForReal();
         doReturn(null).when(jdbc).query(contains("ON CONFLICT (user_id, content_hash)"),
                 ArgumentMatchers.<ResultSetExtractor<Long>>any(), eq(1L), any(), any(), any(), any());
-        doReturn(new TaskService.ExistingTask(8L, "DEAD")).when(jdbc)
-                .query(contains("SELECT id, status FROM task"),
+        doReturn(new TaskService.ExistingTask(8L, "DEAD", false)).when(jdbc)
+                .query(contains("FROM task WHERE content_hash"),
                         ArgumentMatchers.<ResultSetExtractor<TaskService.ExistingTask>>any(), any(), eq(1L));
 
         com.meetingnotes.common.TaskCreatedResponse resp = newService(209715200L, 3600L).createUpload(wav(64));
@@ -236,8 +236,8 @@ class TaskServiceValidationTest {
         runCallbackForReal();
         doReturn(null).when(jdbc).query(contains("ON CONFLICT (user_id, content_hash)"),
                 ArgumentMatchers.<ResultSetExtractor<Long>>any(), eq(1L), any(), any(), any(), any());
-        doReturn(new TaskService.ExistingTask(9L, "RETRYING")).when(jdbc)
-                .query(contains("SELECT id, status FROM task"),
+        doReturn(new TaskService.ExistingTask(9L, "RETRYING", false)).when(jdbc)
+                .query(contains("FROM task WHERE content_hash"),
                         ArgumentMatchers.<ResultSetExtractor<TaskService.ExistingTask>>any(), any(), eq(1L));
 
         com.meetingnotes.common.TaskCreatedResponse resp = newService(209715200L, 3600L).createUpload(wav(64));

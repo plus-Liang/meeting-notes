@@ -75,6 +75,12 @@ public class WebhookDeliveryService {
     /** 任务进入终态时的唯一入口（worker 调用，绝不抛异常拖垮任务流程）。 */
     public void onTerminal(long taskId, String status) {
         try {
+            // T4.96/C7-6（D-245）：回收站任务不投递；恢复后再进终态会照常走到这里
+            if (isTrashed(taskId)) {
+                log.atInfo().addKeyValue("taskId", taskId).addKeyValue("reason", "TRASHED")
+                        .log("任务 {} 终态 {}：任务在回收站，跳过 Webhook 投递", taskId, status);
+                return;
+            }
             if (offlineMode) {
                 log.info("任务 {} 进入终态 {}：离线模式跳过 Webhook（OFFLINE_MODE=true 禁一切出站，D-077）", taskId, status);
                 return;
@@ -102,7 +108,6 @@ public class WebhookDeliveryService {
             log.warn("任务 {} 终态 {}：Webhook 调度异常（不影响任务结果）", taskId, status, e);
         }
     }
-
     /**
      * 重试扫描：到期行交投递器（attempt 内先认领，重复扫描不会双投）。
      * F-22（T4.12 / K-49：调度器必须重放"入队前置条件"）：本扫描与 {@link #onTerminal} 是两条入口，空 secret 必须都挡，
@@ -115,8 +120,12 @@ public class WebhookDeliveryService {
             return;
         }
         try {
-            List<Long> due = jdbc.queryForList(
-                    "SELECT id FROM webhook_delivery WHERE next_retry IS NOT NULL AND next_retry <= now()", Long.class);
+            // T4.96/C7-6（F-22 同理：重试扫描是第二条投递入口，回收站行不投）
+            List<Long> due = jdbc.queryForList("""
+                    SELECT w.id FROM webhook_delivery w
+                    JOIN task t ON t.id = w.task_id AND t.deleted_at IS NULL
+                    WHERE w.next_retry IS NOT NULL AND w.next_retry <= now()
+                    """, Long.class);
             if (due.isEmpty()) {
                 return;
             }
@@ -257,6 +266,12 @@ public class WebhookDeliveryService {
         } catch (Exception e) {
             return 0;
         }
+    }
+
+    /** T4.96：任务在回收站？行不存在 = false（走原口径）。 */
+    private boolean isTrashed(long taskId) {
+        return jdbc.query("SELECT 1 FROM task WHERE id = ? AND deleted_at IS NOT NULL",
+                rs -> rs.next() ? 1 : null, taskId) != null;
     }
 
     /** task.callback_url 优先，否则全局 URL；两者都空返回 null（不投递）。 */

@@ -257,6 +257,13 @@ app:
   setup:
     code: ${SETUP_CODE:}
 
+  # T4.96（v0.2 回收站，D-245）：软删除保留期与到期自动清理。
+  # retention-days <1 属误配（0 等于一次误配永久删除）→ 启动 WARN 回退 30；清空回收站是显式操作不受保留期影响。
+  trash:
+    retention-days: ${TRASH_RETENTION_DAYS:30}
+    purge-interval-ms: ${TRASH_PURGE_INTERVAL_MS:3600000}
+    purge-enabled: ${TRASH_PURGE_ENABLED:true}
+
   auth:
     # T4.70 O-1：开放注册开关，**默认 false**（陌生人不能自助注册、消耗 ASR 配额）——
     # T4.93 起：未认领实例上 POST /auth/register 直接 403 SETUP_REQUIRED——认领只走 /setup 向导

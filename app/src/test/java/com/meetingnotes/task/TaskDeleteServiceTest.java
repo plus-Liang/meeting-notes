@@ -26,15 +26,17 @@ import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * T4.21（D-115）：任务删除——单条 404/409/成功（4 表同事务按 FK 顺序）、批量 1..100 去重逐条
- * 部分成功、清空失败任务只删 DEAD；MinIO best-effort（失败只 WARN 不回滚）；配额不退还（文档口径）。
- * 可证伪断言：TASK_BUSY 路径**零 DELETE**；成功路径 4 条 DELETE 按序；S3 异常不向上抛。
+ * T4.21（D-115）+ T4.96/C2（D-245 软删除语义迁移）：任务删除——单条 404/409/软删成功、
+ * 批量 1..100 去重逐条部分成功、清空失败任务只处理未删除的 DEAD；配额不退还（文档口径）。
+ * 可证伪断言：TASK_BUSY 路径**零 UPDATE**；成功路径 = 一条 `UPDATE … SET deleted_at`、
+ * **零 DELETE FROM**、**零 S3 调用**（子表与对象保留，恢复时还在——物理删除收敛到 TaskTrashService.purge）。
+ * 语义迁移（T4.96 卡面预授权的唯一一种）：原「4 表 DELETE 按序」断言改为「软删 UPDATE + 零 DELETE」。
  */
 @ExtendWith(MockitoExtension.class)
 class TaskDeleteServiceTest {
@@ -77,7 +79,7 @@ class TaskDeleteServiceTest {
     }
 
     @Test
-    void deleteMissingTaskReturnsNotFoundWithoutAnyDelete() {
+    void deleteMissingTaskReturnsNotFoundWithoutAnyWrite() {
         stubStatus(9L, null);
 
         TaskDeleteService.DeleteOutcome out = newService().deleteOne(9L);
@@ -85,11 +87,12 @@ class TaskDeleteServiceTest {
         assertFalse(out.deleted());
         assertEquals("NOT_FOUND", out.reason());
         verify(jdbc, never()).update(contains("DELETE FROM"), any(Object[].class));
+        verify(jdbc, never()).update(contains("deleted_at"), any(Object[].class));
         verifyNoS3Calls();
     }
 
     @Test
-    void busyTaskReturnsTaskBusyWithoutAnyDelete() {
+    void busyTaskReturnsTaskBusyWithoutAnyWrite() {
         stubStatus(8L, "RUNNING");
 
         TaskDeleteService.DeleteOutcome out = newService().deleteOne(8L);
@@ -97,37 +100,35 @@ class TaskDeleteServiceTest {
         assertFalse(out.deleted());
         assertEquals("TASK_BUSY", out.reason());
         verify(jdbc, never()).update(contains("DELETE FROM"), any(Object[].class));
+        verify(jdbc, never()).update(contains("deleted_at"), any(Object[].class));
         verifyNoS3Calls();
     }
 
+    /** T4.96/C2：软删成功 = 一条 `UPDATE … SET deleted_at`，**零 DELETE FROM、零 S3 调用**
+     *  （4 张子表行与 MinIO 对象都在，恢复时原样回来）。 */
     @Test
-    void successDeletesFourTablesInOrderThenPurgesObject() {
+    void successSoftDeletesViaDeletedAtWithoutDeletingRowsOrObject() {
         stubStatus(7L, "DEAD");
         stubSourceUri(7L, "s3://meetingnotes/tasks/7/a.wav");
 
-        TaskDeleteService svc = newService();
-        TaskDeleteService.DeleteOutcome out = svc.deleteOne(7L);
+        TaskDeleteService.DeleteOutcome out = newService().deleteOne(7L);
 
         assertTrue(out.deleted());
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
-        verify(jdbc, times(4)).update(sql.capture(), eq(7L));
-        List<String> statements = sql.getAllValues();
-        assertTrue(statements.get(0).contains("webhook_delivery"), "先删 webhook_delivery");
-        assertTrue(statements.get(1).contains("dead_letter"), "再删 dead_letter");
-        assertTrue(statements.get(2).contains("task_result"), "再删 task_result");
-        assertTrue(statements.get(3).contains("DELETE FROM task WHERE"), "最后删 task");
-        // purge 由 controller 层编排（deleteOne 只删 DB；purge 是独立 best-effort 步）
-        svc.purgeObjectBestEffort(7L, out.sourceUri());
-        verify(s3).deleteObject(any(software.amazon.awssdk.services.s3.model.DeleteObjectRequest.class));
+        verify(jdbc, times(1)).update(sql.capture(), eq(7L), eq(1L));
+        assertTrue(sql.getValue().contains("deleted_at = now()"), "删除 = 置 deleted_at（软删除，D-245）");
+        assertTrue(sql.getValue().contains("UPDATE task SET"), "必须是 UPDATE，不是 DELETE");
+        // 子表与对象保留：本类不再出现任何 DELETE / S3 调用（物理删收敛到 TaskTrashService.purge）
+        verify(jdbc, never()).update(contains("DELETE FROM"), any(Object[].class));
+        verifyNoS3Calls();
     }
 
+    /** T4.96：purgeObjectBestEffort 保留（供 TaskTrashService.purge 复用），行为不变。 */
     @Test
     void s3FailureIsBestEffortAndDoesNotThrow() {
-        // purge 不查 DB（DB 行已删），无需 status/sourceUri 打桩
         doThrow(new RuntimeException("MinIO 不可达")).when(s3)
                 .deleteObject(any(software.amazon.awssdk.services.s3.model.DeleteObjectRequest.class));
 
-        // 不抛：DB 行已删，对象删除失败只 WARN（best-effort 口径）
         newService().purgeObjectBestEffort(6L, "s3://meetingnotes/tasks/6/a.wav");
         verify(s3, times(1)).deleteObject(any(software.amazon.awssdk.services.s3.model.DeleteObjectRequest.class));
     }
@@ -144,7 +145,7 @@ class TaskDeleteServiceTest {
 
         assertEquals(3, out.size(), "重复 id 去重（3/4/99）");
         assertEquals(3L, out.get(0).id());
-        assertTrue(out.get(0).deleted(), "DEAD → 删除成功");
+        assertTrue(out.get(0).deleted(), "DEAD → 软删成功");
         assertEquals(4L, out.get(1).id());
         assertFalse(out.get(1).deleted());
         assertEquals("TASK_BUSY", out.get(1).reason(), "RUNNING → TASK_BUSY，不整体失败");
@@ -163,27 +164,29 @@ class TaskDeleteServiceTest {
         assertEquals(400, assertThrows(ApiException.class, () -> svc.deleteBatch(tooMany)).getStatus());
     }
 
+    /** T4.96/C2-5：清空失败只处理 `deleted_at IS NULL` 的 DEAD 行（回收站任务由回收站出口清理）。 */
     @Test
-    void deleteAllFailedOnlyTouchesDeadTasks() {
-        when(jdbc.query(contains("status = 'DEAD'"),
+    void deleteAllFailedOnlyTouchesDeadTasksNotInTrash() {
+        when(jdbc.query(contains("status = 'DEAD' AND deleted_at IS NULL"),
                 ArgumentMatchers.<RowMapper<Long>>any(), eq(1L)))
                 .thenReturn(List.of(10L, 11L));
         stubStatus(10L, "DEAD");
         stubSourceUri(10L, "s3://meetingnotes/tasks/10/a.wav");
         stubStatus(11L, "DEAD");
-        stubSourceUri(11L, "s3://meetingnotes/tasks/11/a.wav");
+        stubSourceUri(11L, "s3://meetingnotes/tasks/11/b.wav");
 
         int deleted = newService().deleteAllFailed();
 
-        assertEquals(2, deleted, "只删查询出的 DEAD 行");
-        verify(jdbc).update(contains("DELETE FROM task WHERE"), eq(10L));
-        verify(jdbc).update(contains("DELETE FROM task WHERE"), eq(11L));
+        assertEquals(2, deleted, "只软删查询出的 DEAD 行（未在回收站）");
+        verify(jdbc).update(contains("deleted_at = now()"), eq(10L), eq(1L));
+        verify(jdbc).update(contains("deleted_at = now()"), eq(11L), eq(1L));
+        verify(jdbc, never()).update(contains("DELETE FROM"), any(Object[].class));
     }
 
+    /** T4.96 语义迁移：软删**不再删 MinIO 对象**（回收站要能恢复；对象删除只发生在 purge）。 */
     @Test
-    void deleteAllFailedPurgesObjectForEachDeletedTask() {
-        // T4.21b：清空失败任务删除成功后逐个 best-effort 清 MinIO 对象（三路径口径一致）
-        when(jdbc.query(contains("status = 'DEAD'"),
+    void deleteAllFailedDoesNotTouchS3Anymore() {
+        when(jdbc.query(contains("status = 'DEAD' AND deleted_at IS NULL"),
                 ArgumentMatchers.<RowMapper<Long>>any(), eq(1L)))
                 .thenReturn(List.of(20L, 21L));
         stubStatus(20L, "DEAD");
@@ -193,33 +196,27 @@ class TaskDeleteServiceTest {
 
         int deleted = newService().deleteAllFailed();
 
-        assertEquals(2, deleted);
-        ArgumentCaptor<software.amazon.awssdk.services.s3.model.DeleteObjectRequest> req =
-                ArgumentCaptor.forClass(software.amazon.awssdk.services.s3.model.DeleteObjectRequest.class);
-        verify(s3, times(2)).deleteObject(req.capture());
-        assertEquals("tasks/20/a.mp3", req.getAllValues().get(0).key(), "sourceUri 解析成对象 key");
-        assertEquals("tasks/21/b.mp3", req.getAllValues().get(1).key());
+        assertEquals(2, deleted, "软删计数不变（删除语义=进回收站）");
+        verifyNoS3Calls();
     }
 
+    /** T4.21b 语义迁移：原「S3 失败不影响删除」用例在软删下不再触发 S3——改为纯 DB 断言。 */
     @Test
-    void deleteAllFailedS3FailureStillDeletesAllAndReturnsCount() {
-        // T4.21b：S3 抛异常不向上抛、不回滚 DB——所有 DEAD 行照删、计数正确
-        when(jdbc.query(contains("status = 'DEAD'"),
+    void deleteAllFailedReturnsCountWithoutS3Interaction() {
+        when(jdbc.query(contains("status = 'DEAD' AND deleted_at IS NULL"),
                 ArgumentMatchers.<RowMapper<Long>>any(), eq(1L)))
                 .thenReturn(List.of(30L, 31L));
         stubStatus(30L, "DEAD");
         stubSourceUri(30L, "s3://meetingnotes/tasks/30/a.wav");
         stubStatus(31L, "DEAD");
         stubSourceUri(31L, "s3://meetingnotes/tasks/31/b.wav");
-        doThrow(new RuntimeException("MinIO 不可达")).when(s3)
-                .deleteObject(any(software.amazon.awssdk.services.s3.model.DeleteObjectRequest.class));
 
         int deleted = newService().deleteAllFailed();
 
-        assertEquals(2, deleted, "S3 失败不影响删除计数");
-        verify(jdbc).update(contains("DELETE FROM task WHERE"), eq(30L));
-        verify(jdbc).update(contains("DELETE FROM task WHERE"), eq(31L));
-        verify(s3, times(2)).deleteObject(any(software.amazon.awssdk.services.s3.model.DeleteObjectRequest.class));
+        assertEquals(2, deleted);
+        verify(jdbc).update(contains("deleted_at = now()"), eq(30L), eq(1L));
+        verify(jdbc).update(contains("deleted_at = now()"), eq(31L), eq(1L));
+        verifyNoS3Calls();
     }
 
     private void verifyNoS3Calls() {

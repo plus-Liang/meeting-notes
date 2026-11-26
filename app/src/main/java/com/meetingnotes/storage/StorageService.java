@@ -64,6 +64,12 @@ public class StorageService {
 
     public record Cleanup(boolean dryRun, long deletedObjects, long deletedBytes, long skipped, List<String> sample) {}
 
+    /** T4.96/C8（D-245）：回收站任务的桶内占用（对象数/字节）。 */
+    public record Trash(long objects, long bytes) {}
+
+    /** 单次扫桶的总览（T4.96/C8：disk/audio/orphans/trash 共用同一次 scanBucket，不重复全桶扫）。 */
+    public record UsageBundle(Disk disk, Audio audio, Orphans orphans, Trash trash) {}
+
     private record Scan(Map<String, Long> objects, boolean truncated) {}
 
     /** 磁盘占用；探测失败返回全 0（前端展示为不可用，不抛）。 */
@@ -170,14 +176,54 @@ public class StorageService {
         return new Scan(objects, truncated);
     }
 
-    /** DB 引用的完整 source_uri 集合（只拉 source_uri 列，只取 s3:// 前缀行）。 */
-    private Set<String> referencedKeys() {
-        Set<String> uris = new HashSet<>(jdbc.queryForList(
-                "SELECT source_uri FROM task WHERE source_uri LIKE 's3://%'", String.class));
+    /** 单次扫桶总览（T4.96/C8）：AdminStorageController 专用——disk/audio/orphans/trash 复用同一次
+     *  scanBucket，不新增全桶扫描。任何 S3/DB 异常 → 空结果不 500（口径同 audioUsage/orphans）。 */
+    public UsageBundle usageBundle() {
+        Disk disk = diskUsage();
+        try {
+            Scan scan = scanBucket();
+            long bytes = scan.objects().values().stream().mapToLong(Long::longValue).sum();
+            Audio audio = new Audio(scan.objects().size(), bytes, scan.truncated(), true, null);
+            Set<String> referenced = referencedKeys(); // 含回收站任务（C7-7：回收站 source_uri 也是引用）
+            List<String> orphanKeys = new ArrayList<>();
+            long orphanBytes = 0;
+            long trashObjects = 0;
+            long trashBytes = 0;
+            Set<String> trashKeys = keysOfUris(jdbc.queryForList(
+                    "SELECT source_uri FROM task WHERE deleted_at IS NOT NULL AND source_uri LIKE 's3://%'",
+                    String.class));
+            for (Map.Entry<String, Long> e : scan.objects().entrySet()) {
+                if (!referenced.contains(e.getKey())) {
+                    orphanKeys.add(e.getKey());
+                    orphanBytes += e.getValue();
+                }
+                if (trashKeys.contains(e.getKey())) {
+                    trashObjects++;
+                    trashBytes += e.getValue();
+                }
+            }
+            return new UsageBundle(disk, audio, new Orphans(orphanKeys.size(), orphanBytes, orphanKeys),
+                    new Trash(trashObjects, trashBytes));
+        } catch (RuntimeException e) {
+            log.warn("存储总览统计失败：{}", e.getMessage());
+            return new UsageBundle(disk, new Audio(0, 0, false, false, e.getMessage()),
+                    new Orphans(0, 0, List.of()), new Trash(0, 0));
+        }
+    }
+
+    /** source_uri 集合 → 桶内键集合（去桶前缀）。 */
+    private Set<String> keysOfUris(java.util.Collection<String> uris) {
         Set<String> keys = new HashSet<>();
         for (String uri : uris) {
             keys.add(uri.substring(("s3://" + bucket + "/").length()));
         }
         return keys;
+    }
+
+    /** DB 引用的完整 source_uri 集合（只拉 source_uri 列，只取 s3:// 前缀行）。
+     *  T4.96/C7-7：**不过滤 deleted_at**——回收站任务的音频仍被引用，孤儿清理绝不能当垃圾删掉。 */
+    private Set<String> referencedKeys() {
+        return keysOfUris(new HashSet<>(jdbc.queryForList(
+                "SELECT source_uri FROM task WHERE source_uri LIKE 's3://%'", String.class)));
     }
 }

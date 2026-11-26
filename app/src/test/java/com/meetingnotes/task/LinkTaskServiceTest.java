@@ -103,7 +103,7 @@ class LinkTaskServiceTest {
 
     @SuppressWarnings("unchecked")
     private void stubExisting(LinkTaskService.ExistingTask existing) {
-        when(jdbc.query(contains("SELECT id, status FROM task"),
+        when(jdbc.query(contains("FROM task WHERE content_hash"),
                 ArgumentMatchers.<ResultSetExtractor<LinkTaskService.ExistingTask>>any(),
                 any(), any())).thenReturn(existing);
     }
@@ -169,7 +169,7 @@ class LinkTaskServiceTest {
         fetcherWrites(WAV);
         txExecutesCallback();
         stubConflict();
-        stubExisting(new LinkTaskService.ExistingTask(9L, "PENDING"));
+        stubExisting(new LinkTaskService.ExistingTask(9L, "PENDING", false));
         when(probe.durationSeconds(any(Path.class))).thenReturn(2.0);
 
         TaskCreatedResponse resp = newService().createLink("http://example.com/a/sample.wav", false);
@@ -229,7 +229,7 @@ class LinkTaskServiceTest {
         fetcherWrites(WAV);
         txExecutesCallback();
         stubConflict();
-        stubExisting(new LinkTaskService.ExistingTask(9L, "DONE"));
+        stubExisting(new LinkTaskService.ExistingTask(9L, "DONE", false));
         when(probe.durationSeconds(any(Path.class))).thenReturn(2.0);
 
         TaskCreatedResponse resp = newService().createLink("http://example.com/a/sample.wav", false);

@@ -84,9 +84,9 @@ class TaskServiceTest {
                 .thenAnswer(inv -> ((TransactionCallback<Long>) inv.getArgument(0)).doInTransaction(null));
         when(jdbc.query(contains("INSERT INTO task"), ArgumentMatchers.<ResultSetExtractor<Long>>any(),
                 eq(1L), anyString(), eq(60L), eq(16L), any())).thenReturn(null);
-        when(jdbc.query(contains("SELECT id, status FROM task"),
+        when(jdbc.query(contains("FROM task WHERE content_hash"),
                 ArgumentMatchers.<ResultSetExtractor<TaskService.ExistingTask>>any(),
-                anyString(), eq(1L))).thenReturn(new TaskService.ExistingTask(existingId, "PENDING"));
+                anyString(), eq(1L))).thenReturn(new TaskService.ExistingTask(existingId, "PENDING", false));
         when(probe.durationSeconds(any())).thenReturn(60.0);
     }
 

@@ -158,7 +158,7 @@ public class TaskController {
                        t.attempts
                 FROM task t
                 LEFT JOIN task_result r ON r.task_id = t.id
-                WHERE t.id = ? AND t.user_id = ?
+                WHERE t.id = ? AND t.user_id = ? AND t.deleted_at IS NULL
                 """,
                 rs -> {
                     if (!rs.next()) {

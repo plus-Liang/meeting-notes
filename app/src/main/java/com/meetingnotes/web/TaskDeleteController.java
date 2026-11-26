@@ -54,11 +54,11 @@ public class TaskDeleteController {
         if (!outcome.deleted()) {
             if ("TASK_BUSY".equals(outcome.reason())) {
                 throw new ApiException(409, "TASK_BUSY",
-                        "任务正在排队或转写中，不能删除（删除后不可恢复，已用配额不退还）");
+                        "任务正在排队或转写中，不能删除（删除后进回收站，30 天内可恢复；配额不退还）");
             }
             throw new ApiException(404, "TASK_NOT_FOUND", "任务 " + id + " 不存在");
         }
-        taskDeleteService.purgeObjectBestEffort(id, outcome.sourceUri());
+        // T4.96/C2：软删除**不再删 MinIO 对象**（回收站要能恢复；对象删除收敛到 TaskTrashService.purge）
         return new DeleteCountResponse(1);
     }
 
@@ -69,9 +69,7 @@ public class TaskDeleteController {
         List<TaskDeleteService.DeleteOutcome> outcomes = taskDeleteService.deleteBatch(ids);
         List<DeleteItemResult> results = new ArrayList<>();
         for (TaskDeleteService.DeleteOutcome o : outcomes) {
-            if (o.deleted()) {
-                taskDeleteService.purgeObjectBestEffort(o.id(), o.sourceUri());
-            }
+            // T4.96/C2：软删除不删对象（同单条口径）
             results.add(new DeleteItemResult(o.id(), o.deleted(), o.reason()));
         }
         return new BatchDeleteResponse(results);

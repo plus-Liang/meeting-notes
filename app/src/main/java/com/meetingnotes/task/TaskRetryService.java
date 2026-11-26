@@ -57,8 +57,10 @@ public class TaskRetryService {
                 skipped.add(new Skipped(id, "NOT_FOUND"));
                 continue;
             }
+            // T4.96/C7-3：回收站任务不可重试（deleted_at IS NULL）——命中即 NOT_FOUND（404 口径，与详情一致，
+            // 已写进接入指南）；恢复走回收站端点
             String status = jdbc.query(
-                    "SELECT status FROM task WHERE id = ? AND user_id = ?",
+                    "SELECT status FROM task WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
                     rs -> rs.next() ? rs.getString(1) : null, id, UserContext.current());
             if (status == null) {
                 skipped.add(new Skipped(id, "NOT_FOUND"));

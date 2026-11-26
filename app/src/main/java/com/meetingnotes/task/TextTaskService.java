@@ -156,6 +156,12 @@ public class TextTaskService {
             if (existing == null) {
                 throw new ApiException(500, "INTERNAL_ERROR", "幂等冲突回查未找到已有任务，请联系管理员");
             }
+            if (existing.trashed()) {
+                // T4.96/D-245：幂等命中回收站任务 → 自动恢复并复用（与 TaskService/LinkTaskService 同口径）
+                jdbc.update("UPDATE task SET deleted_at = NULL, updated_at = now() WHERE id = ? AND deleted_at IS NOT NULL",
+                        existing.id());
+                log.info("文本任务 {} 幂等命中回收站任务，已自动恢复（D-245）", existing.id());
+            }
             if ("DEAD".equals(existing.status())) {
                 // T4.60 B2：复活两连 + 重投收敛到 TaskRequeueSupport
                 taskRequeueSupport.reviveDeadThenPublish(existing.id());
@@ -186,13 +192,13 @@ public class TextTaskService {
         }
     }
 
-    record ExistingTask(long id, String status) {
+    record ExistingTask(long id, String status, boolean trashed) {
     }
 
     private ExistingTask findIdAndStatusByHash(long userId, String sha256) {
         return jdbc.query(
-                "SELECT id, status FROM task WHERE content_hash = ? AND user_id = ? ORDER BY id LIMIT 1",
-                rs -> rs.next() ? new ExistingTask(rs.getLong(1), rs.getString(2)) : null,
+                "SELECT id, status, (deleted_at IS NOT NULL) AS trashed FROM task WHERE content_hash = ? AND user_id = ? ORDER BY id LIMIT 1",
+                rs -> rs.next() ? new ExistingTask(rs.getLong(1), rs.getString(2), rs.getBoolean(3)) : null,
                 sha256, userId);
     }
 }
