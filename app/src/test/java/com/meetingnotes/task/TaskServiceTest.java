@@ -21,6 +21,7 @@ import software.amazon.awssdk.services.s3.S3Client;
 import java.nio.charset.StandardCharsets;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -83,7 +84,8 @@ class TaskServiceTest {
         when(transactionTemplate.execute(ArgumentMatchers.<TransactionCallback<Long>>any()))
                 .thenAnswer(inv -> ((TransactionCallback<Long>) inv.getArgument(0)).doInTransaction(null));
         when(jdbc.query(contains("INSERT INTO task"), ArgumentMatchers.<ResultSetExtractor<Long>>any(),
-                eq(1L), anyString(), eq(60L), eq(16L), any())).thenReturn(null);
+                eq(1L), anyString(), eq(60L), eq(16L), any(),
+                org.mockito.ArgumentMatchers.isNull())).thenReturn(null); /* T4.99：language 缺省 null */
         when(jdbc.query(contains("FROM task WHERE content_hash"),
                 ArgumentMatchers.<ResultSetExtractor<TaskService.ExistingTask>>any(),
                 anyString(), eq(1L))).thenReturn(new TaskService.ExistingTask(existingId, "PENDING", false));
@@ -113,5 +115,27 @@ class TaskServiceTest {
 
         assertEquals(503, ex.getStatus(), "重投失败必须 503，不得假成功（T4.50）");
         assertEquals("QUEUE_UNAVAILABLE", ex.getCode());
+    }
+
+    /* ---- T4.99/C2：normalizeLanguage 三入口共用校验（合法/缺省/非法逐字文案） ---- */
+
+    @Test
+    void normalizeLanguageAcceptsCodesAutoAndBlank() {
+        assertEquals("en", TaskService.normalizeLanguage("en"));
+        assertEquals("yue", TaskService.normalizeLanguage("yue"));
+        assertEquals("auto", TaskService.normalizeLanguage("auto"));
+        assertEquals("en", TaskService.normalizeLanguage(" en "), "首尾空白忽略");
+        assertNull(TaskService.normalizeLanguage(null), "缺省 → null = 部署级 ASR_LANGUAGE");
+        assertNull(TaskService.normalizeLanguage("   "));
+    }
+
+    @Test
+    void normalizeLanguageRejectsInvalidWithVerbatimMessage() {
+        ApiException e1 = assertThrows(ApiException.class, () -> TaskService.normalizeLanguage("english"));
+        assertEquals(400, e1.getStatus());
+        assertEquals("INVALID_PARAM", e1.getCode());
+        assertEquals("language 只支持 2–3 位小写语言码（如 zh、en、ja），或 auto", e1.getMessage(), "文案逐字（Lead A7）");
+        assertEquals("INVALID_PARAM", assertThrows(ApiException.class, () -> TaskService.normalizeLanguage("xx1")).getCode());
+        assertEquals("INVALID_PARAM", assertThrows(ApiException.class, () -> TaskService.normalizeLanguage("中文")).getCode());
     }
 }

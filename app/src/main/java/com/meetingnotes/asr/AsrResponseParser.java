@@ -23,8 +23,8 @@ public final class AsrResponseParser {
     public record Segment(double start, double end, String text) {
     }
 
-    /** 解析结果：text=null 表示响应不可解析（非 JSON/缺 text 键），由调用方按 ASR_ERROR 处理。 */
-    public record AsrResult(String text, List<Segment> segments) {
+    /** 解析结果：text=null 表示响应不可解析（非 JSON/缺 text 键）；language=T4.99 只增键（响应无该键 → null，不报错）。 */
+    public record AsrResult(String text, List<Segment> segments, String language) {
     }
 
     private AsrResponseParser() {
@@ -32,16 +32,18 @@ public final class AsrResponseParser {
 
     public static AsrResult parse(String raw) {
         if (raw == null || raw.isBlank()) {
-            return new AsrResult(null, null);
+            return new AsrResult(null, null, null);
         }
         JsonNode root;
         try {
             root = MAPPER.readTree(raw);
         } catch (Exception e) {
-            return new AsrResult(null, null); // 非 JSON：不抛，交调用方按失败语义处理
+            return new AsrResult(null, null, null); // 非 JSON：不抛，交调用方按失败语义处理
         }
         JsonNode textNode = root.get("text");
         String text = textNode == null || !textNode.isTextual() ? null : textNode.asText();
+        JsonNode langNode = root.get("language"); // T4.99：只增键，缺省 null 不报错
+        String language = langNode == null || !langNode.isTextual() ? null : langNode.asText();
         JsonNode segs = root.get("segments");
         List<Segment> out = null;
         if (segs != null && segs.isArray()) {
@@ -60,7 +62,7 @@ public final class AsrResponseParser {
             }
         }
         // 无 segments 键（老响应只有三键）或非数组 → null：旧任务/旧响应语义，不是 []
-        return new AsrResult(text, out);
+        return new AsrResult(text, out, language);
     }
 
     /** List&lt;Segment&gt; → jsonb 文本（worker 落库用）；null → SQL NULL（旧任务/无音频是 null 不是 []）。序列化失败按 null 降级，不抛。 */

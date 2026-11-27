@@ -36,6 +36,7 @@ public class TranscriptionWorker implements SmartLifecycle {
     private final JdbcTemplate jdbc;
     private final S3Client s3;
     private final com.meetingnotes.asr.AsrClient asrClient;
+    private final TaskTranscriber taskTranscriber; /* T4.99/C5：转写步骤独立组件 */
     private final com.meetingnotes.ai.StructuringService structuringService;
     private final com.meetingnotes.ai.TranscriptPunctuator punctuator;
     private final com.meetingnotes.webhook.WebhookDeliveryService webhookService;
@@ -64,8 +65,8 @@ public class TranscriptionWorker implements SmartLifecycle {
             TaskHeartbeat taskHeartbeat, @Value("${app.worker.queue-key}") String queueKey,
             @Value("${app.worker.poll-timeout-sec}") long pollTimeoutSec,
             @Value("${app.storage.bucket}") String bucket, @Value("${app.task.max-retries}") int maxRetries,
-            RedisUnavailableReporter reporter, TaskAttempts taskAttempts) {
-        this.redis = redis; this.jdbc = jdbc; this.s3 = s3; this.asrClient = asrClient;
+            RedisUnavailableReporter reporter, TaskAttempts taskAttempts, TaskTranscriber taskTranscriber) {
+        this.redis = redis; this.jdbc = jdbc; this.s3 = s3; this.asrClient = asrClient; this.taskTranscriber = taskTranscriber; /* T4.99/C5 */
         this.structuringService = structuringService; this.punctuator = punctuator; this.webhookService = webhookService;
         this.pasteTextReader = pasteTextReader; this.monoWavExtractor = monoWavExtractor; this.queuePublisher = queuePublisher;
         this.deadTaskRecorder = deadTaskRecorder;
@@ -156,7 +157,8 @@ public class TranscriptionWorker implements SmartLifecycle {
     /** T4.77/P-06：原子认领（SQL 语义不变）+ 在飞标记 + 心跳启动；返回 null = 已被其它实例认领（跳过）。 */
     private Claimed claim(long taskId) {
         Map<String, Object> row = jdbc.queryForMap(
-                "SELECT status, attempts, source_type, COALESCE(source_uri, '') AS source_uri, COALESCE(request_id, '') AS request_id FROM task WHERE id = ?", taskId);
+                "SELECT status, attempts, source_type, COALESCE(source_uri, '') AS source_uri, COALESCE(request_id, '') AS request_id, "
+                + "COALESCE(language, '') AS language FROM task WHERE id = ?", taskId); /* T4.99/C7：任务级语言带出 */
         int claimed = jdbc.update("UPDATE task SET status = 'RUNNING', updated_at = now() WHERE id = ? "
                 + "AND status IN ('PENDING','RETRYING')", taskId);
         if (claimed == 0) { return null; }
@@ -169,7 +171,7 @@ public class TranscriptionWorker implements SmartLifecycle {
     private void process(Map<String, Object> row, long taskId) throws Exception {
         String sourceUri = (String) row.get("source_uri");
         if (!sourceUri.startsWith("s3://" + bucket + "/")) {
-            throw new ProcessingException("STORAGE_ERROR", "source_uri 非法：" + sourceUri, null);
+            throw new ProcessingException("STORAGE_ERROR", "任务内容地址无效，请重新上传文件", null); /* T4.99/C6 脱敏 */
         }
         String key = sourceUri.substring(("s3://" + bucket + "/").length());
         // T3.7：PASTE/字幕任务——直接读文本对象，跳过 ffmpeg/ASR（管线仍守 F-1/D-069：transcript → 结构化 → DONE）
@@ -178,7 +180,7 @@ public class TranscriptionWorker implements SmartLifecycle {
             try {
                 text = pasteTextReader.read(key);
             } catch (RuntimeException e) {
-                throw new ProcessingException("STORAGE_ERROR", "读取文本对象失败：" + e.getMessage(), e);
+                throw new ProcessingException("STORAGE_ERROR", "读取任务内容失败，请检查对象存储是否正常", e); /* T4.99/C6 脱敏，cause 保留 */
             }
             log.info("PASTE 文本已读取（{} 字），跳过 ASR", text == null ? 0 : text.length());
             finalizeResult(taskId, text, null); // PASTE 无音频，segments 恒 null（不是 []）
@@ -194,23 +196,17 @@ public class TranscriptionWorker implements SmartLifecycle {
                 s3.getObject(GetObjectRequest.builder().bucket(bucket).key(key).build(),
                         ResponseTransformer.toFile(input));
             } catch (RuntimeException e) {
-                throw new ProcessingException("STORAGE_ERROR", "从对象存储拉取文件失败：" + e.getMessage(), e);
+                throw new ProcessingException("STORAGE_ERROR", "从对象存储拉取音频失败，请检查对象存储是否正常", e); /* T4.99/C6 脱敏，cause 保留 */
             }
             log.info("拉取媒体对象完成（{} bytes）", Files.size(input));
             // 2) ffmpeg 抽 16k 单声道 wav（卡片指定参数）
             wav = Files.createTempFile("mn-wav-", ".wav");
             monoWavExtractor.extract(input, wav);
             log.info("ffmpeg 抽音轨完成（16k 单声道 wav）");
-            // 3) ASR 转写（T4.35a：一次调用拿 text + segments；RuntimeException → ProcessingException("ASR_ERROR") 走既有重试/死信）
-            String text;
-            java.util.List<com.meetingnotes.asr.AsrResponseParser.Segment> segments;
-            try {
-                com.meetingnotes.asr.AsrClient.Transcription result = asrClient.transcribe(wav);
-                text = result.text();
-                segments = result.segments();
-            } catch (RuntimeException e) {
-                throw new ProcessingException("ASR_ERROR", "ASR 转写调用失败：" + e.getMessage(), e);
-            }
+            // 3) ASR 转写（T4.99/C5：调 TaskTranscriber——语言透传 + ASR_ERROR 人话脱敏收敛到单点，cause 仍随异常上抛进日志）
+            TaskTranscriber.Result result = taskTranscriber.transcribe((String) row.get("language"), wav);
+            String text = result.text();
+            java.util.List<com.meetingnotes.asr.AsrResponseParser.Segment> segments = result.segments();
             log.info("ASR 转写完成（{} 字，{} 段）", text == null ? 0 : text.length(),
                     segments == null ? 0 : segments.size());
             // 4) 收口（finalizeResult）：写 transcript + segments → 摘要/待办（AI 失败只 WARN 留空，T3.3 接管）→ 最后置 DONE；空文本照常（D-048）
@@ -256,7 +252,10 @@ public class TranscriptionWorker implements SmartLifecycle {
     /** 失败兜底：不永久卡 RUNNING。重试未耗尽 → RETRYING + 重新入队（队尾）；重投失败 → 退回 PENDING；耗尽 → DEAD + dead_letter。 */
     private void markFailure(long taskId, Exception cause) {
         String code = cause instanceof ProcessingException pe ? pe.code : "UNKNOWN_ERROR";
-        String reason = abbreviate(cause.getMessage());
+        /* T4.99/C6：reason 是用户可见文案——ProcessingException 已是脱敏人话；裸异常原文只进日志（:128 已带堆栈） */
+        String reason = cause instanceof ProcessingException
+                ? abbreviate(cause.getMessage())
+                : "处理过程发生异常，请重试或联系管理员（详见服务端日志）";
         try {
             // T4.94/P-03：RETURNING（PG 专用）→ 可移植两步（自增 UPDATE + 单独 SELECT），SQL 首次可被 H2 真库覆盖
             taskAttempts.bump(taskId);

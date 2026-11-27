@@ -30,8 +30,8 @@ public class LinkTaskController {
 
     @PostMapping(value = "/tasks/link", consumes = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<TaskCreatedResponse> link(@RequestBody LinkRequest body) {
-        LinkRequest req = body == null ? new LinkRequest(null, null) : body;
+        LinkRequest req = body == null ? new LinkRequest(null, null, null) : body;
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(linkTaskService.createLink(req.url(), req.useByofRequested()));
+                .body(linkTaskService.createLink(req.url(), req.useByofRequested(), req.language())); /* T4.99：可选 language */
     }
 }

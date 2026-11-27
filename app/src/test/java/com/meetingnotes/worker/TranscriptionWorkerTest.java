@@ -82,7 +82,8 @@ class TranscriptionWorkerTest {
         return new TranscriptionWorker(redis, jdbc, s3, asrClient,
                 structuringService, punctuator, webhookService, pasteTextReader, monoWavExtractor,
                 queuePublisher, deadTaskRecorder, taskHeartbeat, "meetingnotes:task-queue", 10, "meetingnotes", 3,
-                new RedisUnavailableReporter(60, 2, java.time.Clock.systemUTC()), taskAttempts); // T4.91/T4.94：构造器连带（K-192 预授权）
+                new RedisUnavailableReporter(60, 2, java.time.Clock.systemUTC()), taskAttempts,
+                new com.meetingnotes.worker.TaskTranscriber(asrClient)); /* T4.99：构造器连带（K-192 预授权）——真实 TaskTranscriber 包 mock asrClient */
     }
 
     @Test
@@ -205,7 +206,7 @@ class TranscriptionWorkerTest {
 
         ReflectionTestUtils.invokeMethod(worker, "process", row, 20L);
 
-        verify(asrClient, never()).transcribe(ArgumentMatchers.any());
+        verify(asrClient, never()).transcribe(ArgumentMatchers.any(), ArgumentMatchers.any()); /* T4.99：双参重载同样不调 */
         verify(monoWavExtractor, never()).extract(ArgumentMatchers.any(), ArgumentMatchers.any());
         InOrder order = inOrder(jdbc, structuringService);
         order.verify(jdbc).update(contains("task_result"), eq(20L), eq("粘贴的一段会议文本"), ArgumentMatchers.isNull());
@@ -286,6 +287,41 @@ class TranscriptionWorkerTest {
         verify(deadTaskRecorder).markDead(eq(10L), eq("ASR_ERROR"), contains("服务不可达"));
         verify(queuePublisher, org.mockito.Mockito.never()).tryPublishToTail(org.mockito.ArgumentMatchers.anyLong());
         verify(queuePublisher, org.mockito.Mockito.never()).tryPublish(org.mockito.ArgumentMatchers.anyLong());
+    }
+
+    /* ---- T4.99/C6：ASR_ERROR 人话进 dead_letter.reason，原文不泄露（与 TaskTranscriber 包装串联后的端到端口径） ---- */
+
+    @Test
+    void asrErrorDeadLetterReasonIsSanitizedVerbatim() {
+        TranscriptionWorker worker = newWorker();
+        when(taskAttempts.read(12L)).thenReturn(3); // 重试耗尽
+
+        ReflectionTestUtils.invokeMethod(worker, "markFailure", 12L,
+                new ProcessingException("ASR_ERROR", TaskTranscriber.ASR_FAILURE_MESSAGE,
+                        new RuntimeException("Connection refused: http://asr:8000/v1/audio/transcriptions")));
+
+        org.mockito.ArgumentCaptor<String> reason = org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(deadTaskRecorder).markDead(eq(12L), eq("ASR_ERROR"), reason.capture());
+        assertEquals("语音识别服务调用失败，请检查 ASR 服务是否正常（详见服务端日志）", reason.getValue(), "reason 逐字（Lead A6）");
+        assertFalse(reason.getValue().contains("http"), "不得含内部地址");
+        assertFalse(reason.getValue().contains("asr:8000"), "不得含容器名/端口");
+        assertFalse(reason.getValue().contains("Exception"), "不得含异常类名");
+    }
+
+    @Test
+    void unknownErrorReasonIsSanitizedToo() {
+        TranscriptionWorker worker = newWorker();
+        when(taskAttempts.read(13L)).thenReturn(3); // 重试耗尽
+
+        /* 非 ProcessingException（如 ffmpeg/IO 裸异常）→ getMessage 原文不得进 reason */
+        ReflectionTestUtils.invokeMethod(worker, "markFailure", 13L,
+                new IllegalStateException("java.nio.file.NoSuchFileException: /tmp/mn-asr-123/in.wav (http://internal)"));
+
+        org.mockito.ArgumentCaptor<String> reason = org.mockito.ArgumentCaptor.forClass(String.class);
+        verify(deadTaskRecorder).markDead(eq(13L), eq("UNKNOWN_ERROR"), reason.capture());
+        assertEquals("处理过程发生异常，请重试或联系管理员（详见服务端日志）", reason.getValue());
+        assertFalse(reason.getValue().contains("NoSuchFileException"), "原文只进日志");
+        assertFalse(reason.getValue().contains("http"), "不得含内部地址");
     }
 
     /* ---- T2.3 崩溃恢复：启动时回收 RUNNING 僵尸（独立 StartupRecovery）---- */

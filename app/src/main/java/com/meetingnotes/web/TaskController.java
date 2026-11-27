@@ -85,8 +85,8 @@ public class TaskController {
 
     @PostMapping(value = "/tasks", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<TaskCreatedResponse> upload(@RequestPart("file") MultipartFile file,
-                                                      @RequestPart(value = "template", required = false) String template)
-            throws IOException {
+                                                      @RequestPart(value = "template", required = false) String template,
+                                                      @RequestPart(value = "language", required = false) String language) throws IOException {
         // T3.7：字幕（.srt/.ass，按文件名后缀大小写不敏感）先于魔数闸分派——纯文本过不了
         // MediaMagic.detect，必须在这里转成文本任务；其余后缀仍走原音频路径（逐字节不动）。
         // T3.9：template 为可选表单字段（显式/文件名自动推荐/默认的解析在各 service 内做）。
@@ -95,7 +95,7 @@ public class TaskController {
         if (name.endsWith(".srt") || name.endsWith(".ass")) {
             return ResponseEntity.status(HttpStatus.CREATED).body(textTaskService.createSubtitle(file, template));
         }
-        TaskCreatedResponse resp = taskService.createUpload(file, template);
+        TaskCreatedResponse resp = taskService.createUpload(file, template, language); /* T4.99：可选 language */
         return ResponseEntity.status(HttpStatus.CREATED).body(resp);
     }
 
@@ -117,7 +117,7 @@ public class TaskController {
     public ResponseEntity<TaskCreatedResponse> paste(@RequestBody PasteRequest body) {
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(textTaskService.createPaste(body == null ? null : body.text(),
-                        body == null ? null : body.template()));
+                        body == null ? null : body.template(), body == null ? null : body.language())); /* T4.99 */
     }
 
     /** 批量重试（T4.1）：只处理 DEAD（复活口径与重传复活 D-049 逐字一致，不消费配额）；非 DEAD/不存在/非本人 → 逐条 skipped（NOT_DEAD / NOT_FOUND），不整体失败。 */

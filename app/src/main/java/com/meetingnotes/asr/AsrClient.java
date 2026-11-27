@@ -33,8 +33,9 @@ public class AsrClient {
     /** 契约端点路径（与 config/AsrHttpClientConfig 的路由常量同一字面量：转写路径走 900s 读超时）。 */
     static final String TRANSCRIPTION_PATH = "/v1/audio/transcriptions";
 
-    /** 一次调用的完整结果：text（拼接全文）+ segments（句子级时间戳，可能为 null=响应无该键）。 */
-    public record Transcription(String text, java.util.List<AsrResponseParser.Segment> segments) {
+    /** 一次调用的完整结果：text（拼接全文）+ segments（句子级时间戳，可能为 null=响应无该键）
+     *  + language（T4.99：ASR 响应带回的实际语言，响应无该键时为 null，只增不减）。 */
+    public record Transcription(String text, java.util.List<AsrResponseParser.Segment> segments, String language) {
     }
 
     private final RestClient restClient;
@@ -47,11 +48,20 @@ public class AsrClient {
         this.model = model;
     }
 
-    /** 转写一个 16k 单声道 wav，返回 text + segments（同一响应，绝不二次调 ASR）。 */
+    /** 转写一个 16k 单声道 wav（无任务级语言 → 部署级默认），返回 text + segments。 */
     public Transcription transcribe(Path wav) {
+        return transcribe(wav, null);
+    }
+
+    /** T4.99/C3：任务级语言重载——null/空白**不加** language 字段（服务端用部署级默认）；
+     *  "auto" 原样传（服务端解释为自动检测）；其它合法码原样传（校验在入口层已做）。 */
+    public Transcription transcribe(Path wav, String language) {
         MultiValueMap<String, Object> body = new LinkedMultiValueMap<>();
         body.add("file", new FileSystemResource(wav));
         body.add("model", model);
+        if (language != null && !language.isBlank()) {
+            body.add("language", language);
+        }
         String raw = restClient.post()
                 .uri(TRANSCRIPTION_PATH)
                 .contentType(org.springframework.http.MediaType.MULTIPART_FORM_DATA)
@@ -62,7 +72,7 @@ public class AsrClient {
         if (parsed.text() == null) {
             throw new IllegalStateException("ASR 响应不可解析（非 JSON 或缺 text 键）：" + abbreviate(raw));
         }
-        return new Transcription(parsed.text(), parsed.segments());
+        return new Transcription(parsed.text(), parsed.segments(), parsed.language());
     }
 
     private static String abbreviate(String s) {

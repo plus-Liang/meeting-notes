@@ -67,12 +67,16 @@ public class TextTaskService {
 
     /** JSON 文本 PASTE 入口（controller 已保证非 null body）。 */
     public TaskCreatedResponse createPaste(String text) {
-        return createPaste(text, null);
+        return createPaste(text, null, null);
     }
 
-    /** PASTE 入口（T3.9 起带可选 template；文本路径不做文件名推荐：显式值否则 meeting）。 */
     public TaskCreatedResponse createPaste(String text, String template) {
-        return createTextTask(text, template);
+        return createPaste(text, template, null);
+    }
+
+    /** PASTE 入口（T3.9 template；T4.99 可选 language，校验与上传共用）。 */
+    public TaskCreatedResponse createPaste(String text, String template, String language) {
+        return createTextTask(text, template, language);
     }
 
     /** 字幕入口：413 大小闸 → 解码 → 解析 → 得到最终文本后与 PASTE 同路（解析为空 → 400）。 */
@@ -110,6 +114,12 @@ public class TextTaskService {
     }
 
     private TaskCreatedResponse createTextTask(String rawText, String explicitTemplate) {
+        return createTextTask(rawText, explicitTemplate, null);
+    }
+
+    /** T4.99/C2：language 可选（校验与上传共用 TaskService.normalizeLanguage；null=部署级）。 */
+    private TaskCreatedResponse createTextTask(String rawText, String explicitTemplate, String language) {
+        String lang = TaskService.normalizeLanguage(language);
         String text = rawText == null ? "" : rawText.trim();
         if (text.isEmpty()) {
             throw new ApiException(400, "INVALID_PARAM", "text 不能为空");
@@ -124,14 +134,14 @@ public class TextTaskService {
         String sha256 = sha256Hex(bytes);
         Long taskId = transactionTemplate.execute(tx -> {
             Long newId = jdbc.query("""
-                            INSERT INTO task (user_id, source_type, content_hash, duration_sec, size_bytes, status, request_id)
-                            VALUES (?, 'PASTE', ?, NULL, ?, 'PENDING', ?)
+                            INSERT INTO task (user_id, source_type, content_hash, duration_sec, size_bytes, status, request_id, language)
+                            VALUES (?, 'PASTE', ?, NULL, ?, 'PENDING', ?, ?)
                             ON CONFLICT (user_id, content_hash) DO NOTHING
                             RETURNING id
                             """,
                     rs -> rs.next() ? rs.getLong(1) : null,
                     UserContext.current(), sha256, (long) bytes.length,
-                    org.slf4j.MDC.get("requestId")); // T4.86/P-26：同 TaskService（MDC null → NULL 列）
+                    org.slf4j.MDC.get("requestId"), lang); // T4.86/P-26 同前；T4.99：任务级语言
             if (newId == null) {
                 return null;
             }

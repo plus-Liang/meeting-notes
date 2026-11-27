@@ -91,6 +91,12 @@ public class LinkTaskService {
      * 既有语义与错误码不变。两条路入口都先过 UrlGuard（在各自 fetcher 内逐跳执行）。
      */
     public TaskCreatedResponse createLink(String url, boolean useByof) {
+        return createLink(url, useByof, null);
+    }
+
+    /** T4.99/C2：可选 language（校验与上传共用 TaskService.normalizeLanguage；null=部署级）。 */
+    public TaskCreatedResponse createLink(String url, boolean useByof, String language) {
+        String lang = TaskService.normalizeLanguage(language);
         if (url == null || url.isBlank()) {
             throw new ApiException(400, "INVALID_PARAM", "url 不能为空");
         }
@@ -138,14 +144,14 @@ public class LinkTaskService {
             Long taskId = transactionTemplate.execute(tx -> {
                 Long newId = jdbc.query(
                         """
-                        INSERT INTO task (user_id, source_type, content_hash, duration_sec, size_bytes, status, request_id)
-                        VALUES (?, 'LINK', ?, ?, ?, 'PENDING', ?)
+                        INSERT INTO task (user_id, source_type, content_hash, duration_sec, size_bytes, status, request_id, language)
+                        VALUES (?, 'LINK', ?, ?, ?, 'PENDING', ?, ?)
                         ON CONFLICT (user_id, content_hash) DO NOTHING
                         RETURNING id
                         """,
                         rs -> rs.next() ? rs.getLong(1) : null,
                         UserContext.current(), sha256, durationSec, size,
-                        org.slf4j.MDC.get("requestId")); // T4.86/P-26：同 TaskService（MDC null → NULL 列）
+                        org.slf4j.MDC.get("requestId"), lang); // T4.86/P-26 同前；T4.99：任务级语言
                 if (newId == null) {
                     return null; // 冲突：同用户已有同内容任务，回查交给事务外
                 }

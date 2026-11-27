@@ -9,7 +9,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  * 既有请求体不含该键 → 语义不变）：true 表示用外部抓取工具（FETCHER_CMD）抓取，
  * 未配置 → 400 FETCHER_UNAVAILABLE。网页链接（text/html）无 BYOF → 400 NOT_DIRECT_MEDIA。
  */
-public record LinkRequest(String url, @JsonProperty("use_byof") Boolean useByof) {
+public record LinkRequest(String url, @JsonProperty("use_byof") Boolean useByof, String language) { /* T4.99：末尾只增 */
 
     /** use_byof 归一化：null/缺省 = false（T4.32a 既有语义不变）。 */
     public boolean useByofRequested() {

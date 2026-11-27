@@ -92,13 +92,13 @@ class LinkTaskServiceTest {
     @SuppressWarnings("unchecked")
     private void stubInsertInserts(long newId) {
         when(jdbc.query(contains("INSERT INTO task"), ArgumentMatchers.<ResultSetExtractor<Long>>any(),
-                eq(1L), anyString(), anyLong(), anyLong(), any())).thenReturn(newId);
+                eq(1L), anyString(), anyLong(), anyLong(), any(), org.mockito.ArgumentMatchers.isNull()) /* T4.99：language */).thenReturn(newId);
     }
 
     @SuppressWarnings("unchecked")
     private void stubConflict() {
         when(jdbc.query(contains("INSERT INTO task"), ArgumentMatchers.<ResultSetExtractor<Long>>any(),
-                eq(1L), anyString(), anyLong(), anyLong(), any())).thenReturn(null);
+                eq(1L), anyString(), anyLong(), anyLong(), any(), org.mockito.ArgumentMatchers.isNull()) /* T4.99：language */).thenReturn(null);
     }
 
     @SuppressWarnings("unchecked")
@@ -135,7 +135,7 @@ class LinkTaskServiceTest {
         assertEquals(false, resp.reused());
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
         verify(jdbc).query(sql.capture(), ArgumentMatchers.<ResultSetExtractor<Long>>any(),
-                eq(1L), anyString(), anyLong(), anyLong(), any());
+                eq(1L), anyString(), anyLong(), anyLong(), any(), org.mockito.ArgumentMatchers.isNull()) /* T4.99：language */;
         assertTrue(sql.getValue().contains("'LINK'"), "source_type 用卡面逐字的 LINK（V1 无 CHECK 约束）");
         assertTrue(sql.getValue().contains("ON CONFLICT (user_id, content_hash) DO NOTHING"), "幂等靠唯一约束裁决");
         verify(quotaService).consume(1L, 1);
@@ -271,5 +271,17 @@ class LinkTaskServiceTest {
         assertEquals(9L, resp.taskId());
         verify(byofFetcher).fetch(anyString(), any(Path.class));
         verify(fetcher, never()).fetch(anyString(), any(Path.class));
+    }
+
+    /* ---- T4.99/C2/C9：link 入口 language 校验（非法 400 逐字；合法落 INSERT） ---- */
+
+    @Test
+    void linkLanguageInvalidRejectedWithVerbatimMessage() {
+        ApiException e = assertThrows(ApiException.class, () -> newService().createLink("https://example.com/a.mp3", false, "xx1"));
+        assertEquals(400, e.getStatus());
+        assertEquals("INVALID_PARAM", e.getCode());
+        assertEquals("language 只支持 2–3 位小写语言码（如 zh、en、ja），或 auto", e.getMessage(), "文案逐字（Lead A7）");
+        assertEquals("INVALID_PARAM", assertThrows(ApiException.class,
+                () -> newService().createLink("https://example.com/a.mp3", false, "中文")).getCode());
     }
 }

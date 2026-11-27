@@ -78,13 +78,13 @@ class TextTaskServiceTest {
     @SuppressWarnings("unchecked")
     private void stubInsertInserts(long newId) {
         when(jdbc.query(contains("INSERT INTO task"), ArgumentMatchers.<ResultSetExtractor<Long>>any(),
-                eq(1L), anyString(), anyLong(), any())).thenReturn(newId);
+                eq(1L), anyString(), anyLong(), any(), org.mockito.ArgumentMatchers.isNull()) /* T4.99：language */).thenReturn(newId);
     }
 
     @SuppressWarnings("unchecked")
     private void stubConflict() {
         when(jdbc.query(contains("INSERT INTO task"), ArgumentMatchers.<ResultSetExtractor<Long>>any(),
-                eq(1L), anyString(), anyLong(), any())).thenReturn(null);
+                eq(1L), anyString(), anyLong(), any(), org.mockito.ArgumentMatchers.isNull()) /* T4.99：language */).thenReturn(null);
     }
 
     @SuppressWarnings("unchecked")
@@ -118,7 +118,7 @@ class TextTaskServiceTest {
         assertEquals(false, resp.reused());
         ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
         verify(jdbc).query(sql.capture(), ArgumentMatchers.<ResultSetExtractor<Long>>any(),
-                eq(1L), anyString(), anyLong(), any());
+                eq(1L), anyString(), anyLong(), any(), org.mockito.ArgumentMatchers.isNull()) /* T4.99：language */;
         assertTrue(sql.getValue().contains("'PASTE'"), "source_type 用 schema 预留的 PASTE");
         assertTrue(sql.getValue().contains("ON CONFLICT (user_id, content_hash) DO NOTHING"), "幂等靠唯一约束裁决");
         verify(quotaService).consume(1L, 0);
@@ -216,6 +216,29 @@ class TextTaskServiceTest {
         verify(transactionTemplate, never()).execute(any());
     }
 
+    /* ---- T4.99/C2/C9：language 字段落参 + 非法值 400 逐字 ---- */
+
+    @Test
+    void pasteLanguageStoredInInsertAndInvalidRejected() {
+        txExecutesCallback();
+        when(jdbc.query(contains("INSERT INTO task"), ArgumentMatchers.<ResultSetExtractor<Long>>any(),
+                eq(1L), anyString(), anyLong(), any(), eq("en"))).thenReturn(21L); /* T4.99：language=en 专属 stub */
+
+        TaskCreatedResponse resp = newService().createPaste("一段英文会议文本", "meeting", "en");
+
+        assertEquals(21L, resp.taskId());
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(jdbc).query(sql.capture(), ArgumentMatchers.<ResultSetExtractor<Long>>any(),
+                eq(1L), anyString(), anyLong(), any(), eq("en"));
+        assertTrue(sql.getValue().contains("language"), "INSERT 列表含 language 列");
+
+        ApiException e = assertThrows(ApiException.class,
+                () -> newService().createPaste("一段文本", "meeting", "english"));
+        assertEquals(400, e.getStatus());
+        assertEquals("INVALID_PARAM", e.getCode());
+        assertEquals("language 只支持 2–3 位小写语言码（如 zh、en、ja），或 auto", e.getMessage(), "文案逐字（Lead A7）");
+    }
+
     @Test
     void subtitleWithNoRecognizableTextRejectedWith400() {
         String emptySrt = "1\n00:00:01,000 --> 00:00:02,000\n\n\n";
@@ -253,7 +276,7 @@ class TextTaskServiceTest {
 
         assertEquals(fromSrt.contentHash(), fromAss.contentHash(), "同内容字幕/文本共享一个任务");
         verify(jdbc, times(2)).query(contains("INSERT INTO task"),
-                ArgumentMatchers.<ResultSetExtractor<Long>>any(), eq(1L), anyString(), anyLong(), any());
+                ArgumentMatchers.<ResultSetExtractor<Long>>any(), eq(1L), anyString(), anyLong(), any(), org.mockito.ArgumentMatchers.isNull()) /* T4.99：language */;
     }
 
     private static MultipartFile multipart(String name, byte[] bytes) {

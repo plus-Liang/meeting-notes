@@ -152,7 +152,8 @@ class TaskServiceValidationTest {
         runCallbackForReal();
         // T2.1：INSERT ... ON CONFLICT (user_id, content_hash) DO NOTHING RETURNING id → 新任务返回 7
         doReturn(7L).when(jdbc).query(contains("ON CONFLICT (user_id, content_hash)"),
-                ArgumentMatchers.<ResultSetExtractor<Long>>any(), eq(1L), any(), any(), any(), any());
+                ArgumentMatchers.<ResultSetExtractor<Long>>any(), eq(1L), any(), any(), any(), any(),
+                org.mockito.ArgumentMatchers.isNull()); /* T4.99：language 缺省 null */
 
         TaskService service = newService(209715200L, 3600L);
         com.meetingnotes.common.TaskCreatedResponse resp = service.createUpload(wav(64));
@@ -174,7 +175,7 @@ class TaskServiceValidationTest {
         when(probe.durationSeconds(any())).thenReturn(90.0);
         runCallbackForReal();
         doReturn(null).when(jdbc).query(contains("ON CONFLICT (user_id, content_hash)"),
-                ArgumentMatchers.<ResultSetExtractor<Long>>any(), eq(1L), any(), any(), any(), any());
+                ArgumentMatchers.<ResultSetExtractor<Long>>any(), eq(1L), any(), any(), any(), any(), org.mockito.ArgumentMatchers.isNull()) /* T4.99：language */;
         doReturn(new TaskService.ExistingTask(7L, "DONE", false)).when(jdbc)
                 .query(contains("FROM task WHERE content_hash"),
                         ArgumentMatchers.<ResultSetExtractor<TaskService.ExistingTask>>any(), any(), eq(1L));
@@ -194,7 +195,7 @@ class TaskServiceValidationTest {
         when(probe.durationSeconds(any())).thenReturn(90.0);
         runCallbackForReal();
         doReturn(null).when(jdbc).query(contains("ON CONFLICT (user_id, content_hash)"),
-                ArgumentMatchers.<ResultSetExtractor<Long>>any(), eq(1L), any(), any(), any(), any());
+                ArgumentMatchers.<ResultSetExtractor<Long>>any(), eq(1L), any(), any(), any(), any(), org.mockito.ArgumentMatchers.isNull()) /* T4.99：language */;
         doReturn(new TaskService.ExistingTask(8L, "DEAD", false)).when(jdbc)
                 .query(contains("FROM task WHERE content_hash"),
                         ArgumentMatchers.<ResultSetExtractor<TaskService.ExistingTask>>any(), any(), eq(1L));
@@ -215,7 +216,7 @@ class TaskServiceValidationTest {
         when(probe.durationSeconds(any())).thenReturn(90.0);
         runCallbackForReal();
         doReturn(11L).when(jdbc).query(contains("ON CONFLICT (user_id, content_hash)"),
-                ArgumentMatchers.<ResultSetExtractor<Long>>any(), eq(1L), any(), any(), any(), any());
+                ArgumentMatchers.<ResultSetExtractor<Long>>any(), eq(1L), any(), any(), any(), any(), org.mockito.ArgumentMatchers.isNull()) /* T4.99：language */;
         when(s3.putObject(ArgumentMatchers.<software.amazon.awssdk.services.s3.model.PutObjectRequest>any(),
                 ArgumentMatchers.<software.amazon.awssdk.core.sync.RequestBody>any()))
                 .thenThrow(software.amazon.awssdk.core.exception.SdkClientException.builder()
@@ -235,7 +236,7 @@ class TaskServiceValidationTest {
         when(probe.durationSeconds(any())).thenReturn(90.0);
         runCallbackForReal();
         doReturn(null).when(jdbc).query(contains("ON CONFLICT (user_id, content_hash)"),
-                ArgumentMatchers.<ResultSetExtractor<Long>>any(), eq(1L), any(), any(), any(), any());
+                ArgumentMatchers.<ResultSetExtractor<Long>>any(), eq(1L), any(), any(), any(), any(), org.mockito.ArgumentMatchers.isNull()) /* T4.99：language */;
         doReturn(new TaskService.ExistingTask(9L, "RETRYING", false)).when(jdbc)
                 .query(contains("FROM task WHERE content_hash"),
                         ArgumentMatchers.<ResultSetExtractor<TaskService.ExistingTask>>any(), any(), eq(1L));
@@ -270,7 +271,7 @@ class TaskServiceValidationTest {
         when(probe.durationSeconds(any())).thenReturn(90.0);
         runCallbackForReal();
         doReturn(15L).when(jdbc).query(contains("ON CONFLICT (user_id, content_hash)"),
-                ArgumentMatchers.<ResultSetExtractor<Long>>any(), eq(1L), any(), any(), any(), any());
+                ArgumentMatchers.<ResultSetExtractor<Long>>any(), eq(1L), any(), any(), any(), any(), org.mockito.ArgumentMatchers.isNull()) /* T4.99：language */;
 
         // 不传 template：文件名"公开课Lecture03" 命中 course 关键字 → course（来源：文件名）
         MockMultipartFile file = new MockMultipartFile("file", "公开课Lecture03.wav", null, wav(64).getBytes());

@@ -81,11 +81,29 @@ public class TaskService {
     }
 
     public TaskCreatedResponse createUpload(MultipartFile file) throws IOException {
-        return createUpload(file, null);
+        return createUpload(file, null, null);
     }
 
-    /** 音频上传（T3.9 起带可选 template：显式 / 文件名自动推荐 / 默认 meeting；非法值 400 不静默回落）。 */
     public TaskCreatedResponse createUpload(MultipartFile file, String template) throws IOException {
+        return createUpload(file, template, null);
+    }
+
+    /** T4.99/C2 校验规则（三入口共用）：NULL/空白 → null（用部署级 ASR_LANGUAGE）；auto 或 ^[a-z]{2,3}$ 通过；
+     *  其余 → 400 INVALID_PARAM 文案逐字（zh/en/ja 仅为示例，不是白名单）。 */
+    public static String normalizeLanguage(String language) {
+        if (language == null || language.isBlank()) {
+            return null;
+        }
+        String v = language.trim();
+        if ("auto".equals(v) || v.matches("^[a-z]{2,3}$")) {
+            return v;
+        }
+        throw new ApiException(400, "INVALID_PARAM", "language 只支持 2–3 位小写语言码（如 zh、en、ja），或 auto");
+    }
+
+    /** 音频上传（T3.9 起带可选 template；T4.99 起带可选 language：null=部署级，校验见 normalizeLanguage）。 */
+    public TaskCreatedResponse createUpload(MultipartFile file, String template, String language) throws IOException {
+        String lang = normalizeLanguage(language);
         if (file == null || file.isEmpty()) {
             throw new ApiException(400, "INVALID_MEDIA", "multipart 字段 file 缺失或为空文件");
         }
@@ -132,14 +150,14 @@ public class TaskService {
             Long taskId = transactionTemplate.execute(tx -> {
                 Long newId = jdbc.query(
                         """
-                        INSERT INTO task (user_id, source_type, content_hash, duration_sec, size_bytes, status, request_id)
-                        VALUES (?, 'UPLOAD', ?, ?, ?, 'PENDING', ?)
+                        INSERT INTO task (user_id, source_type, content_hash, duration_sec, size_bytes, status, request_id, language)
+                        VALUES (?, 'UPLOAD', ?, ?, ?, 'PENDING', ?, ?)
                         ON CONFLICT (user_id, content_hash) DO NOTHING
                         RETURNING id
                         """,
                         rs -> rs.next() ? rs.getLong(1) : null,
                         UserContext.current(), sha256, durationSec, size,
-                        org.slf4j.MDC.get("requestId")); // T4.86/P-26：入口 filter 写入的请求 id（MDC.get 为 null 时 JdbcTemplate 落 NULL）
+                        org.slf4j.MDC.get("requestId"), lang); // T4.86/P-26 同前；T4.99：任务级语言（null=部署级）
                 if (newId == null) {
                     return null; // 冲突：同用户已有同内容任务，回查交给事务外（事务内不能留未决状态）
                 }
