@@ -172,9 +172,18 @@
           </div>
         </details>
         <div class="inline-copy">
-          <button type="button" class="btn-secondary" id="copySampleBtn">复制示例文本去真跑</button>
-          <span class="hint" id="copySampleHint">把示例文本复制到剪贴板，粘贴成纯文本任务即可真跑一次。</span>
+          <button type="button" class="btn-secondary" id="copySampleBtn">填入粘贴框</button>
+          <span class="hint" id="copySampleHint">把示例文本填入下方粘贴框，点「提交为文本任务」即真跑一次（消耗 1 个任务额度）。</span>
         </div>
+        <!-- T4.98/C1：粘贴文本任务——PASTE 的首个 UI 入口（后端 POST /tasks JSON 既有能力，本卡只补前端） -->
+        <details class="paste-box">
+          <summary>或者：直接粘贴一段文字 ▶</summary>
+          <textarea id="pasteText" rows="5" maxlength="100000" placeholder="把会议记录、访谈逐字稿或任何纯文本贴到这里（10–100000 字符）"></textarea>
+          <div class="paste-actions">
+            <button type="button" class="btn-secondary" id="pasteSubmitBtn">提交为文本任务</button>
+            <span class="hint" id="pasteHint"></span>
+          </div>
+        </details>
       </div>
     </div>
 
@@ -244,9 +253,10 @@
   /* 模块失败：只把数值位写成"—"（不编数；控制整栏 em dash 密度不触发检测器） */
   function failBlock(ids) { ids.forEach(function (id) { fill(id, '—'); }); }
 
-  /* 今日额度 + AI 摘要档位（GET /api/v1/settings） */
+  /* 今日额度 + AI 摘要档位（GET /api/v1/settings）；T4.98：包装成命名函数，粘贴提交成功后复用刷新 */
   function quotaFail() { failBlock(['railQuotaBig', 'railQuotaLeft', 'railTier']); }
-  getJson('api/v1/settings').then(function (data) {
+  function loadRailQuota() {
+    getJson('api/v1/settings').then(function (data) {
     if (data.__httpStatus !== 200 || !data.quota) { quotaFail(); return; }
     var q = data.quota;
     fill('railQuotaBig', String(q.used_tasks));
@@ -257,6 +267,9 @@
     var tier = data.ai_tier && data.ai_tier.preferred;
     fill('railTier', tier === 'CLOUD' ? '云端' : (tier === 'LOCAL' ? '本地' : (tier === 'EXTRACTIVE' ? '提取式' : '—')));
   }, quotaFail);
+  }
+  loadRailQuota();
+  window.loadRailQuota = loadRailQuota; /* T4.98：IIFE 内私有 → 挂全局供粘贴提交后复用刷新 */
 
   /* 任务状态分布（GET /api/v1/tasks/counts） */
   function countsFail() { failBlock(['railDone', 'railActive', 'railDead']); }
@@ -443,6 +456,8 @@
   }
   /* escapeHtmlIndex 已收敛到共享 escape.js（T4.59）——属性上下文用 escapeAttr（含引号转义，比原行内补丁更严），
      文本上下文用 escapeHtml（与原 escapeHtmlIndex 逐字等价） */
+  /* T4.98：包装成命名函数，粘贴提交成功后复用刷新（行为不变） */
+  function loadRecentList() {
   getJson('api/v1/tasks?limit=3').then(function (data) {
     var empty = document.getElementById('recentEmpty');
     if (data.__httpStatus !== 200 || !Array.isArray(data.items) || !data.items.length) return; /* 保留空态提示 */
@@ -469,11 +484,22 @@
       if (el) el.textContent = fmtClockShort(first.created_at);
     }
   }, function () { /* 静默：保留空态提示 */ });
+  }
+  loadRecentList();
   /* T4.38：详情站内抽屉（列表 URL 不变、不新开标签） */
   mnBindDrawerLinks(document.getElementById('recentList'));
 
-  /* ===== T4.15：示例文本复制入口（仅 remaining_tasks ≥ 1 可用；0 任务额度时禁用+提示） ===== */
+  /* ===== T4.15：示例文本入口（仅 remaining_tasks ≥ 1 可用；0 任务额度时禁用+提示） =====
+     T4.98/C2：主按钮从「复制到剪贴板」改为「填入粘贴框」（页面上从此真的有粘贴处）；
+     T4.98/C1：同一份 settings 数据同时锁粘贴按钮（不新发请求）。 */
   var SAMPLE_TEXT = '本周例会纪要：一、发布计划：新版定于下周四发布，发布前完成回归测试。二、问题跟进：客服反馈的导出乱码与列表加载慢两个问题，由李四在本周五前给出修复方案。三、分工：张三负责回归测试清单，本周五前输出初稿；王五负责发布说明文档。请各位在本周三前确认自己的分工。';
+  var pasteText = document.getElementById('pasteText');
+  var pasteHint = document.getElementById('pasteHint');
+  var pasteSubmitBtn = document.getElementById('pasteSubmitBtn');
+  function setPasteQuotaLocked() { /* T4.98/C1：配额为 0 → 粘贴按钮禁用 + 提示 */
+    pasteSubmitBtn.disabled = true;
+    pasteHint.textContent = '今日任务额度已用完，明天再试。';
+  }
   getJson('api/v1/settings').then(function (data) {
     var btn2 = document.getElementById('copySampleBtn');
     var hint = document.getElementById('copySampleHint');
@@ -481,14 +507,40 @@
     if (remain !== null && remain < 1) {
       btn2.disabled = true;
       hint.textContent = '今日任务额度已用尽，明天日切后再试。';
+      setPasteQuotaLocked();
     }
   });
   document.getElementById('copySampleBtn').addEventListener('click', function () {
     var hint = document.getElementById('copySampleHint');
-    mnCopyText(SAMPLE_TEXT, function () {
-      hint.textContent = '已复制示例文本，粘贴即可提交一个纯文本任务（消耗 1 个任务额度）。';
+    var box = document.querySelector('details.paste-box');
+    if (box) box.open = true; /* T4.98/C2：填入并展开，用户直接看得见 */
+    pasteText.value = SAMPLE_TEXT;
+    pasteText.focus();
+    hint.textContent = '已填入粘贴框，点「提交为文本任务」即提交（消耗 1 个任务额度）。';
+  });
+
+  /* ===== T4.98/C1：粘贴文本任务提交（前端校验 → sendJson → 复用既有刷新，不新增轮询） ===== */
+  pasteSubmitBtn.addEventListener('click', function () {
+    if (pasteSubmitBtn.disabled) return;
+    var value = pasteText.value.trim();
+    if (!value) { pasteHint.textContent = '请先粘贴一段文字'; return; }
+    if (value.length > 100000) { pasteHint.textContent = '最多 100000 字符'; return; }
+    pasteSubmitBtn.disabled = true;
+    pasteHint.textContent = '';
+    sendJson('api/v1/tasks', 'POST', { text: value }).then(function (data) {
+      pasteSubmitBtn.disabled = false;
+      if (data.__httpStatus === 201) {
+        pasteText.value = '';
+        pasteHint.textContent = '已提交，任务 #' + data.task_id + '（消耗 1 个任务额度）';
+        rememberTask(data.task_id, '粘贴文本');
+        loadRecentList(); /* T4.98：复用既有刷新（不新增轮询） */
+        loadRailQuota();
+      } else {
+        pasteHint.textContent = data.message || ('提交失败（HTTP ' + data.__httpStatus + '）');
+      }
     }, function () {
-      hint.textContent = '复制失败，请手动选择文本复制。';
+      pasteSubmitBtn.disabled = false;
+      pasteHint.textContent = '服务暂时不可用，请稍后重试';
     });
   });
 
