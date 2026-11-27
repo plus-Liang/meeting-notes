@@ -83,7 +83,8 @@ class TranscriptionWorkerDrainTest {
                 structuringService, punctuator, webhookService, pasteTextReader, monoWavExtractor,
                 queuePublisher, deadTaskRecorder, taskHeartbeat, "meetingnotes:task-queue", 10, "meetingnotes", 3,
                 new RedisUnavailableReporter(60, 2, java.time.Clock.systemUTC()), taskAttempts,
-                new com.meetingnotes.worker.TaskTranscriber(asrClient)); /* T4.99：构造器连带 */
+                new com.meetingnotes.worker.TaskTranscriber(asrClient),
+                new RetryBackoff(30, 300, 5000)); /* T4.99/T4.100：构造器连带 */
     }
 
     private long stopAndMeasure(TranscriptionWorker worker) {

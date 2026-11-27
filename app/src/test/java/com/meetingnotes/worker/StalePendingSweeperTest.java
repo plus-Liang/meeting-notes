@@ -288,6 +288,27 @@ class StalePendingSweeperTest {
         verify(zSetOps).remove("meetingnotes:worker-processing", "5");
     }
 
+    /** T4.100/C6：未到期的 RETRYING 僵尸回执 → skipped、ZREM、绝不投递（退避不能被提前入队击穿）。 */
+    @Test
+    void notDueRetryingReceiptIsSkippedWithoutPublishing() {
+        StalePendingSweeper sweeper = newSweeperWithReceiptConfig();
+        stubEmptyPendingSweep();
+        when(zSetOps.rangeByScore(eq("meetingnotes:worker-processing"), eq(0.0), anyDouble(), eq(0L), eq(50L)))
+                .thenReturn(Set.of("5"));
+        java.util.Map<String, Object> row = new java.util.HashMap<>();
+        row.put("status", "RETRYING");
+        row.put("updated_at", new Timestamp(System.currentTimeMillis() - 600_000L));
+        row.put("next_retry_at", new Timestamp(System.currentTimeMillis() + 60_000L)); // 未到期
+        when(stalePendingQueries.findTaskStatus(5L)).thenReturn(row);
+
+        sweeper.sweepStalePending();
+
+        verify(queuePublisher, never()).publishToTail(anyLong());
+        verify(queuePublisher, never()).tryPublishToTail(anyLong());
+        verify(crashRecovery, never()).recover(anyLong(), anyString());
+        verify(zSetOps).remove("meetingnotes:worker-processing", "5"); // 清回执但不投递
+    }
+
     /** A5 负控（单测层）：visibility ≤0 属误配 → 回退默认 180s（cutoff ≈ now-180s），绝无 0 值全量回收。 */
     @Test
     void nonPositiveVisibilityTimeoutFallsBackToDefault() {

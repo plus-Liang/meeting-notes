@@ -26,7 +26,8 @@ public class DeadTaskRecorder {
     /** @return 本次是否真的退了分钟数（已退过/无需退 = false）。DEAD + dead_letter 不受退款结果影响。 */
     public boolean markDead(long taskId, String code, String reason) {
         Boolean refunded = transactionTemplate.execute(status -> {
-            jdbc.update("UPDATE task SET status = 'DEAD', error_code = ?, updated_at = now() WHERE id = ?",
+            // T4.100/C7：离开 RETRYING（本类由 worker 重试耗尽调用）必须清 next_retry_at，维持「RETRYING ⇒ 非空」不变量。
+            jdbc.update("UPDATE task SET status = 'DEAD', error_code = ?, next_retry_at = NULL, updated_at = now() WHERE id = ?",
                     code, taskId);
             jdbc.update("INSERT INTO dead_letter (task_id, reason) VALUES (?, ?)", taskId, reason);
             return quotaService.refundForTask(taskId);

@@ -83,7 +83,8 @@ class TranscriptionWorkerTest {
                 structuringService, punctuator, webhookService, pasteTextReader, monoWavExtractor,
                 queuePublisher, deadTaskRecorder, taskHeartbeat, "meetingnotes:task-queue", 10, "meetingnotes", 3,
                 new RedisUnavailableReporter(60, 2, java.time.Clock.systemUTC()), taskAttempts,
-                new com.meetingnotes.worker.TaskTranscriber(asrClient)); /* T4.99：构造器连带（K-192 预授权）——真实 TaskTranscriber 包 mock asrClient */
+                new com.meetingnotes.worker.TaskTranscriber(asrClient),
+                new RetryBackoff(30, 300, 5000)); /* T4.99/T4.100：构造器连带（K-192 预授权）——真实 TaskTranscriber + RetryBackoff */
     }
 
     @Test
@@ -242,35 +243,39 @@ class TranscriptionWorkerTest {
 
     /* ---- S-1 状态机（T1.8）：失败走 RETRYING 重新入队 / 重试耗尽走 DEAD + dead_letter ---- */
 
+    /** T4.100/C4 + C9-3：失败一次 → RETRYING + next_retry_at ≈ now+30s（±10s），只写库绝不入队。 */
     @Test
-    void failureUnderRetryLimitMarksRetryingAndRequeues() {
+    void failureUnderRetryLimitMarksRetryingWithBackoffAndNeverRequeues() {
         TranscriptionWorker worker = newWorker();
-        // T4.94：bump + read 两步替代 UPDATE...RETURNING → 本次失败后 attempts=1，未达上限 3
         when(taskAttempts.read(9L)).thenReturn(1);
-        when(queuePublisher.tryPublishToTail(9L)).thenReturn(true);
 
+        long before = System.currentTimeMillis();
         ReflectionTestUtils.invokeMethod(worker, "markFailure", 9L,
                 new ProcessingException("ASR_ERROR", "ASR 转写调用失败：连接拒绝", null));
+        long after = System.currentTimeMillis();
 
-        verify(jdbc).update(contains("'RETRYING'"), eq("ASR_ERROR"), eq(9L));
-        /* T4.60 B1：失败重投必须走队尾（tryPublishToTail），且绝不碰头插通道（不插队） */
-        verify(queuePublisher).tryPublishToTail(9L);
-        verify(queuePublisher, org.mockito.Mockito.never()).tryPublish(9L);
+        ArgumentCaptor<java.sql.Timestamp> ts = ArgumentCaptor.forClass(java.sql.Timestamp.class);
+        verify(jdbc).update(contains("'RETRYING'"), eq("ASR_ERROR"), ts.capture(), eq(9L));
+        long delayMs = ts.getValue().getTime() - (before + after) / 2;
+        assertTrue(delayMs >= 20_000 && delayMs <= 40_000,
+                "next_retry_at 应 ≈ now+30s（±10s），实测 " + delayMs + "ms");
+        verify(queuePublisher, never()).tryPublishToTail(anyLong()); // C4：失败绝不立即入队
+        verify(queuePublisher, never()).tryPublish(anyLong());
         verify(jdbc, org.mockito.Mockito.never()).update(contains("'DEAD'"), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
     }
 
-    /** T4.52 S6：重投失败不能停在 RETRYING（无任何机制回收）——必须退回 PENDING 等启动恢复/重提自愈 */
+    /** T4.100/C4：无论 Redis 是否可用，markFailure 都不入队、不退回 PENDING——到期由 RetryDueSweeper 接管。 */
     @Test
-    void repushFailureRollsBackToPendingNotStuckRetrying() {
+    void failureNeverFallsBackToPendingRegardlessOfQueueState() {
         TranscriptionWorker worker = newWorker();
-        when(taskAttempts.read(11L)).thenReturn(1); // T4.94：bump + read 两步（本条失败后 attempts=1）
-        when(queuePublisher.tryPublishToTail(11L)).thenReturn(false);
+        when(taskAttempts.read(11L)).thenReturn(1);
 
         ReflectionTestUtils.invokeMethod(worker, "markFailure", 11L,
                 new ProcessingException("ASR_ERROR", "ASR 转写调用失败：连接拒绝", null));
 
-        verify(jdbc).update(contains("'RETRYING'"), eq("ASR_ERROR"), eq(11L));
-        verify(jdbc).update(contains("status = 'PENDING'"), eq(11L));
+        verify(jdbc).update(contains("next_retry_at"), eq("ASR_ERROR"), org.mockito.ArgumentMatchers.any(), eq(11L));
+        verify(jdbc, org.mockito.Mockito.never()).update(contains("status = 'PENDING'"), eq(11L));
+        verify(queuePublisher, never()).tryPublishToTail(anyLong());
         verify(jdbc, org.mockito.Mockito.never()).update(contains("'DEAD'"), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any());
     }
 

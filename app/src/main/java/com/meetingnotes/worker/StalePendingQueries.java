@@ -62,11 +62,16 @@ public class StalePendingQueries {
         return Timestamp.from(Instant.now().minus(Duration.ofMinutes(minutes)));
     }
 
-    /** T4.79/P-02：按 id 取任务状态与 updated_at（僵尸回执清扫用）；行不存在返回 null。
-     *  参数化 Timestamp（无 to_char 等 PG 字面量），H2 真库可跑。 */
+    /** T4.79/P-02 + T4.100/C6：按 id 取任务状态、updated_at 与 next_retry_at（僵尸回执清扫用）；行不存在返回 null。
+     *  next_retry_at 可空（历史行），用 HashMap 承载（Map.of 不接受 null）。参数化 Timestamp，H2 真库可跑。 */
     public Map<String, Object> findTaskStatus(long id) {
-        List<Map<String, Object>> rows = jdbc.query("SELECT status, updated_at FROM task WHERE id = ?",
-                (rs, i) -> Map.of("status", rs.getString("status"), "updated_at", rs.getTimestamp("updated_at")), id);
-        return rows.isEmpty() ? null : rows.get(0);
+        return jdbc.query("SELECT status, updated_at, next_retry_at FROM task WHERE id = ?",
+                (rs, i) -> {
+                    Map<String, Object> row = new java.util.HashMap<>();
+                    row.put("status", rs.getString("status"));
+                    row.put("updated_at", rs.getTimestamp("updated_at"));
+                    row.put("next_retry_at", rs.getTimestamp("next_retry_at"));
+                    return row;
+                }, id).stream().findFirst().orElse(null);
     }
 }

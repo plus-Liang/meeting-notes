@@ -48,7 +48,8 @@ class DeadTaskRecorderTest {
         boolean refunded = newRecorder().markDead(5L, "ASR_ERROR", "服务不可达");
 
         assertEquals(true, refunded);
-        verify(jdbc).update(contains("UPDATE task SET status = 'DEAD', error_code = ?"), eq("ASR_ERROR"), eq(5L));
+        verify(jdbc).update(contains("UPDATE task SET status = 'DEAD', error_code = ?, next_retry_at = NULL"),
+                eq("ASR_ERROR"), eq(5L)); // T4.100/C7：DEAD 清 next_retry_at
         verify(jdbc).update(contains("INSERT INTO dead_letter (task_id, reason) VALUES (?, ?)"), eq(5L), eq("服务不可达"));
         verify(quotaService).refundForTask(5L);
         verify(tx).execute(any()); // 三步同一事务

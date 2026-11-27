@@ -174,8 +174,14 @@ public class StalePendingSweeper {
                         zombieReceipts++;
                     }
                 } else if ("PENDING".equals(row.get("status")) || "RETRYING".equals(row.get("status"))) {
-                    // 消费失败后没人重投的行：重投成功才清回执，失败留到下一轮
-                    if (queuePublisher.tryPublishToTail(id)) {
+                    // T4.100/C6：RETRYING 且 next_retry_at 未到 → 在等退避，僵尸回执路径绝不提前入队（否则退避失效）
+                    Timestamp nextRetryAt = (Timestamp) row.get("next_retry_at");
+                    if ("RETRYING".equals(row.get("status")) && nextRetryAt != null
+                            && nextRetryAt.after(new Timestamp(System.currentTimeMillis()))) {
+                        skipped++;
+                        zremQuietly(member); // 清回执但不投递：到期由 RetryDueSweeper 接管
+                    } else if (queuePublisher.tryPublishToTail(id)) {
+                        // 消费失败后没人重投的行：重投成功才清回执，失败留到下一轮
                         zremQuietly(member);
                         requeued++;
                         zombieReceipts++;

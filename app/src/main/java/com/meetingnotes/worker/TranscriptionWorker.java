@@ -16,12 +16,11 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.Callable;
-import java.util.concurrent.TimeUnit;
 
 /**
  * 转写 worker（T1.5 / plan §7 步骤 6–8）。队列消费用 Redis BLPOP（阻塞取，不轮询空转）；单线程顺序处理。
- * 状态机：PENDING/RETRYING → RUNNING → DONE；失败：重试未耗尽 → RETRYING 重新入队（队尾，FIFO 不插队），
- * 耗尽 → DEAD + dead_letter；兜底 catch 保证任务不永久卡 RUNNING。
+ * 状态机：PENDING/RETRYING → RUNNING → DONE；失败：重试未耗尽 → RETRYING + next_retry_at（T4.100 指数退避，
+ * 到期由 RetryDueSweeper 入队），耗尽 → DEAD + dead_letter；兜底 catch 保证任务不永久卡 RUNNING。
  * <p>T4.79/P-02：取出即 ZADD「处理中」回执（processingKey，score=取出毫秒）、结束 ZREM——BLPOP 取走即消失，
  * 没有回执就没有「这条还在处理中」的持久记录；SIGKILL/OOM 后残留回执由 StalePendingSweeper 的可见性超时回收。
  * <p>管线：MinIO 拉文件 → ffmpeg 抽 16k 单声道 wav（D-010）→ AsrClient 一次调用拿 text + segments（T4.35a，
@@ -48,6 +47,7 @@ public class TranscriptionWorker implements SmartLifecycle {
     private final String queueKey;
     private final Duration pollTimeout;
     private final String bucket; private final int maxRetries; private final RedisUnavailableReporter reporter;
+    private final RetryBackoff retryBackoff; // T4.100/C4：失败退避计算（Java 侧算 next_retry_at）
 
     private volatile boolean running;
     private Thread workerThread;
@@ -65,12 +65,14 @@ public class TranscriptionWorker implements SmartLifecycle {
             TaskHeartbeat taskHeartbeat, @Value("${app.worker.queue-key}") String queueKey,
             @Value("${app.worker.poll-timeout-sec}") long pollTimeoutSec,
             @Value("${app.storage.bucket}") String bucket, @Value("${app.task.max-retries}") int maxRetries,
-            RedisUnavailableReporter reporter, TaskAttempts taskAttempts, TaskTranscriber taskTranscriber) {
+            RedisUnavailableReporter reporter, TaskAttempts taskAttempts, TaskTranscriber taskTranscriber,
+            RetryBackoff retryBackoff) { // T4.100/C4：构造器注入退避计算器（连带测试构造器）
         this.redis = redis; this.jdbc = jdbc; this.s3 = s3; this.asrClient = asrClient; this.taskTranscriber = taskTranscriber; /* T4.99/C5 */
         this.structuringService = structuringService; this.punctuator = punctuator; this.webhookService = webhookService;
         this.pasteTextReader = pasteTextReader; this.monoWavExtractor = monoWavExtractor; this.queuePublisher = queuePublisher;
         this.deadTaskRecorder = deadTaskRecorder;
         this.taskHeartbeat = taskHeartbeat; this.queueKey = queueKey; this.pollTimeout = Duration.ofSeconds(pollTimeoutSec); this.bucket = bucket; this.maxRetries = maxRetries; this.reporter = reporter; this.taskAttempts = taskAttempts;
+        this.retryBackoff = retryBackoff;
     }
 
     @Override
@@ -109,7 +111,7 @@ public class TranscriptionWorker implements SmartLifecycle {
             } catch (RuntimeException e) {
                 if (!running) { break; }
                 reporter.report(e); // T4.91/S2：去抖——窗口内最多 1 条 WARN（RedisUnavailableReporter）
-                sleepQuietly();
+                WorkerSupport.sleepQuietly(pollTimeout); // T4.100：抽到 WorkerSupport（行为逐字不变）
                 continue;
             }
             // T4.79-fix F1 双保险：单条消息的任何异常不终结消费循环（handleOne 内部已全捕获，此处兜 Redis 侧漏网）；F2：回执写失败（已退回队尾）本轮不处理
@@ -249,12 +251,13 @@ public class TranscriptionWorker implements SmartLifecycle {
         catch (Exception e) { log.warn("{}生成异常（不影响任务完成）", name, e); return false; }
     }
 
-    /** 失败兜底：不永久卡 RUNNING。重试未耗尽 → RETRYING + 重新入队（队尾）；重投失败 → 退回 PENDING；耗尽 → DEAD + dead_letter。 */
+    /** 失败兜底：不永久卡 RUNNING。T4.100/C4：重试未耗尽 → RETRYING + next_retry_at（Java 算，只写库不入队，
+     *  到期由 RetryDueSweeper 条件抢占入队）；耗尽 → DEAD + dead_letter（next_retry_at 由 DeadTaskRecorder 清）。 */
     private void markFailure(long taskId, Exception cause) {
         String code = cause instanceof ProcessingException pe ? pe.code : "UNKNOWN_ERROR";
         /* T4.99/C6：reason 是用户可见文案——ProcessingException 已是脱敏人话；裸异常原文只进日志（:128 已带堆栈） */
         String reason = cause instanceof ProcessingException
-                ? abbreviate(cause.getMessage())
+                ? WorkerSupport.abbreviate(cause.getMessage())
                 : "处理过程发生异常，请重试或联系管理员（详见服务端日志）";
         try {
             // T4.94/P-03：RETURNING（PG 专用）→ 可移植两步（自增 UPDATE + 单独 SELECT），SQL 首次可被 H2 真库覆盖
@@ -266,15 +269,14 @@ public class TranscriptionWorker implements SmartLifecycle {
                 log.error("任务 {} 重试 {} 次仍失败，置 DEAD（{}）并写 dead_letter：{}", taskId, attempts, code, reason);
                 webhookService.onTerminal(taskId, "DEAD"); // T4.6：终态异步投递 Webhook（内部不抛、不阻塞）
             } else {
-                jdbc.update("UPDATE task SET status = 'RETRYING', error_code = ?, updated_at = now() WHERE id = ?",
-                        code, taskId);
-                if (queuePublisher.tryPublishToTail(taskId)) { /* T4.60 B1：失败重投走队尾（rightPush），让出队头给其他任务 */
-                    log.warn("任务 {} 失败（{}/{} 次，{}），已置 RETRYING 并重新入队：{}", taskId, attempts, maxRetries, code, reason);
-                } else {
-                    // T4.52 S6：重投失败不能停在 RETRYING（无人回收）——退回 PENDING，由启动恢复/幂等重提自愈兜底
-                    jdbc.update("UPDATE task SET status = 'PENDING', updated_at = now() WHERE id = ?", taskId);
-                    log.error("任务 {} 失败（{}/{} 次，{}）后重投失败（Redis 不可用），已退回 PENDING", taskId, attempts, maxRetries, code);
-                }
+                // T4.100/C4：只写库不入队；next_retry_at 由 Java 算（H2/PG 通用），到期由 RetryDueSweeper 接管
+                long delaySec = retryBackoff.delayFor(attempts == null ? 1 : attempts).getSeconds();
+                java.sql.Timestamp nextRetryAt = java.sql.Timestamp.from(
+                        java.time.OffsetDateTime.now().plusSeconds(delaySec).toInstant());
+                jdbc.update("UPDATE task SET status = 'RETRYING', error_code = ?, next_retry_at = ?, updated_at = now() WHERE id = ?",
+                        code, nextRetryAt, taskId);
+                log.warn("任务 {} 失败（{}/{} 次，{}），{} 秒后重试（next_retry_at={}）",
+                        taskId, attempts, maxRetries, code, delaySec, nextRetryAt);
             }
         } catch (RuntimeException e) {
             log.error("任务 {} 写回失败状态时出错（可能卡在 RUNNING，待 T2.3 恢复）", taskId, e);
@@ -288,12 +290,4 @@ public class TranscriptionWorker implements SmartLifecycle {
         }
     }
 
-    private void sleepQuietly() {
-        try { TimeUnit.SECONDS.sleep(pollTimeout.getSeconds()); }
-        catch (InterruptedException e) { Thread.currentThread().interrupt(); }
-    }
-
-    private static String abbreviate(String s) {
-        return s == null || s.isBlank() ? "UNKNOWN" : s.length() <= 200 ? s : s.substring(0, 200) + "…";
-    }
 }

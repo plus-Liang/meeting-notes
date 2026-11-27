@@ -169,6 +169,12 @@ app:
     fetcher-cmd: ${FETCHER_CMD:}
     fetcher-timeout-ms: ${FETCHER_TIMEOUT_MS:120000}
 
+  # T4.100/C2：失败重试指数退避（RetryBackoff + RetryDueSweeper）。base<1 或 max<base → WARN 回退 30/300；scan<500 → 回退 5000。
+  retry:
+    base-delay-sec: ${RETRY_BASE_DELAY_SEC:30}
+    max-delay-sec: ${RETRY_MAX_DELAY_SEC:300}
+    scan-interval-ms: ${RETRY_SCAN_INTERVAL_MS:5000}
+
   queue:
     pending-sweep:
       # T4.67 S3：运行期陈旧 PENDING 周期清扫（StalePendingSweeper）配置。
