@@ -5,9 +5,7 @@
     if (el) el.textContent = text;
   }
   /* 占位符统一用 en dash（em dash 会被检测器计入正文密度；失败态的"—"数量受控） */
-  var today = new Date();
   var p2 = function (n) { return n < 10 ? '0' + n : String(n); };
-  fill('docketDate', today.getFullYear() + '-' + p2(today.getMonth() + 1) + '-' + p2(today.getDate()));
 
   /* 音频总时长：≥1 小时显示 小时+分，否则沿用 分+秒 */
   function fmtTotal(sec) {
@@ -58,11 +56,10 @@
   }, countsFail);
 
   /* 归档/音频总时长/成功率/平均处理（GET /api/v1/stats） */
-  function statsFail() { failBlock(['docketArchive', 'mastTotal', 'mastDuration', 'railSuccess', 'railRatio']); }
+  function statsFail() { failBlock(['mastTotal', 'mastDuration', 'railSuccess', 'railRatio']); }
   getJson('api/v1/stats').then(function (data) {
     if (data.__httpStatus !== 200) { statsFail(); return; }
     var total = (data.tasks && data.tasks.total) || 0;
-    fill('docketArchive', String(total));
     fill('mastTotal', total + ' 条');
     fill('mastDuration', fmtTotal(data.duration_sec_total));
     fill('railSuccess', (data.success_rate === null || data.success_rate === undefined)

@@ -251,7 +251,6 @@
       set('mastActive', String(countState.active));
       set('mastDone', String(countState.done));
       set('mastDead', String(countState.dead));
-      set('docketCounts', '归档 ' + countState.total);
     }
   }
 
@@ -1127,15 +1126,6 @@
     });
     }); /* T4.53：闭合 resolveSelectedIds().then —— 全选态下导出走同一收集链 */
   });
-
-  /* 档案抬头行日期（T4.41） */
-  (function () {
-    var el = document.getElementById('docketDate');
-    if (!el) return;
-    var d = new Date();
-    var p = function (n) { return n < 10 ? '0' + n : String(n); };
-    el.textContent = d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
-  })();
 
   /* ===== 启动（T4.42：先还原 URL 筛选，非法参数回退默认 + toast 不白屏） ===== */
   var boot = parseUrlFilters();
