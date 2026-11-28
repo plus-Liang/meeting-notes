@@ -53,14 +53,61 @@ if [ -z "$CUR_CODE" ]; then
   echo "[first-run] 安装码已生成：${GEN_CODE}（浏览器打开 ${BASE_URL}/setup 时需填入，创建管理员后失效）"
 fi
 
-# 2) 模型（缺则用 asr 镜像自带 python 下载，宿主机无需 Python；国内可设 HF_ENDPOINT=https://hf-mirror.com）
+# 1.3) compose 项目名（T4.110/C2）：shell 环境变量 > .env > 目录名；起栈前检测同名项目撞车——
+#      clone 默认目录名与已有主栈同名时，compose up 会接管/重建那套容器（T4.107 实测）。
+#      命中即逐字报错 exit 3，不自动改名；后续 compose 调用统一 export COMPOSE_PROJECT_NAME。
+PROJ=${COMPOSE_PROJECT_NAME:-$(grep -E '^[[:space:]]*COMPOSE_PROJECT_NAME=' .env | head -1 | cut -d= -f2 | tr -d '"' | tr -d '\r')}
+PROJ=${PROJ:-$(basename "$(pwd)")}
+LS_JSON=$(docker compose ls --format json 2>/dev/null || true)
+OTHER_DIR=''
+if command -v python3 >/dev/null 2>&1; then
+  OTHER_DIR=$(printf '%s' "$LS_JSON" | PROJ="$PROJ" python3 -c "
+import json, os, sys
+try:
+    data = json.load(sys.stdin)
+except Exception:
+    data = []
+if isinstance(data, dict):
+    data = [data]
+want = os.environ.get('PROJ', '')
+for p in data:
+    if str(p.get('Name', '')) == want:
+        print(p.get('ConfigFiles', ''))
+        break
+" 2>/dev/null || true)
+else
+  OTHER_DIR=$(docker compose ls 2>/dev/null | awk -v p="$PROJ" '$1==p {print $3}')
+fi
+REPO_ROOT=$(pwd)
+if [ -n "$OTHER_DIR" ] && ! printf '%s' "$OTHER_DIR" | grep -q "^$REPO_ROOT"; then
+  echo "[first-run] 检测到同名 Docker 项目「${PROJ}」已被另一个目录使用：${OTHER_DIR}"
+  echo '[first-run] 直接启动会接管那套容器。请二选一：'
+  echo '[first-run]   1) 在 .env 里设置 COMPOSE_PROJECT_NAME=<name>-2 后重跑'
+  echo '[first-run]   2) 换一个不同的目录名再 clone'
+  exit 3
+fi
+export COMPOSE_PROJECT_NAME=$PROJ
+echo "[first-run] 项目名 = ${PROJ}"
+
+# 2) 模型（缺则用 asr 镜像自带 python 下载，宿主机无需 Python；国内可设 HF_ENDPOINT=https://hf-mirror.com；
+#    T4.110/C1：模型根目录跟随 ASR_MODEL_HOST_DIR——shell 环境变量 > .env > 缺省 ./models（相对仓库根），
+#    绝对路径（含 Windows 盘符）原样。此前写死 ./models，自定义模型盘的用户下载与挂载各看一个目录。）
 MODEL_NAME=$(grep -E '^[[:space:]]*ASR_MODEL_NAME=' .env | head -1 | cut -d= -f2 | tr -d '"' | tr -d '\r')
 MODEL_NAME=${MODEL_NAME:-small}
-SNAP_DIR="models/hub/models--Systran--faster-whisper-${MODEL_NAME}/snapshots"
+MODEL_HOST_DIR=${ASR_MODEL_HOST_DIR:-$(grep -E '^[[:space:]]*ASR_MODEL_HOST_DIR=' .env | head -1 | cut -d= -f2 | tr -d '"' | tr -d '\r')}
+MODEL_HOST_DIR=${MODEL_HOST_DIR:-models}
+case "$MODEL_HOST_DIR" in
+  /*) ;;
+  [A-Za-z]:*|\\\\*) ;;
+  *) MODEL_HOST_DIR="$(pwd)/${MODEL_HOST_DIR#./}" ;;
+esac
+mkdir -p "$MODEL_HOST_DIR"
+echo "[first-run] 模型根目录 = <${MODEL_HOST_DIR}>（来自 ASR_MODEL_HOST_DIR）"
+SNAP_DIR="${MODEL_HOST_DIR}/hub/models--Systran--faster-whisper-${MODEL_NAME}/snapshots"
 if [ ! -d "$SNAP_DIR" ] || [ -z "$(ls -A "$SNAP_DIR" 2>/dev/null)" ]; then
   echo "[first-run] 模型 faster-whisper-${MODEL_NAME} 不存在，先下载…"
   PY="from huggingface_hub import snapshot_download; snapshot_download('Systran/faster-whisper-${MODEL_NAME}', cache_dir='/dl/hub')"
-  MODELS_ABS="$(pwd)/models"
+  MODELS_ABS="$MODEL_HOST_DIR"
   # compose run 不会自动构建——全新克隆时先显式构建 asr 镜像（已构建则秒过）
   docker compose build asr || { echo '[first-run] asr 镜像构建失败。'; exit 1; }
   # /models 在 compose 里是 :ro（运行态安全）——下载挂独立可写点 /dl（宿主同一 models 目录），不与 ro 冲突；
@@ -107,6 +154,6 @@ done
 APP_PORT=$(grep -E '^[[:space:]]*APP_PORT=' .env | head -1 | cut -d= -f2 | tr -d '"' | tr -d '\r')
 APP_PORT=${APP_PORT:-8080}
 echo ''
-echo "[first-run] 完成。Web 地址：  http://localhost:${APP_PORT}"
+echo "[first-run] 完成。项目名 = ${PROJ}。Web 地址：  http://localhost:${APP_PORT}"
 echo "[first-run] 首次进入请打开安装向导： http://localhost:${APP_PORT}/setup （安装码 SETUP_CODE 见上方输出，创建管理员后失效）。"
 exit 0

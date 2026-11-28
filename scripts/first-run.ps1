@@ -69,6 +69,37 @@ if ($codeIdx -ge 0) {
     }
 }
 
+# 1.3) compose 项目名（T4.110/C2）：shell 环境变量 > .env > 目录名；起栈前检测同名项目撞车——
+#      clone 默认目录名与已有主栈同名时（T4.107 实测主栈项目名 = meeting-notes），compose up 会
+#      接管/重建那套容器。命中即逐字报错 exit 3，不自动改名（静默改名会让现有部署"消失"）。
+#      后续所有 docker compose 调用统一 -p $proj，保证检测到的和实际操作的是同一套。
+$proj = $env:COMPOSE_PROJECT_NAME
+if (-not $proj) {
+    $projLine = $codeLines | Where-Object { $_ -match '^\s*COMPOSE_PROJECT_NAME\s*=' } | Select-Object -First 1
+    if ($projLine) { $proj = ($projLine -split '=', 2)[1].Trim().Trim('"') }
+}
+if (-not $proj) { $proj = Split-Path -Leaf $repo }
+$lsJson = (docker compose ls --format json 2>$null) -join "`n"
+try { $composeProjects = @($lsJson | ConvertFrom-Json -ErrorAction Stop) } catch {
+    $composeProjects = @()
+    foreach ($jLine in ($lsJson -split "`n" | Where-Object { $_.Trim() })) {
+        try { $composeProjects += ($jLine | ConvertFrom-Json -ErrorAction Stop) } catch { }
+    }
+}
+$otherProject = $composeProjects | Where-Object { $_.Name -eq $proj } | Select-Object -First 1
+if ($otherProject) {
+    $repoNorm = $repo.TrimEnd('\', '/').ToLower()
+    $cfNorm = ([string]$otherProject.ConfigFiles).TrimEnd('\', '/').ToLower()
+    if (-not $cfNorm.StartsWith($repoNorm)) {
+        Write-Host ("[first-run] 检测到同名 Docker 项目「{0}」已被另一个目录使用：{1}" -f $proj, $otherProject.ConfigFiles)
+        Write-Host '[first-run] 直接启动会接管那套容器。请二选一：'
+        Write-Host '[first-run]   1) 在 .env 里设置 COMPOSE_PROJECT_NAME=<name>-2 后重跑'
+        Write-Host '[first-run]   2) 换一个不同的目录名再 clone'
+        exit 3
+    }
+}
+Write-Host ("[first-run] 项目名 = {0}" -f $proj)
+
 # 2) 模型
 $modelLine = (Get-Content $envFile | Where-Object { $_ -match '^\s*ASR_MODEL_NAME\s*=' } | Select-Object -First 1)
 $modelName = if ($modelLine) { ($modelLine -split '=', 2)[1].Trim() } else { 'small' }
@@ -97,7 +128,19 @@ function Get-MissingModelFiles {
     return $missing
 }
 
-$snapDir = Join-Path $repo ("models\hub\models--Systran--faster-whisper-" + $modelName + "\snapshots")
+# T4.110/C1：内联完整性校验与 download-model.ps1 同源——模型根目录跟随 ASR_MODEL_HOST_DIR
+# （shell 环境变量 > .env > 缺省 <repo>\models；相对路径相对仓库根解析），否则下载与校验各看一个目录。
+$modelsRoot = $env:ASR_MODEL_HOST_DIR
+if (-not $modelsRoot) {
+    $mLine = $codeLines | Where-Object { $_ -match '^\s*ASR_MODEL_HOST_DIR\s*=' } | Select-Object -First 1
+    if ($mLine) { $modelsRoot = ($mLine -split '=', 2)[1].Trim().Trim('"') }
+}
+if (-not $modelsRoot) { $modelsRoot = Join-Path $repo 'models' }
+if ($modelsRoot -notmatch '^[A-Za-z]:') { $modelsRoot = Join-Path $repo $modelsRoot }
+$modelsRoot = $modelsRoot.TrimEnd('\', '/')
+if (-not (Test-Path $modelsRoot)) { New-Item -ItemType Directory -Force -Path $modelsRoot | Out-Null }
+Write-Host "[first-run] 模型根目录 = <$modelsRoot>（来自 ASR_MODEL_HOST_DIR）"
+$snapDir = Join-Path $modelsRoot ("hub\models--Systran--faster-whisper-" + $modelName + "\snapshots")
 $missing = @(Get-MissingModelFiles $snapDir)
 if ($missing.Count -gt 0) {
     if (Test-Path $snapDir) {
@@ -114,7 +157,7 @@ if ($missing.Count -gt 0) {
 
 # 3) 起栈
 Write-Host '[first-run] docker compose up -d --build（首次构建可能需要几分钟）…'
-docker compose up -d --build
+docker compose -p $proj up -d --build
 if ($LASTEXITCODE -ne 0) { Write-Host '[first-run] docker compose up 失败，请检查 Docker 是否在运行。'; exit $LASTEXITCODE }
 
 # 4) 轮询 healthy（超时 10 分钟）
@@ -122,7 +165,7 @@ $services = @('app', 'asr', 'minio', 'postgres', 'redis')
 $deadline = (Get-Date).AddMinutes(10)
 while ($true) {
     Start-Sleep -Seconds 10
-    $psOut = docker compose ps --format '{{.Service}} {{.Status}}' 2>$null
+    $psOut = docker compose -p $proj ps --format '{{.Service}} {{.Status}}' 2>$null
     $unhealthy = @()
     foreach ($s in $services) {
         $line = $psOut | Where-Object { $_ -match ('^' + $s + ' ') } | Select-Object -First 1
@@ -135,7 +178,7 @@ while ($true) {
     if ((Get-Date) -gt $deadline) {
         Write-Host '[first-run] 超时（10 分钟）——以下服务未 healthy：'
         $unhealthy | ForEach-Object { Write-Host "  $_" }
-        Write-Host '[first-run] 排查：  docker compose logs asr  （模型缺失会给出中文提示与下载命令）'
+        Write-Host "[first-run] 排查：  docker compose -p $proj logs asr  （模型缺失会给出中文提示与下载命令）"
         exit 1
     }
     $left = [math]::Round(($deadline - (Get-Date)).TotalSeconds)
@@ -146,6 +189,6 @@ while ($true) {
 $portLine = (Get-Content $envFile | Where-Object { $_ -match '^\s*APP_PORT\s*=' } | Select-Object -First 1)
 $appPort = if ($portLine) { ($portLine -split '=', 2)[1].Trim() } else { '8080' }
 Write-Host ''
-Write-Host ("[first-run] 完成。Web 地址：  http://localhost:$appPort")
+Write-Host ("[first-run] 完成。项目名 = {0}。Web 地址：  http://localhost:{1}" -f $proj, $appPort)
 Write-Host '[first-run] 首次进入请打开安装向导： http://localhost:'$appPort'/setup （安装码 SETUP_CODE 见上方输出，创建管理员后失效）。'
 exit 0

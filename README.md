@@ -65,6 +65,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\first-run.ps1
 
 `first-run` 会依次做四件事：没有 `.env` 就从 `.env.example` 生成 → 下载 ASR 模型到 `./models`（已存在则跳过）→ `docker compose up -d --build` → 轮询到 5 个容器 healthy 并打印访问地址。**模型没下全时 ASR 会明确提示并退出，不会静默卡住。**
 
+> - **模型放在哪**由 `ASR_MODEL_HOST_DIR` 决定（默认仓库根 `./models`，可改成任意盘的绝对路径，下载脚本会跟随该目录，改自定义盘无需手动搬模型）。
+> - **同机第二套部署必须改 `.env` 里的 `COMPOSE_PROJECT_NAME`**：clone 默认目录名与已有部署同名时，`docker compose up` 会接管那套容器（first-run 现在会检测并报错退出 3，不会自动改名，见 T4.110）。
+
 ### 手动启动（想自己控制每一步）
 
 ```bash
