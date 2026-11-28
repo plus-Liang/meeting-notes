@@ -174,16 +174,29 @@
   /* escapeHtml 已收敛到共享 escape.js（T4.59，五页一份） */
 
   /* T4.15⑦：系统状态——GET /actuator/health（T4.89 起需 token，getJson/apiFetch 已自动带 Bearer）；app=整体 status，
-     asr/postgres(minio 的 db 组件)/minio/redis 取 components；任一失败显示「未知」，不弹错 */
+     asr/postgres(minio 的 db 组件)/minio/redis 取 components；任一失败显示「未知」，不弹错。
+     T4.102：200 与 503 一视同仁——响应体带 status/components 就按体渲染（依赖不健康时各组件显示 DOWN，
+     不再全显「未知」）；仅 401 显示「需要登录（令牌失效）」；体里确实没有任何信息才退回「未知」。 */
   getJson('actuator/health').then(function (data) {
     var el = document.getElementById('health');
-    var comps = (data.__httpStatus === 200 && data.components) ? data.components : null;
     function val(s) {
-      if (!comps || !s) return '<span class="status-unknown">未知</span>';
+      if (!s) return '<span class="status-unknown">未知</span>';
       if (s === 'UP') return '<span class="status-up">UP</span>';
       return '<span class="status-down">' + escapeHtml(String(s)) + '</span>';
     }
-    var appStatus = (data.__httpStatus === 200 && data.status) ? data.status : null;
+    if (data.__httpStatus === 401) {
+      var tip = '<span class="status-unknown">需要登录（令牌失效）</span>';
+      el.innerHTML = '<div class="status-grid">' +
+        '<div class="status-item"><span class="status-name">app</span><span class="status-val">' + tip + '</span></div>' +
+        '<div class="status-item"><span class="status-name">asr</span><span class="status-val">' + tip + '</span></div>' +
+        '<div class="status-item"><span class="status-name">postgres</span><span class="status-val">' + tip + '</span></div>' +
+        '<div class="status-item"><span class="status-name">minio</span><span class="status-val">' + tip + '</span></div>' +
+        '<div class="status-item"><span class="status-name">redis</span><span class="status-val">' + tip + '</span></div>' +
+        '</div>';
+      return;
+    }
+    var comps = data.components || null;
+    var appStatus = data.status || null;
     el.innerHTML = '<div class="status-grid">' +
       '<div class="status-item"><span class="status-name">app</span><span class="status-val">' + val(appStatus) + '</span></div>' +
       '<div class="status-item"><span class="status-name">asr</span><span class="status-val">' + val(comps && comps.asr && comps.asr.status) + '</span></div>' +

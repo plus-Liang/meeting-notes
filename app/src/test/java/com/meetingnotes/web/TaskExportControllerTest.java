@@ -6,22 +6,37 @@ import org.junit.jupiter.api.Test;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * T4.18：导出 include 解析（省略→默认四节不含待办；空/全空→400；未知值→400 列合法值；
+ * T4.18/T4.102：导出 include 解析（省略→默认五节含待办；空/全空→400；未知值→400 列合法值；
  * 输出按固定节序）+ 转写节文本（标点文本按句换行 / 无标点原样）。
  */
 class TaskExportControllerTest {
 
     @Test
-    void omittedIncludeFallsBackToDefaultFourSectionsWithoutTodos() {
+    void omittedIncludeFallsBackToDefaultFiveSectionsIncludingTodos() {
         // 仅参数**省略**（null）回落默认；传了但空/全空必须 400（见 emptyOrAllCommasFail400）
+        // T4.102 语义翻转：默认集由四节改为五节（含待办），观察期结束
         Set<String> omitted = TaskExportController.parseInclude(null);
 
-        assertEquals(Set.of("summary", "keywords", "keypoints", "transcript"), omitted,
-                "默认 = 摘要+关键词+要点+转写（待办观察期不含，D-109）");
+        assertEquals(Set.of("summary", "keywords", "keypoints", "transcript", "todos"), omitted,
+                "默认 = 全部五节（T4.102 起含待办）");
+    }
+
+    /** T4.102/C7-1：默认集按固定节序排列，待办在最后。 */
+    @Test
+    void omittedIncludeKeepsFixedOrderWithTodosLast() {
+        var ordered = TaskExportController.parseInclude(null);
+        var iter = ordered.iterator();
+        assertEquals("summary", iter.next());
+        assertEquals("keywords", iter.next());
+        assertEquals("keypoints", iter.next());
+        assertEquals("transcript", iter.next());
+        assertEquals("todos", iter.next());
+        assertFalse(iter.hasNext(), "默认集恰好五节");
     }
 
     @Test

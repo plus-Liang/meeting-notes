@@ -219,7 +219,7 @@ public class TranscriptionWorker implements SmartLifecycle {
         }
     }
 
-    /** 结果收口（F-1/T3.2，D-069）：transcript+segments → 结构化 → 标点 → **最后**置 DONE；segments 与 transcript 同一语句写入（T4.35a，无音频/PASTE 传 null）。 */
+    /** 结果收口（F-1/T3.2，D-069）：transcript+segments → 结构化 → 标点 → **最后**置 DONE；segments 与 transcript 同一语句写入（T4.35a，无音频/PASTE 传 null）。T4.102：置 DONE 同时清 error_code（失败→重试→成功不留旧码）。 */
     void finalizeResult(long taskId, String text,
                         java.util.List<com.meetingnotes.asr.AsrResponseParser.Segment> segments) {
         saveTranscript(taskId, text, segments);
@@ -227,7 +227,7 @@ public class TranscriptionWorker implements SmartLifecycle {
         if (structured) {
             runAiStep("标点", () -> punctuator.punctuateAndPersist(taskId, text));
         }
-        jdbc.update("UPDATE task SET status = 'DONE', updated_at = now() WHERE id = ?", taskId);
+        jdbc.update("UPDATE task SET status = 'DONE', error_code = NULL, updated_at = now() WHERE id = ?", taskId);
         log.info("任务已置 DONE（transcript/segments/摘要/待办均已收口）");
         webhookService.onTerminal(taskId, "DONE"); // T4.6：终态异步投递 Webhook（内部不抛、不阻塞）
     }

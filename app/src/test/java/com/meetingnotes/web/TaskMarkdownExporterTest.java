@@ -47,16 +47,28 @@ class TaskMarkdownExporterTest {
                 "未选中的节不得出现：" + md);
     }
 
-    /** T4.18：默认选择（不选待办）→ 无待办节；其余节照常。 */
+    /** T4.18：include 选择集只输出被选中的节——显式四节（不含待办）→ 无待办节，其余照常。
+     * T4.102：默认集已含待办（观察期结束），「不含待办」只发生在使用方显式选择时。 */
     @Test
-    void defaultSelectionExcludesTodos() {
+    void explicitSelectionWithoutTodosOmitsTodosSection() {
         String md = TaskMarkdownExporter.export(Set.of("summary", "keywords", "keypoints", "transcript"),
                 "s", List.of("k"), List.of(new KeypointView("标题", "说明。")),
                 "转写内容。", List.of(new TodoItemView("做点事", null, null, false)));
 
-        assertFalse(md.contains("## 待办"), "默认不含待办（观察期，D-109）：" + md);
+        assertFalse(md.contains("## 待办"), "未选待办不得输出该节：" + md);
         assertTrue(md.contains("## 摘要") && md.contains("## 关键词")
                 && md.contains("## 要点") && md.contains("## 转写"), md);
+    }
+
+    /** T4.102/C7-2：显式 include=summary → 只有摘要一节，没有待办节。 */
+    @Test
+    void includeSummaryOnlyHasNoTodosSection() {
+        String md = TaskMarkdownExporter.export(Set.of("summary"),
+                "摘要正文", null, null, "转写。", List.of(new TodoItemView("做点事", null, null, false)));
+
+        assertTrue(md.startsWith("## 摘要\n"), md);
+        assertFalse(md.contains("## 待办"), "include=summary 不得输出待办节：" + md);
+        assertFalse(md.contains("## 关键词") || md.contains("## 转写"), "其余节不得出现：" + md);
     }
 
     /** T4.18：转写节内容原样注入（一句一行由调用方 transcriptForExport 完成）。 */

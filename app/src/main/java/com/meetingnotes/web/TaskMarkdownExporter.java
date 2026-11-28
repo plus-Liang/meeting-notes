@@ -15,7 +15,7 @@ import java.util.Set;
  *       有值时每条格式 {@code 1. **标题**：说明}；</li>
  *   <li>转写（T4.18）：内容由调用方给定（有 AI 标点文本则已按句换行）；null/空 → 写（无）；</li>
  *   <li>待办：null/空 → 写（无）；带 done 勾选状态（`- [x]`/`- [ ]`），owner/deadline 只在非 null 时追加；
- *       T4.18 默认选择集**不含待办**（观察期，D-109）。</li>
+ *       T4.102 起默认选择集**包含待办**（观察期结束）。</li>
  * </ul>
  */
 public final class TaskMarkdownExporter {

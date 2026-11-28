@@ -209,7 +209,7 @@ class E2ETest {
     @Test
     @Order(3)
     void c_exportHonorsIncludeSelection() throws Exception {
-        // 默认（不传 include）：摘要→关键词→（要点）→转写，**不含待办**（T4.18 观察期，D-109）
+        // 默认（不传 include）：摘要→关键词→（要点）→转写→待办（T4.102 起默认含待办，观察期结束）
         HttpResponse<String> resp = send("GET", "/api/v1/tasks/" + taskId + "/export?format=md", null, null);
         assertEquals(200, resp.statusCode(), "导出：" + abbreviate(resp.body()));
         assertTrue(resp.headers().firstValue("Content-Type").orElse("").startsWith("text/markdown"),
@@ -218,9 +218,11 @@ class E2ETest {
         int summary = body.indexOf("## 摘要");
         int keywords = body.indexOf("## 关键词");
         int transcript = body.indexOf("## 转写");
+        int todosDefault = body.indexOf("## 待办");
         assertTrue(summary >= 0 && keywords > summary && transcript > keywords,
                 "默认节固定顺序 摘要→关键词→（要点）→转写，实际：" + abbreviate(body));
-        assertFalse(body.contains("## 待办"), "默认（不传 include）不得输出待办节：" + abbreviate(body));
+        assertTrue(body.contains("## 待办") && todosDefault > transcript,
+                "默认（不传 include）含待办节且在转写之后（T4.102）：" + abbreviate(body));
         // 全选：5 节齐全（含待办），顺序 摘要→关键词→（要点）→转写→待办
         HttpResponse<String> all = send("GET", "/api/v1/tasks/" + taskId + "/export?format=md"
                 + "&include=summary,keywords,keypoints,transcript,todos", null, null);

@@ -137,10 +137,12 @@ public class TaskDeleteService {
 
     /** 事务内单条软删除：状态判断与打删除时间戳同事务，状态读加 FOR UPDATE 行锁
      * （T4.21 验收 P3：读-改串行化防竞态，语义不变）。
-     * T4.96/C2：不再删 4 张子表、不再删 MinIO 对象——回收站要能整条恢复。 */
+     * T4.96/C2：不再删 4 张子表、不再删 MinIO 对象——回收站要能整条恢复。
+     * T4.102：SELECT/UPDATE 都加 AND deleted_at IS NULL——已在回收站的任务再删走 NOT_FOUND
+     * （控制器映射 404），且 deleted_at 不被刷新（30 天计时不会被二次删除重置）。 */
     private DeleteOutcome deleteOneInTx(long taskId) {
         String status = jdbc.query(
-                "SELECT status FROM task WHERE id = ? AND user_id = ? FOR UPDATE",
+                "SELECT status FROM task WHERE id = ? AND user_id = ? AND deleted_at IS NULL FOR UPDATE",
                 rs -> rs.next() ? rs.getString(1) : null, taskId, UserContext.current());
         if (status == null) {
             return new DeleteOutcome(taskId, false, "NOT_FOUND", null);
@@ -151,7 +153,7 @@ public class TaskDeleteService {
         String sourceUri = jdbc.query(
                 "SELECT COALESCE(source_uri, '') FROM task WHERE id = ?",
                 rs -> { rs.next(); return rs.getString(1); }, taskId);
-        jdbc.update("UPDATE task SET deleted_at = now(), updated_at = now() WHERE id = ? AND user_id = ?",
+        jdbc.update("UPDATE task SET deleted_at = now(), updated_at = now() WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
                 taskId, UserContext.current());
         log.info("任务 {}（{}）已进回收站（软删除：deleted_at 置 now，子表与对象保留；配额不退还，D-115）",
                 taskId, status);
