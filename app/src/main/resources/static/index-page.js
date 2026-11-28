@@ -410,7 +410,9 @@
  * 只复用现有 POST /api/v1/tasks（multipart：file + template，与上方文件上传同字段同写法）；
  * 1s timeslice 分片收集（切后台/长录音不丢数据）；60 分钟 / 200 MB 到点自动停止
  * （与服务端单任务默认上限一致，仅前端提示，服务端仍是权威）；
- * 权限拒绝等一律页面可读提示，不抛未捕获异常；提交失败保留 Blob 可就地重试，不许丢录音。 */
+ * 权限拒绝等一律页面可读提示，不抛未捕获异常；提交失败保留 Blob 可就地重试，不许丢录音。
+ * T4.103：新增「录制标签页声音」（getDisplayMedia 只取音轨，画面轨立刻停掉绝不外传）；
+ * 麦克风/标签页两路共用同一录制核心与收尾，命名按 captureMode 区分（「浏览器录音」拆为「麦克风录音」「标签页录音」）。 */
 (function () {
   var MAX_REC_SEC = 60 * 60;             /* 与服务端 60 分钟上限一致 */
   var MAX_REC_BYTES = 200 * 1024 * 1024; /* 与服务端 200 MB 上限一致 */
@@ -431,6 +433,14 @@
   var recDiscard = document.getElementById('recDiscard');
   var recIntro = document.getElementById('recIntro');
   var templateSelect = document.getElementById('templateSelect');
+  var recTabBtn = document.getElementById('recTabBtn');
+  var recTabHint = document.getElementById('recTabHint');
+
+  /* T4.103（B2）：标签页音频能力探测——没有 getDisplayMedia 就隐藏按钮并换提示，不禁用整页 */
+  if (!navigator.mediaDevices || typeof navigator.mediaDevices.getDisplayMedia !== 'function') {
+    recTabBtn.hidden = true;
+    recTabHint.textContent = '当前浏览器不支持录制标签页声音（需要 Chrome / Edge）。可以改用「文件」上传，或按 README 用系统工具录。';
+  }
 
   var REC_MIME = null;
   if (window.MediaRecorder && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
@@ -454,6 +464,7 @@
   var blob = null;
   var recExt = REC_MIME.ext;
   var pendingReason = null;
+  var captureMode = 'mic'; /* T4.103：本段录音来源（mic=麦克风 / tab=标签页），决定命名 */
 
   function showRec(kind, text) {
     recMsg.hidden = !text;
@@ -494,6 +505,46 @@
     if (recBytes >= MAX_REC_BYTES) { pendingReason = '录音体积已达 200 MB 上限，自动停止。'; stopRecorder(); }
   }
 
+  /* T4.103：麦克风 / 标签页两路共用的「开始录制」核心
+   * （同一 REC_MIME、同一 1s 分片、同一 enforceLimits/chunks/recBytes、同一 500ms 计时器、同一 stopRecorder 收尾） */
+  function startRecorderOn(s) {
+    stream = s;
+    chunks = [];
+    recBytes = 0;
+    pendingReason = null;
+    try {
+      recorder = new MediaRecorder(s, { mimeType: REC_MIME.type });
+    } catch (e) {
+      releaseStream();
+      showRec('error', '无法开始录音（' + REC_MIME.type + ' 不受当前环境支持）。请换用 Chrome / Edge 等现代浏览器。');
+      return false;
+    }
+    recorder.ondataavailable = function (e) {
+      if (!e.data || !e.data.size) return;
+      chunks.push(e.data);
+      recBytes += e.data.size;
+      enforceLimits();
+    };
+    recorder.onstop = onStopped;
+    recorder.onerror = function () {
+      if (state === 'recording') { pendingReason = '录音过程出错，'; stopRecorder(); }
+    };
+    recorder.start(1000); /* 1s 分片：切后台不丢、超限可及时停 */
+    startTime = Date.now();
+    state = 'recording';
+    recBtn.textContent = '停止录制';
+    recLive.hidden = false;
+    recResult.hidden = true;
+    recTimer.textContent = '00:00';
+    recTabBtn.disabled = true; /* 互斥：同一时刻只允许一路录音 */
+    timerId = setInterval(function () {
+      var sec = Math.floor((Date.now() - startTime) / 1000);
+      recTimer.textContent = fmtClock(sec);
+      enforceLimits();
+    }, 500);
+    return true;
+  }
+
   recBtn.addEventListener('click', function () {
     if (state === 'recording') {
       pendingReason = null;
@@ -504,40 +555,9 @@
     }
     if (state !== 'idle') return;
     navigator.mediaDevices.getUserMedia({ audio: true }).then(function (s) {
-      stream = s;
-      chunks = [];
-      recBytes = 0;
-      pendingReason = null;
-      try {
-        recorder = new MediaRecorder(s, { mimeType: REC_MIME.type });
-      } catch (e) {
-        releaseStream();
-        showRec('error', '无法开始录音（' + REC_MIME.type + ' 不受当前环境支持）。请换用 Chrome / Edge 等现代浏览器。');
-        return;
-      }
-      recorder.ondataavailable = function (e) {
-        if (!e.data || !e.data.size) return;
-        chunks.push(e.data);
-        recBytes += e.data.size;
-        enforceLimits();
-      };
-      recorder.onstop = onStopped;
-      recorder.onerror = function () {
-        if (state === 'recording') { pendingReason = '录音过程出错，'; stopRecorder(); }
-      };
-      recorder.start(1000); /* 1s 分片：切后台不丢、超限可及时停 */
-      startTime = Date.now();
-      state = 'recording';
-      recBtn.textContent = '停止录制';
-      recLive.hidden = false;
-      recResult.hidden = true;
-      recTimer.textContent = '00:00';
+      captureMode = 'mic';
+      if (!startRecorderOn(s)) return;
       showRec('info', '录音中…说完点「停止录制」。中途切到别的标签页不受影响。');
-      timerId = setInterval(function () {
-        var sec = Math.floor((Date.now() - startTime) / 1000);
-        recTimer.textContent = fmtClock(sec);
-        enforceLimits();
-      }, 500);
       s.getAudioTracks().forEach(function (t) {
         t.onended = function () {
           if (state === 'recording') { pendingReason = '麦克风被占用或已断开，录音自动停止。'; stopRecorder(); }
@@ -555,14 +575,49 @@
     });
   });
 
+  /* T4.103（B2）：录制标签页声音——getDisplayMedia 只取音轨，画面轨立刻停掉（画面不保留/不上传）；
+   * 未勾「分享标签页音频」/ 用户取消一律不发请求；点浏览器的「停止共享」与手动停止走同一条收尾，已录 Blob 保留。 */
+  async function startTabCapture() {
+    if (state !== 'idle') return;
+    var s;
+    try {
+      s = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true });
+    } catch (e) {
+      if (e && e.name === 'NotAllowedError') {
+        showRec('error', '已取消或未授权录制（不会创建任务）。');
+      } else {
+        showRec('error', '无法开始录制标签页声音：' + (e && e.name ? e.name : '未知原因') + '。可改用「文件」上传。');
+      }
+      return;
+    }
+    s.getVideoTracks().forEach(function (t) { t.stop(); }); /* 只留音频：绝不把画面交出去 */
+    var audios = s.getAudioTracks();
+    if (audios.length === 0) {
+      try { s.getTracks().forEach(function (t) { t.stop(); }); } catch (e2) { /* 已停则忽略 */ }
+      showRec('error', '没有选择「分享标签页音频」，已取消（不会创建任务）。');
+      return;
+    }
+    captureMode = 'tab';
+    if (!startRecorderOn(s)) return;
+    audios.forEach(function (t) {
+      t.onended = function () {
+        if (state === 'recording') stopRecorder(); /* 「停止共享」：同一收尾，已录 Blob 保留 */
+      };
+    });
+    showRec('info', '正在录制标签页声音…点「停止录制」结束；不要关闭被录的标签页。');
+  }
+
+  recTabBtn.addEventListener('click', function () { startTabCapture(); });
+
   function onStopped() {
     state = 'ready';
     recBtn.hidden = true; /* 防误点重录覆盖已有录音；丢弃后恢复 */
+    recTabBtn.disabled = false; /* T4.103：收尾恢复标签页按钮（录制期间被互斥禁用） */
     recLive.hidden = true;
     blob = new Blob(chunks, { type: REC_MIME.type });
     chunks = [];
     recExt = REC_MIME.ext;
-    recName.value = '浏览器录音 ' + fmtDate(new Date().toISOString());
+    recName.value = (captureMode === 'tab' ? '标签页录音 ' : '麦克风录音 ') + fmtDate(new Date().toISOString());
     recResult.hidden = false;
     var sec = Math.round((Date.now() - startTime) / 1000);
     showRec('info', (pendingReason || '') + '录音完成：' + fmtDuration(sec) + ' / ' + fmtBytes(blob.size) + '。填好名称后点「提交转写」，或「丢弃录音」重来。');

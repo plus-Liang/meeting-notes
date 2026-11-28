@@ -124,12 +124,14 @@
 
     <div class="inlet">
       <span class="step">录音</span>
-      <h2>浏览器录音</h2>
-      <p id="recIntro">直接在本页说话录制，停止后填个名字即可进入转写（与上传同一流程）。单次上限 60 分钟 / 200 MB，停止后才会提交。</p>
+      <h2>麦克风录音</h2>
+      <p id="recIntro">用麦克风录你说话的声音（录不到电脑里播放的声音）。想录网页/会议/播放器里的声音，用下面的「录制标签页声音」。单次上限 60 分钟 / 200 MB。</p>
       <div class="acts">
         <button id="recBtn" class="btn ghost">开始录制</button>
+        <button id="recTabBtn" class="btn ghost">录制标签页声音</button>
         <span id="recLive" hidden><span class="rec-dot" aria-hidden="true"></span><span id="recTimer" class="num">00:00</span></span>
       </div>
+      <p class="hint" id="recTabHint">需要 Chrome / Edge：弹窗里选「标签页」并勾选「分享标签页音频」。只录你有权录制的内容；本站只上传音轨，不保存屏幕画面。</p>
       <p id="recMsg" class="hint" hidden></p>
       <div id="recResult" hidden>
         <div class="tpl-pick">

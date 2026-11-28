@@ -108,11 +108,16 @@ docker compose -f docker-compose.yml -f docker-compose.ghcr.yml up -d
 4. **整理**：摘要/要点/待办/关键词，按模板产出；可**重命名**、打**标签**、收藏；
 5. **带走**：导出 Markdown（单条或 zip 批量）、生成 7 天有效的**只读分享链接**、或通过 Webhook 推给自己系统。
 
+> **想录电脑里播放的声音**（网页 / 会议 / 播放器），两条路：
+> ① 首页「**录制标签页声音**」按钮——Chrome / Edge，弹窗里选「标签页」并勾选「分享标签页音频」；受版权保护的内容（DRM）录不到；
+> ② **系统工具**录好再用「文件」入口上传——Audacity（WASAPI 环回）/ 立体声混音 / VB-Cable / OBS / `ffmpeg -vn` 抽音轨。
+> 前提、步骤与限制详见 [接入指南：想录电脑里播放的声音怎么办](docs/项目/录音纪要平台/接入指南.md)。
+
 ## 功能清单
 
 | 模块 | 能力 |
 |---|---|
-| 输入入口 | 上传（mp3/wav/m4a/flac/ogg/opus/amr/mp4/mov/mkv/webm…）、粘贴文本、srt/vtt 字幕、http(s) 直链（L2 直链探测）、浏览器内录音（Chrome/Edge 标签页或屏幕音频） |
+| 输入入口 | 上传（mp3/wav/m4a/flac/ogg/opus/amr/mp4/mov/mkv/webm…）、粘贴文本、srt/vtt 字幕、http(s) 直链（L2 直链探测）、浏览器内录音（麦克风；Chrome/Edge 可录标签页音频） |
 | 转写 | 本地 faster-whisper（OpenAI 兼容 HTTP），带标点、句子级时间戳；ASR 模型可换档（small/medium…） |
 | 结构化 | 5 套模板：会议 / 课程 / 访谈 / 播客 / 短视频；摘要、要点、待办、关键词，`ai_tier` 记录用了哪档模型 |
 | 查找整理 | 台账检索（时间范围 / 状态 / **标签多选** / 关键词搜索）、按日期分组、**行内重命名**、标签、收藏、批量操作 |
