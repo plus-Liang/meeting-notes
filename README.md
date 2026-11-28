@@ -185,11 +185,11 @@ docker compose -f docker-compose.yml -f docker-compose.ghcr.yml up -d
 
 这是刻意的产品边界：平台解析器是维护黑洞，且与"数据不出门"的定位冲突。
 
-### 四种输入通道怎么选（一张图）
+### 五种输入通道怎么选（一张图）
 
 先看这张图，再看下面的文字细则。
 
-![四种输入通道怎么选](docs/images/input-channels.svg)
+![五种输入通道怎么选](docs/images/input-channels.svg)
 
 一句话版：文件在手上 → 上传；文件在别处 → 直链；声音在本页 → 麦克风录音；声音在浏览器标签页 → 录制标签页声音；声音在其它软件 → 系统录音后上传。
 
