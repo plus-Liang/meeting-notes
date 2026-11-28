@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 470" role="img" aria-label="四种输入通道怎么选" font-family="system-ui, -apple-system, 'Segoe UI', 'Microsoft YaHei', sans-serif">
+<rect width="880" height="470" fill="#fff"/>
+<defs><marker id="a" markerWidth="8" markerHeight="7" refX="7" refY="3" orient="auto"><path d="M0,0L7,3L0,6z" fill="#8c2f26"/></marker></defs>
+<g fill="none" stroke="#bbb" stroke-width="1.5">
+<path d="M240,80C340,80 380,56 470,56" marker-end="url(#a)"/>
+<path d="M240,92C340,92 380,138 470,138" marker-end="url(#a)"/>
+<path d="M140,108V200" marker-end="url(#a)"/>
+<path d="M240,222C340,222 380,228 470,228" marker-end="url(#a)"/>
+<path d="M140,244V336" marker-end="url(#a)"/>
+<path d="M240,350C340,350 380,316 470,316" marker-end="url(#a)"/>
+<path d="M240,366C340,366 380,404 470,404" marker-end="url(#a)"/>
+</g>
+<g fill="#1a1a1a" font-size="11">
+<text x="345" y="70" text-anchor="middle">是 · 文件在你手上</text>
+<text x="345" y="132" text-anchor="middle">是 · 文件在网盘/对象存储</text>
+<text x="150" y="158">否</text>
+<text x="255" y="216">否 · 还没开始说</text>
+<text x="150" y="294">是</text>
+<text x="345" y="322" text-anchor="middle">浏览器标签页</text>
+<text x="345" y="398" text-anchor="middle">其它软件</text>
+</g>
+<g fill="#fff" stroke="#8c2f26" stroke-width="1.5">
+<rect x="40" y="64" width="200" height="44" rx="8"/>
+<rect x="40" y="200" width="200" height="44" rx="8"/>
+<rect x="40" y="336" width="200" height="44" rx="8"/>
+</g>
+<g fill="#1a1a1a" font-size="14" text-anchor="middle">
+<text x="140" y="91">声音已经在文件里？</text>
+<text x="140" y="227">声音正在播放吗？</text>
+<text x="140" y="363">在哪播放？</text>
+</g>
+<g fill="#fff" stroke="#bbb">
+<rect x="470" y="20" width="340" height="72" rx="8"/>
+<rect x="470" y="102" width="340" height="72" rx="8"/>
+<rect x="470" y="192" width="340" height="72" rx="8"/>
+<rect x="470" y="280" width="340" height="72" rx="8"/>
+<rect x="470" y="368" width="340" height="72" rx="8"/>
+</g>
+<g fill="#1a1a1a">
+<text x="486" y="44" font-size="15" font-weight="600">① 文件上传</text>
+<text x="486" y="62" font-size="11">适合：文件在你手上</text>
+<text x="486" y="78" font-size="11">注意：200 MB / 60 分钟</text>
+<text x="486" y="126" font-size="15" font-weight="600">② 直链导入</text>
+<text x="486" y="144" font-size="11">适合：文件在网盘/对象存储</text>
+<text x="486" y="160" font-size="11">注意：服务端去下载，需能出网</text>
+<text x="486" y="216" font-size="15" font-weight="600">③ 麦克风录音</text>
+<text x="486" y="234" font-size="11">适合：本页说话</text>
+<text x="486" y="250" font-size="11">注意：录不到电脑播放的声音</text>
+<text x="486" y="304" font-size="15" font-weight="600">④ 录制标签页声音</text>
+<text x="486" y="322" font-size="11">适合：浏览器标签页在放</text>
+<text x="486" y="338" font-size="11">注意：Chrome/Edge，需勾选分享音频</text>
+<text x="486" y="392" font-size="15" font-weight="600">⑤ 系统录音后上传</text>
+<text x="486" y="410" font-size="11">适合：其它软件在放</text>
+<text x="486" y="426" font-size="11">注意：Audacity WASAPI / 立体声混音</text>
+</g>
+<text x="40" y="462" font-size="12" fill="#bbb">平台页面链接（B 站 / YouTube / 抖音等）不在其列：需先下载成文件，或由部署方配置 FETCHER_CMD。</text>
+</svg>
