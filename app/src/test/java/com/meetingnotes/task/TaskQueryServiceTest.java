@@ -195,8 +195,8 @@ class TaskQueryServiceTest {
                 org.mockito.Mockito.mock(com.meetingnotes.task.TextTaskService.class),
                 org.mockito.Mockito.mock(com.meetingnotes.task.TaskRetryService.class),
                 org.mockito.Mockito.mock(com.meetingnotes.task.GlossaryRepository.class),
-                jdbc,
-                new com.fasterxml.jackson.databind.ObjectMapper());
+                new com.meetingnotes.web.TaskStatusAssembler(
+                        jdbc, new com.fasterxml.jackson.databind.ObjectMapper())); /* T4.101：构造器去 jdbc/mapper，改注 assembler */
     }
 
     @Test

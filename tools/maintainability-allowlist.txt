@@ -9,6 +9,7 @@
 # ---- M-12 前端规模豁免（T4.55 新增节）：格式 "M-12|相对路径"，整文件豁免 >600 行提示 ----
 # 登记理由：T4.54 inventory 第 6 类历史欠账（拆分需按域重构，另出卡），拆分卡落地后必须删除对应行。
 M-12|app/src/main/resources/static/task.html
-M-12|app/src/main/resources/static/tasks.html
 M-12|app/src/main/resources/static/components.css
-M-12|app/src/main/resources/static/index.html
+# T4.101：tasks/index 两页内联脚本「原样」外置成独立 JS（>600 行），后续拆分卡落地后删除这两行
+M-12|app/src/main/resources/static/tasks-page.js
+M-12|app/src/main/resources/static/index-page.js
